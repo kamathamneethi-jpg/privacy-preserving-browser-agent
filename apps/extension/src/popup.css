@@ -1,0 +1,75 @@
+:root {
+  color: #172033;
+  font-family: Arial, sans-serif;
+}
+
+body {
+  width: 300px;
+  margin: 0;
+  background: #f7f9fc;
+}
+
+main {
+  padding: 16px;
+}
+
+h1 {
+  font-size: 18px;
+  margin: 0 0 4px;
+}
+
+.hint,
+#status {
+  color: #4b5563;
+  font-size: 13px;
+}
+
+button {
+  width: 100%;
+  padding: 10px;
+  border: 0;
+  border-radius: 6px;
+  background: #1d4ed8;
+  color: white;
+  cursor: pointer;
+}
+
+button + button {
+  margin-top: 8px;
+}
+
+button.secondary {
+  background: #374151;
+}
+
+dl {
+  margin: 14px 0 0;
+}
+
+dt {
+  margin-top: 8px;
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+h2 {
+  font-size: 15px;
+  margin: 16px 0 4px;
+}
+
+#pii-summary,
+#pii-list {
+  font-size: 13px;
+}
+
+#pii-list {
+  margin: 6px 0 0;
+  padding-left: 20px;
+}

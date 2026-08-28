@@ -1,0 +1,28 @@
+{
+  "name": "privacy-preserving-browser-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SIH 2026 privacy-preserving on-device visual perception browser agent",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "check:structure": "node scripts/check-structure.mjs",
+    "check:extension": "node scripts/check-extension.mjs",
+    "check:privacy": "node scripts/check-privacy.mjs",
+    "check:pii": "node scripts/check-pii-detector.mjs",
+    "check:step5": "node scripts/check-step5-localization.mjs",
+    "check:step6": "node scripts/check-step6-robustness.mjs",
+    "check:step7": "node scripts/check-step7-context.mjs",
+    "check:step8": "node scripts/check-step8-policy.mjs",
+    "check:step9": "node scripts/check-step9-vault.mjs",
+    "check:step10": "node scripts/check-step10-visual.mjs",
+    "check:step11": "node scripts/check-step11-sanitized-context.mjs",
+    "test:privacy": "node --test tests/privacy-policy.test.mjs tests/localization.test.mjs tests/robust-detection.test.mjs tests/context-analyzer.test.mjs tests/privacy-policy-engine.test.mjs tests/privacy-vault.test.mjs tests/on-device-ocr.test.mjs tests/sanitized-context.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,19 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+.turbo/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Extension keys and packaged artifacts
+*.pem
+*.crx
+
+# Logs and operating-system files
+*.log
+.DS_Store
+Thumbs.db

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy Browser Agent</title>
+    <link rel="stylesheet" href="src/popup.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Privacy Browser Agent</h1>
+      <p class="hint">Steps 2–4: local capture and PII scan</p>
+      <button id="capture" type="button">Capture page metadata</button>
+      <button id="scan" class="secondary" type="button">Scan page locally for PII</button>
+      <p id="status" role="status">Ready. No page content is collected.</p>
+      <dl id="metadata" hidden></dl>
+      <section id="pii-results" hidden>
+        <h2>Local PII scan</h2>
+        <p id="pii-summary"></p>
+        <ul id="pii-list"></ul>
+      </section>
+    </main>
+    <script src="src/popup.js"></script>
+  </body>
+</html>
