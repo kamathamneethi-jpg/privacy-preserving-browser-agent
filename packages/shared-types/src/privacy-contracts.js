@@ -198,3 +198,231 @@ export const SANITIZED_PAYLOAD_SHAPE = Object.freeze({
   tokenMapping: "object",
   metadata: "object"
 });
+
+// --- Step 12: ONNX Runtime Web / Local ML Inference Contracts ---
+
+export const ONNX_INFERENCE_STATUS = Object.freeze({
+  UNINITIALIZED: "UNINITIALIZED",
+  READY: "READY",
+  PROCESSING: "PROCESSING",
+  ERROR: "ERROR",
+  DISPOSED: "DISPOSED"
+});
+
+export const ONNX_EXECUTION_PROVIDERS = Object.freeze({
+  WASM: "wasm",
+  WEBGL: "webgl",
+  WEBGPU: "webgpu",
+  CPU: "cpu",
+  MOCK_TEST: "mock_test"
+});
+
+export const ONNX_MODEL_TYPES = Object.freeze({
+  VISUAL_CLASSIFIER: "visual_classifier",
+  PAGE_UNDERSTANDING: "page_understanding",
+  FEATURE_EXTRACTOR: "feature_extractor",
+  CUSTOM: "custom"
+});
+
+export const ONNX_INFERENCE_RESULT_SHAPE = Object.freeze({
+  ok: "boolean",
+  outputs: "object",
+  metadata: "object"
+});
+
+// --- Step 13: WebGPU Acceleration / Hardware-Aware Local Inference Contracts ---
+
+export const WEBGPU_STATUS = Object.freeze({
+  UNAVAILABLE: "UNAVAILABLE",
+  AVAILABLE: "AVAILABLE",
+  INITIALIZING: "INITIALIZING",
+  READY: "READY",
+  ERROR: "ERROR",
+  DISPOSED: "DISPOSED"
+});
+
+export const GPU_BACKEND_CAPABILITIES = Object.freeze({
+  WEBGPU: "webgpu",
+  WASM: "wasm",
+  CPU: "cpu",
+  MOCK_TEST: "mock_test"
+});
+
+export const GPU_EXECUTION_MODE = Object.freeze({
+  AUTO: "AUTO",
+  WEBGPU: "WEBGPU",
+  FALLBACK: "FALLBACK"
+});
+
+export const GPU_DEVICE_INFO_SHAPE = Object.freeze({
+  available: "boolean",
+  status: "string",
+  maxTextureDimension2D: "number",
+  supportedFeatures: "array"
+});
+
+// --- Step 14: Browser-Agent Action System Contracts ---
+
+export const ACTION_STATUS = Object.freeze({
+  UNINITIALIZED: "UNINITIALIZED",
+  READY: "READY",
+  VALIDATING: "VALIDATING",
+  EXECUTING: "EXECUTING",
+  COMPLETED: "COMPLETED",
+  DENIED: "DENIED",
+  ERROR: "ERROR",
+  DISPOSED: "DISPOSED"
+});
+
+export const BROWSER_ACTION_TYPES = Object.freeze({
+  CLICK: "CLICK",
+  TYPE: "TYPE",
+  FILL: "FILL",
+  SELECT: "SELECT",
+  SUBMIT: "SUBMIT",
+  SCROLL: "SCROLL",
+  NAVIGATE: "NAVIGATE",
+  WAIT: "WAIT"
+});
+
+export const ACTION_RESULTS = Object.freeze({
+  COMPLETED: "COMPLETED",
+  DENIED_INVALID_ACTION: "DENIED_INVALID_ACTION",
+  DENIED_INVALID_TARGET: "DENIED_INVALID_TARGET",
+  DENIED_POLICY: "DENIED_POLICY",
+  DENIED_UNAUTHORIZED: "DENIED_UNAUTHORIZED",
+  DENIED_PURPOSE_MISMATCH: "DENIED_PURPOSE_MISMATCH",
+  DENIED_SENSITIVE_VALUE: "DENIED_SENSITIVE_VALUE",
+  DENIED_REMOTE_DESTINATION: "DENIED_REMOTE_DESTINATION",
+  DENIED_TARGET_NOT_FOUND: "DENIED_TARGET_NOT_FOUND",
+  DENIED_STALE_TARGET: "DENIED_STALE_TARGET",
+  DENIED_UNSAFE_ACTION: "DENIED_UNSAFE_ACTION",
+  ERROR: "ERROR"
+});
+
+export const ACTION_TARGET_TYPES = Object.freeze({
+  TOKEN_REFERENCE: "TOKEN_REFERENCE",
+  SEMANTIC_TARGET: "SEMANTIC_TARGET",
+  DOM_ELEMENT: "DOM_ELEMENT",
+  OCR_REGION: "OCR_REGION"
+});
+
+export const ACTION_REQUEST_SHAPE = Object.freeze({
+  actionType: "string",
+  target: "object",
+  parameters: "object",
+  purpose: "string",
+  destination: "string",
+  authorization: "object"
+});
+
+// --- Step 15: Backend + Remote Reasoning Contracts ---
+
+export const REMOTE_REASONING_STATUS = Object.freeze({
+  UNINITIALIZED: "UNINITIALIZED",
+  READY: "READY",
+  PROCESSING: "PROCESSING",
+  COMPLETED: "COMPLETED",
+  ERROR: "ERROR",
+  DISPOSED: "DISPOSED"
+});
+
+export const REASONING_PROVIDER_TYPES = Object.freeze({
+  REAL_REMOTE: "REAL_REMOTE",
+  MOCK_TEST: "MOCK_TEST"
+});
+
+export const REMOTE_REASONING_REQUEST_SHAPE = Object.freeze({
+  protocolVersion: "string",
+  taskIntent: "string",
+  sanitizedPageState: "object",
+  safeMetadata: "object"
+});
+
+export const REMOTE_REASONING_RESPONSE_SHAPE = Object.freeze({
+  ok: "boolean",
+  status: "string",
+  recommendedActions: "array",
+  reasoningSummary: "string",
+  metadata: "object"
+});
+
+// --- Step 16: Secure Communication / End-to-End Remote Integration Contracts ---
+
+export const SECURE_COMMUNICATION_STATUS = Object.freeze({
+  UNINITIALIZED: "UNINITIALIZED",
+  READY: "READY",
+  CONNECTING: "CONNECTING",
+  TRANSMITTING: "TRANSMITTING",
+  COMPLETED: "COMPLETED",
+  DENIED: "DENIED",
+  ERROR: "ERROR",
+  DISPOSED: "DISPOSED"
+});
+
+export const SECURE_TRANSPORT_TYPES = Object.freeze({
+  REAL_REMOTE_TRANSPORT: "REAL_REMOTE_TRANSPORT",
+  MOCK_TEST_TRANSPORT: "MOCK_TEST_TRANSPORT"
+});
+
+export const SECURE_REQUEST_SHAPE = Object.freeze({
+  correlationId: "string",
+  timestamp: "number",
+  sanitizedPayload: "object",
+  metadata: "object"
+});
+
+export const SECURE_RESPONSE_SHAPE = Object.freeze({
+  ok: "boolean",
+  status: "string",
+  recommendedActions: "array",
+  metadata: "object"
+});
+
+export const AUTHENTICATION_STATUS = Object.freeze({
+  UNAUTHENTICATED: "UNAUTHENTICATED",
+  AUTHENTICATED: "AUTHENTICATED",
+  EXPIRED: "EXPIRED",
+  INVALID: "INVALID"
+});
+
+// --- Step 17: End-to-End Workflow + Evaluation + Benchmarking Contracts ---
+
+export const E2E_WORKFLOW_STATUS = Object.freeze({
+  UNINITIALIZED: "UNINITIALIZED",
+  PERCEIVING: "PERCEIVING",
+  SANITIZING: "SANITIZING",
+  REASONING: "REASONING",
+  VALIDATING: "VALIDATING",
+  EXECUTING: "EXECUTING",
+  COMPLETED: "COMPLETED",
+  DENIED: "DENIED",
+  ERROR: "ERROR"
+});
+
+export const SYSTEM_ENVIRONMENT_REPORT_SHAPE = Object.freeze({
+  ocrProvider: "string",
+  onnxProvider: "string",
+  webgpuStatus: "string",
+  mlProvider: "string",
+  reasoningProvider: "string",
+  transportProvider: "string",
+  browserRuntime: "string"
+});
+
+export const BENCHMARK_METRICS_SHAPE = Object.freeze({
+  perceptionMs: "number",
+  detectionMs: "number",
+  sanitizationMs: "number",
+  transportMs: "number",
+  reasoningMs: "number",
+  actionExecutionMs: "number",
+  totalEndToEndMs: "number",
+  privacyViolations: "number"
+});
+
+
+
+
+
+

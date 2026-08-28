@@ -61,7 +61,18 @@ export class VisualModelAdapter {
     this.status = VISUAL_PERCEPTION_STATUS.UNINITIALIZED;
     this.backend = this.config.DEFAULT_BACKEND;
     this.lastProcessedAt = null;
+    this.onnxAdapter = customConfig.onnxAdapter || null;
   }
+
+  /**
+   * Attaches an ONNX Runtime Adapter for ONNX_WEB visual perception operations.
+   *
+   * @param {object} onnxAdapter
+   */
+  attachOnnxRuntime(onnxAdapter) {
+    this.onnxAdapter = onnxAdapter;
+  }
+
 
   /**
    * Initializes the visual perception engine.
