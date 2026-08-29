@@ -3,6 +3,7 @@ node_modules/
 dist/
 coverage/
 .turbo/
+ .freebuff/project-id
 
 # Local configuration and secrets
 .env
