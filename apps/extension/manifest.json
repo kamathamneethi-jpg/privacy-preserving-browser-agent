@@ -11,7 +11,7 @@
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*"],
-      "js": ["src/policy-runtime.js", "src/ocr-service.js", "src/content-pii.js", "src/content-metadata.js"],
+      "js": ["src/policy-runtime.js", "src/ocr-service.js", "src/content-pii.js", "src/content-metadata.js", "src/action-runtime.js"],
       "run_at": "document_idle"
     }
   ]

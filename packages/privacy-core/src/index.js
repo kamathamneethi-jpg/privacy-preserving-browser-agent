@@ -105,6 +105,12 @@ export {
 } from "./webgpu-manager.js";
 export { ACTION_SYSTEM_VERSION, ACTION_CONFIG } from "./action-config.js";
 export {
+  DomDriver,
+  createDomDriver,
+  domDriver,
+  resolveDomElement
+} from "./dom-driver.js";
+export {
   BrowserActionEngine,
   createBrowserActionEngine,
   browserActionEngine,

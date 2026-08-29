@@ -6,6 +6,9 @@ import {
   BrowserActionEngine,
   createBrowserActionEngine,
   browserActionEngine,
+  DomDriver,
+  createDomDriver,
+  domDriver,
   validateNavigationProtocol,
   ACTION_SYSTEM_VERSION,
   ACTION_CONFIG,
@@ -566,3 +569,228 @@ test("31. Lifecycle & Disposal: dispose() resets action engine cleanly", () => {
   assert.equal(execRes.ok, false);
   assert.equal(execRes.status, ACTION_RESULTS.ERROR);
 });
+
+// --- 10. DOM Driver Integration & False Success Prevention Tests ---
+
+test("32. CLICK execution through DOM driver invokes driver and returns COMPLETED", () => {
+  let executedAction = null;
+  const mockDriver = createDomDriver({
+    executor: (type, targetId, params) => {
+      executedAction = { type, targetId, params };
+      return { ok: true };
+    }
+  });
+
+  const engine = createBrowserActionEngine({ domDriver: mockDriver });
+  const res = engine.executeAction({
+    actionType: BROWSER_ACTION_TYPES.CLICK,
+    target: { id: "btn_click_test" },
+    destination: PROCESSING_DESTINATIONS.LOCAL_BROWSER
+  }, { pageState: { nodes: [{ id: "btn_click_test" }] } });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.status, ACTION_RESULTS.COMPLETED);
+  assert.equal(executedAction.type, BROWSER_ACTION_TYPES.CLICK);
+  assert.equal(executedAction.targetId, "btn_click_test");
+});
+
+test("33. TYPE execution through DOM driver passes text parameters", () => {
+  let executedParams = null;
+  const mockDriver = createDomDriver({
+    executor: (type, targetId, params) => {
+      executedParams = params;
+      return { ok: true };
+    }
+  });
+
+  const engine = createBrowserActionEngine({ domDriver: mockDriver });
+  const res = engine.executeAction({
+    actionType: BROWSER_ACTION_TYPES.TYPE,
+    target: { id: "search_box" },
+    parameters: { text: "privacy browser agent" },
+    destination: PROCESSING_DESTINATIONS.LOCAL_BROWSER
+  }, { pageState: { nodes: [{ id: "search_box" }] } });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.status, ACTION_RESULTS.COMPLETED);
+  assert.equal(executedParams.text, "privacy browser agent");
+});
+
+test("34. FILL execution through DOM driver passes secret locally and leaves output clean", () => {
+  clearVault();
+  const secret = "TopSecret123!";
+  const stored = storeSecret({ category: "password", secretValue: secret, purpose: VAULT_PURPOSES.LOGIN });
+
+  let filledSecret = null;
+  const mockDriver = {
+    fillElement: (targetId, val) => {
+      filledSecret = val;
+      return { ok: true };
+    },
+    execute: () => ({ ok: true })
+  };
+
+  const engine = createBrowserActionEngine({ domDriver: mockDriver });
+  const res = engine.executeAction({
+    actionType: BROWSER_ACTION_TYPES.FILL,
+    target: { id: "pwd_input", vaultId: stored.vaultId, category: "password" },
+    destination: PROCESSING_DESTINATIONS.LOCAL_BROWSER,
+    purpose: VAULT_PURPOSES.LOGIN,
+    authorization: { authorizationGranted: true }
+  }, { pageState: { nodes: [{ id: "pwd_input" }] } });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.status, ACTION_RESULTS.COMPLETED);
+  assert.equal(filledSecret, secret);
+  assert.equal(JSON.stringify(res).includes(secret), false);
+});
+
+test("35. SELECT execution through DOM driver passes option value", () => {
+  let selectedValue = null;
+  const mockDriver = createDomDriver({
+    executor: (type, targetId, params) => {
+      selectedValue = params.value;
+      return { ok: true };
+    }
+  });
+
+  const engine = createBrowserActionEngine({ domDriver: mockDriver });
+  const res = engine.executeAction({
+    actionType: BROWSER_ACTION_TYPES.SELECT,
+    target: { id: "country_select" },
+    parameters: { value: "IN" },
+    destination: PROCESSING_DESTINATIONS.LOCAL_BROWSER
+  }, { pageState: { nodes: [{ id: "country_select" }] } });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.status, ACTION_RESULTS.COMPLETED);
+  assert.equal(selectedValue, "IN");
+});
+
+test("36. SUBMIT execution through DOM driver triggers form submission", () => {
+  let submittedTarget = null;
+  const mockDriver = createDomDriver({
+    executor: (type, targetId) => {
+      submittedTarget = targetId;
+      return { ok: true };
+    }
+  });
+
+  const engine = createBrowserActionEngine({ domDriver: mockDriver });
+  const res = engine.executeAction({
+    actionType: BROWSER_ACTION_TYPES.SUBMIT,
+    target: { id: "login_form" },
+    destination: PROCESSING_DESTINATIONS.LOCAL_BROWSER
+  }, { pageState: { nodes: [{ id: "login_form" }] } });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.status, ACTION_RESULTS.COMPLETED);
+  assert.equal(submittedTarget, "login_form");
+});
+
+test("37. SCROLL execution through DOM driver passes scroll coordinates", () => {
+  let scrollCoords = null;
+  const mockDriver = createDomDriver({
+    executor: (type, targetId, params) => {
+      scrollCoords = { scrollX: params.scrollX, scrollY: params.scrollY };
+      return { ok: true };
+    }
+  });
+
+  const engine = createBrowserActionEngine({ domDriver: mockDriver });
+  const res = engine.executeAction({
+    actionType: BROWSER_ACTION_TYPES.SCROLL,
+    target: { id: "content_pane" },
+    parameters: { scrollX: 0, scrollY: 450 },
+    destination: PROCESSING_DESTINATIONS.LOCAL_BROWSER
+  }, { pageState: { nodes: [{ id: "content_pane" }] } });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.status, ACTION_RESULTS.COMPLETED);
+  assert.deepEqual(scrollCoords, { scrollX: 0, scrollY: 450 });
+});
+
+test("38. WAIT execution through DOM driver returns COMPLETED", () => {
+  const engine = createBrowserActionEngine();
+  const res = engine.executeAction({
+    actionType: BROWSER_ACTION_TYPES.WAIT,
+    target: { id: "page_root" },
+    parameters: { durationMs: 50 },
+    destination: PROCESSING_DESTINATIONS.LOCAL_BROWSER
+  }, { pageState: { nodes: [{ id: "page_root" }] } });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.status, ACTION_RESULTS.COMPLETED);
+});
+
+test("39. Missing DOM driver returns deterministic failure, NOT false success", () => {
+  const engineNoDriver = createBrowserActionEngine({ domDriver: null });
+  const res = engineNoDriver.executeAction({
+    actionType: BROWSER_ACTION_TYPES.CLICK,
+    target: { id: "btn_no_driver" },
+    destination: PROCESSING_DESTINATIONS.LOCAL_BROWSER
+  }, { pageState: { nodes: [{ id: "btn_no_driver" }] } });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.status, ACTION_RESULTS.ERROR);
+  assert.match(res.error, /DOM driver is unavailable/);
+});
+
+test("40. DOM driver execution failure propagates failure result", () => {
+  const failingDriver = createDomDriver({
+    executor: () => {
+      return { ok: false, error: "Simulated element click interception error." };
+    }
+  });
+
+  const engine = createBrowserActionEngine({ domDriver: failingDriver });
+  const res = engine.executeAction({
+    actionType: BROWSER_ACTION_TYPES.CLICK,
+    target: { id: "btn_fail" },
+    destination: PROCESSING_DESTINATIONS.LOCAL_BROWSER
+  }, { pageState: { nodes: [{ id: "btn_fail" }] } });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.status, ACTION_RESULTS.ERROR);
+  assert.match(res.error, /interception error/);
+});
+
+test("41. DOM driver fillElement failure propagates failure result", () => {
+  clearVault();
+  const stored = storeSecret({ category: "password", secretValue: "Pass123!", purpose: VAULT_PURPOSES.LOGIN });
+
+  const failingFillDriver = {
+    fillElement: () => ({ ok: false, error: "Input element is disabled or readonly." }),
+    execute: () => ({ ok: true })
+  };
+
+  const engine = createBrowserActionEngine({ domDriver: failingFillDriver });
+  const res = engine.executeAction({
+    actionType: BROWSER_ACTION_TYPES.FILL,
+    target: { id: "disabled_pwd", vaultId: stored.vaultId, category: "password" },
+    destination: PROCESSING_DESTINATIONS.LOCAL_BROWSER,
+    purpose: VAULT_PURPOSES.LOGIN,
+    authorization: { authorizationGranted: true }
+  }, { pageState: { nodes: [{ id: "disabled_pwd" }] } });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.status, ACTION_RESULTS.ERROR);
+  assert.match(res.error, /disabled or readonly/);
+});
+
+test("42. Extension bundle output files exist in apps/extension/dist/", async () => {
+  const bundlePath = resolve("apps/extension/dist/privacy-core.bundle.js");
+  const contentPath = resolve("apps/extension/dist/content-action-runtime.bundle.js");
+  const popupPath = resolve("apps/extension/dist/popup.bundle.js");
+
+  const [bundleSrc, contentSrc, popupSrc] = await Promise.all([
+    readFile(bundlePath, "utf8"),
+    readFile(contentPath, "utf8"),
+    readFile(popupPath, "utf8")
+  ]);
+
+  assert.ok(bundleSrc.length > 1000);
+  assert.ok(contentSrc.length > 500);
+  assert.ok(popupSrc.length > 500);
+});
+

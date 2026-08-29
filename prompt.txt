@@ -1,0 +1,660 @@
+You are working on an existing Privacy-Preserving Browser Agent repository.
+
+IMPORTANT:
+Do NOT redesign the architecture.
+Do NOT replace the existing privacy/security pipeline.
+Do NOT create duplicate policy, PII detection, sanitization, vault, reasoning, or action-validation logic.
+
+Your job is to finish the existing implementation and make the Chrome extension actually execute the browser-agent pipeline end-to-end.
+
+==================================================
+CURRENT REPOSITORY
+==================================================
+
+Relevant structure:
+
+apps/
+  extension/
+    manifest.json
+    popup.html
+    popup.js
+    src/
+      action-runtime.js
+      content-metadata.js
+      content-pii.js
+      ocr-service.js
+      policy-runtime.js
+
+packages/
+  privacy-core/
+    src/
+      browser-action-engine.js
+      browser-agent-coordinator.js
+      detection.js
+      context-analyzer.js
+      policy.js
+      policy-engine.js
+      privacy-vault.js
+      sanitized-context-builder.js
+      secure-communication-client.js
+      secure-communication-config.js
+      ...
+  shared-types/
+    src/
+      privacy-contracts.js
+
+services/
+  reasoning-backend/
+    src/
+      index.js
+      payload-validator.js
+      reasoning-config.js
+      reasoning-service.js
+      response-validator.js
+
+scripts/
+  check-step14-actions.mjs
+  check-step15-reasoning.mjs
+  check-step16-secure-communication.mjs
+  check-step17-e2e.mjs
+
+tests/
+  browser-action.test.mjs
+  end-to-end-privacy.test.mjs
+  remote-reasoning.test.mjs
+  secure-communication.test.mjs
+  ...
+
+==================================================
+WHAT HAS BEEN VERIFIED
+==================================================
+
+The repository already contains:
+
+- Step 1-13 privacy/perception infrastructure
+- Step 14 BrowserActionEngine
+- Step 15 ReasoningService
+- Step 16 SecureCommunicationClient
+- Step 17 BrowserAgentCoordinator
+- local PII detection
+- policy enforcement
+- privacy vault
+- sanitized reasoning payload construction
+- response validation
+- action validation
+- stale target protection
+- secure transport validation
+- Chrome extension MVP
+
+BROWSER_ACTION_TYPES includes at least:
+CLICK
+FILL
+SCROLL
+
+and action-config.js references:
+CLICK
+TYPE
+FILL
+SELECT
+SUBMIT
+SCROLL
+NAVIGATE
+WAIT
+
+Verify the complete contract instead of assuming it.
+
+==================================================
+CRITICAL CURRENT BUG / GAP
+==================================================
+
+packages/privacy-core/src/browser-action-engine.js currently contains:
+
+    this.domDriver = customConfig.domDriver || null;
+
+and execution roughly does:
+
+    if (this.domDriver && typeof this.domDriver.execute === "function") {
+        this.domDriver.execute(actionType, targetResolution.targetId, parameters);
+    }
+
+If domDriver is null, execution is silently skipped but executeAction() can still return:
+
+    ok: true
+    status: ACTION_RESULTS.COMPLETED
+
+This is a FALSE SUCCESS bug.
+
+The project also currently has:
+
+apps/extension/src/action-runtime.js
+
+which exposes:
+
+    globalThis.ActionRuntime = {
+        performClick,
+        performInput,
+        performScroll
+    }
+
+but this runtime is not actually connected to BrowserActionEngine.
+
+Searches previously showed no meaningful integration for:
+
+domDriver
+recommendedActions
+executeAction
+ActionRuntime
+
+outside the relevant implementation files.
+
+The Chrome manifest currently loads:
+
+    src/policy-runtime.js
+    src/ocr-service.js
+    src/content-pii.js
+    src/content-metadata.js
+
+but does NOT load a content action execution bridge.
+
+==================================================
+PRIMARY OBJECTIVE
+==================================================
+
+Make the existing architecture actually work end-to-end:
+
+User task
+  ↓
+BrowserAgentCoordinator
+  ↓
+local perception / PII detection
+  ↓
+task intent
+  ↓
+sanitized context
+  ↓
+SecureCommunicationClient
+  ↓
+ReasoningService / reasoning provider
+  ↓
+validated recommendedActions
+  ↓
+BrowserActionEngine
+  ↓
+local DOM driver
+  ↓
+Chrome content script
+  ↓
+actual webpage DOM action
+
+BrowserActionEngine MUST remain the absolute execution authority.
+
+The remote reasoning layer must NEVER execute browser actions directly.
+
+==================================================
+PART 1 — AUDIT BEFORE MODIFYING
+==================================================
+
+First inspect the complete repository.
+
+Specifically inspect:
+
+1. package.json
+2. packages/privacy-core/package.json
+3. packages/shared-types/package.json
+4. apps/extension/manifest.json
+5. packages/shared-types/src/privacy-contracts.js
+6. packages/privacy-core/src/action-config.js
+7. packages/privacy-core/src/browser-action-engine.js
+8. packages/privacy-core/src/browser-agent-coordinator.js
+9. packages/privacy-core/src/index.js
+10. apps/extension/src/action-runtime.js
+11. apps/extension/src/popup.js
+12. all Step 14-17 verification scripts
+13. all relevant tests
+
+Determine:
+- which modules are Node-only
+- which modules can execute in a Chrome extension
+- which modules access Node APIs such as Buffer
+- which modules access browser APIs
+- whether ES modules are currently configured
+- whether any package imports are workspace-relative
+- whether there are existing build scripts
+- whether esbuild is already installed
+- whether package-lock/package manager state is consistent
+
+Do NOT make changes until this audit is understood.
+
+==================================================
+PART 2 — FIX THE DOM ACTION EXECUTION BRIDGE
+==================================================
+
+Implement the missing local DOM execution bridge.
+
+Preferred architecture:
+
+BrowserActionEngine
+    ↓
+DOM Driver abstraction
+    ↓
+Chrome extension messaging
+    ↓
+content-action-runtime.js
+    ↓
+actual DOM
+
+Do NOT let BrowserActionEngine directly depend on arbitrary webpage DOM APIs.
+
+Create the minimum required implementation.
+
+For example, a DOM driver can live under:
+
+packages/privacy-core/src/dom-driver.js
+
+and an extension-side runtime can live under:
+
+apps/extension/src/content-action-runtime.js
+
+Use Chrome runtime/tab messaging appropriately.
+
+The extension-side runtime must perform only local DOM operations.
+
+Supported actions should correspond to the actual BROWSER_ACTION_TYPES contract.
+
+At minimum implement:
+
+CLICK
+TYPE
+FILL
+SELECT
+SUBMIT
+SCROLL
+WAIT
+
+NAVIGATE must follow the existing navigation security rules and must not permit:
+javascript:
+data:
+file:
+blob:
+about:
+
+Do not bypass BrowserActionEngine validation.
+
+==================================================
+PART 3 — FIX FALSE SUCCESS
+==================================================
+
+BrowserActionEngine must NEVER return COMPLETED when no execution mechanism actually executed the action.
+
+If a required DOM driver is unavailable:
+
+return a deterministic failure such as:
+
+ok: false
+status: appropriate ACTION_RESULTS error
+actionType
+targetId
+
+with no secrets or PII.
+
+If domDriver.execute() returns failure, propagate a sanitized failure result.
+
+Do not silently swallow execution failures.
+
+Preserve the existing zero-secret-leakage guarantee.
+
+==================================================
+PART 4 — TARGET RESOLUTION
+==================================================
+
+Preserve existing stale-target protection.
+
+The action engine should resolve opaque target IDs against current page state.
+
+Do not introduce unsafe arbitrary selectors from remote reasoning unless they are explicitly allowed by the existing action contract.
+
+The content runtime should resolve only the validated target representation supplied by the action engine.
+
+Do not allow arbitrary JavaScript execution.
+
+==================================================
+PART 5 — SENSITIVE FORM FILLING
+==================================================
+
+Preserve Step 9 Vault isolation.
+
+Remote reasoning must NEVER receive raw secrets.
+
+Sensitive FILL actions must continue to:
+
+- require explicit authorization
+- require a vault reference
+- require purpose matching
+- require local destination
+- retrieve the secret only locally
+- inject it into the DOM locally
+- never place the raw secret into an action result
+- never log the raw secret
+
+Do not change this security model.
+
+==================================================
+PART 6 — CONNECT THE COORDINATOR
+==================================================
+
+BrowserAgentCoordinator must remain the orchestrator.
+
+It should:
+
+1. receive user task
+2. collect page representation
+3. detect PII
+4. determine task intent
+5. build sanitized payload
+6. send only sanitized payload to reasoning
+7. receive structured action proposals
+8. pass EVERY action through BrowserActionEngine
+9. have BrowserActionEngine use the DOM driver
+10. return sanitized execution results
+
+Do NOT let the coordinator directly manipulate the DOM.
+
+Do NOT let the reasoning provider execute actions.
+
+Do NOT duplicate Step 14 validation inside the coordinator.
+
+Inspect whether decidePrivacyPolicy is genuinely required in the orchestration flow. If existing Step 11/policy modules already enforce it, do not duplicate the logic merely to satisfy comments. Fix actual correctness, not superficial structure.
+
+==================================================
+PART 7 — CONNECT CHROME EXTENSION
+==================================================
+
+Update manifest.json only as necessary.
+
+The content script must include the action runtime.
+
+Preserve existing:
+- metadata capture
+- PII scanner
+- OCR
+- policy runtime
+
+Do not break current popup functionality.
+
+The extension should be able to receive action commands from the extension-side runtime and execute them against the active page.
+
+==================================================
+PART 8 — BUNDLE PRIVACY CORE WITH ESBUILD
+==================================================
+
+After the runtime architecture is correct, implement the bundling plan.
+
+Use ESBUILD unless the repository audit reveals a concrete incompatibility.
+
+Reason:
+This is a browser extension/runtime package, not a frontend application.
+The goal is a minimal, deterministic bundle with low configuration overhead.
+
+Add esbuild as a development dependency if necessary.
+
+Create an explicit build script/configuration.
+
+The bundle must include the required privacy-core runtime code instead of depending on Node/workspace package resolution inside Chrome.
+
+Do NOT bundle Node-only server code into the browser unless it is genuinely required.
+
+Pay particular attention to browser compatibility:
+
+- Buffer usage
+- node: imports
+- Node globals
+- filesystem APIs
+- server-only modules
+- remote backend modules
+
+If browser-compatible replacements are needed, use small explicit adapters rather than hacks.
+
+The resulting extension must load in Chrome without Node.js.
+
+==================================================
+PART 9 — SEPARATE BROWSER AND BACKEND RUNTIMES
+==================================================
+
+Do not accidentally bundle:
+
+services/reasoning-backend
+
+into the Chrome extension if it is intended to remain a backend.
+
+The browser bundle should contain only the client-side/privacy-core functionality needed locally.
+
+If MockTestTransport currently imports reasoningService directly, preserve it for Node tests but create a clean browser-safe transport boundary for the real extension.
+
+The architecture should be:
+
+Chrome extension
+    ↓
+SecureCommunicationClient
+    ↓
+HTTPS reasoning backend
+
+while tests may use:
+
+SecureCommunicationClient
+    ↓
+MockTestTransport
+    ↓
+Mock ReasoningService
+
+Do not confuse test transport with production browser transport.
+
+==================================================
+PART 10 — REAL EXTENSION ENTRYPOINT
+==================================================
+
+The extension currently has popup.js but does not appear to have a real agent orchestration entrypoint.
+
+Implement the minimum necessary mechanism so that the popup or extension background/service-worker layer can trigger an agent task.
+
+Do not invent a large UI.
+
+A simple flow is sufficient:
+
+Popup
+  ↓
+active tab
+  ↓
+request page representation
+  ↓
+agent coordinator
+  ↓
+reasoning
+  ↓
+action engine
+  ↓
+content script
+  ↓
+DOM
+
+Use the existing architecture wherever possible.
+
+If a service worker/background script is necessary, add it cleanly and update manifest.json.
+
+==================================================
+PART 11 — TESTING
+==================================================
+
+Run all existing tests.
+
+At minimum run:
+
+npm test
+
+and:
+
+node scripts/check-step14-actions.mjs
+node scripts/check-step15-reasoning.mjs
+node scripts/check-step16-secure-communication.mjs
+node scripts/check-step17-e2e.mjs
+
+If npm test does not exist, inspect package.json and use the actual configured test command.
+
+Add focused tests for:
+
+1. CLICK execution through the DOM driver
+2. TYPE execution
+3. FILL execution
+4. SELECT execution
+5. SUBMIT execution
+6. SCROLL execution
+7. WAIT execution
+8. missing DOM driver → failure, NOT success
+9. DOM driver execution failure → failure
+10. stale target rejection
+11. remote destination rejection
+12. javascript: rejection
+13. sensitive action without authorization → rejection
+14. sensitive action with vault authorization → local execution
+15. raw secret absent from output
+16. raw secret absent from remote reasoning payload
+17. dangerous JavaScript rejection
+18. extension bundle builds successfully
+
+==================================================
+PART 12 — EXTENSION BUILD VERIFICATION
+==================================================
+
+After building:
+
+1. Verify output bundle files exist.
+2. Verify manifest references existing files.
+3. Verify no unresolved workspace imports remain.
+4. Verify browser bundle does not require Node.js.
+5. Verify extension can load in Chrome.
+6. Verify content scripts load without syntax/runtime errors.
+7. Verify a simple CLICK action actually changes the webpage.
+8. Verify a TYPE action actually changes a field.
+9. Verify FILL uses the local vault and does not expose the secret.
+10. Verify the action result reports actual execution status.
+
+Do not claim browser execution works merely because unit tests pass.
+
+==================================================
+PART 13 — SECURITY AUDIT
+==================================================
+
+After implementation, search the browser runtime for:
+
+fetch(
+XMLHttpRequest
+WebSocket
+axios
+eval(
+new Function(
+javascript:
+rawPassword
+vaultSecret
+secretValue
+document.cookie
+localStorage
+
+Classify each occurrence.
+
+Do not blindly delete legitimate validation strings or test fixtures.
+
+Confirm:
+
+RAW DOM
+RAW PII
+SCREENSHOTS
+OCR BUFFERS
+VAULT SECRETS
+
+never cross the remote reasoning boundary.
+
+==================================================
+PART 14 — DO NOT BREAK EXISTING SECURITY
+==================================================
+
+Preserve:
+
+- Step 8 policy enforcement
+- Step 9 vault isolation
+- Step 11 sanitization boundary
+- Step 14 execution authority
+- Step 15 independent payload validation
+- Step 15 response validation
+- Step 16 secure communication validation
+- HTTPS enforcement
+- stale request protection
+- retry classification
+- zero-secret logging
+- zero-PII remote payload invariant
+
+Do not weaken validation simply to make tests pass.
+
+If an existing test conflicts with the intended security architecture, explain the conflict before changing security behavior.
+
+==================================================
+PART 15 — FINAL DELIVERABLE
+==================================================
+
+At the end provide:
+
+1. Exact files created
+2. Exact files modified
+3. Why each file changed
+4. Build command
+5. Test command
+6. Test results
+7. Extension loading result
+8. Actual browser action execution result
+9. Remaining known limitations
+10. Security invariants verified
+
+Do NOT merely say "implemented successfully".
+
+Show evidence.
+
+==================================================
+IMPORTANT DEVELOPMENT RULE
+==================================================
+
+Work incrementally.
+
+First:
+AUDIT
+
+Then:
+FIX DOM DRIVER + ACTION RUNTIME
+
+Then:
+FIX FALSE SUCCESS
+
+Then:
+CONNECT COORDINATOR
+
+Then:
+BUNDLE WITH ESBUILD
+
+Then:
+RUN TESTS
+
+Then:
+VERIFY CHROME EXTENSION
+
+Do not make unrelated refactors.
+
+Do not replace working modules.
+
+Do not create duplicate action engines.
+
+Do not bypass BrowserActionEngine.
+
+Do not put raw secrets into logs, messages, reasoning payloads, or test output.
+
+The final architecture must have ONE execution authority:
+
+BrowserActionEngine.
+
+The browser content script is only the local execution mechanism.

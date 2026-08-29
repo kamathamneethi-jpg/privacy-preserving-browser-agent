@@ -55,3 +55,29 @@ export const ACTION_CONFIG = Object.freeze({
     ACTION_TARGET_TYPES.OCR_REGION
   ])
 });
+
+/**
+ * Validates whether a URL protocol is permitted for navigation actions.
+ *
+ * @param {string} urlString
+ * @param {Array<string>} permittedProtocols
+ * @param {Array<string>} forbiddenProtocols
+ * @returns {boolean}
+ */
+export function validateNavigationProtocol(urlString, permittedProtocols = ACTION_CONFIG.PERMITTED_PROTOCOLS, forbiddenProtocols = ACTION_CONFIG.FORBIDDEN_PROTOCOLS) {
+  if (typeof urlString !== "string" || urlString.trim().length === 0) return false;
+  const lowerUrl = urlString.trim().toLowerCase();
+
+  for (const forbidden of forbiddenProtocols) {
+    if (lowerUrl.startsWith(forbidden)) return false;
+  }
+
+  try {
+    const parsed = new URL(urlString);
+    return permittedProtocols.includes(parsed.protocol);
+  } catch (err) {
+    // Relative URLs or malformed URLs that don't match permitted protocols
+    return false;
+  }
+}
+

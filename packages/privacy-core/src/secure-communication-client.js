@@ -24,7 +24,28 @@ import {
   AUTHENTICATION_STATUS
 } from "../../../packages/shared-types/src/privacy-contracts.js";
 import { SECURE_COMM_CONFIG, SECURE_COMM_VERSION } from "./secure-communication-config.js";
-import { authenticationProvider } from "./authentication-provider.js";
+import { AuthenticationProvider, authenticationProvider } from "./authentication-provider.js";
+
+/**
+ * Calculates the UTF-8 byte length of a string in a browser-safe and Node-safe manner.
+ *
+ * @param {string} str
+ * @returns {number}
+ */
+export function getUtf8ByteLength(str) {
+  if (typeof str !== "string") return 0;
+  if (typeof TextEncoder !== "undefined") {
+    return new TextEncoder().encode(str).length;
+  }
+  if (typeof Buffer !== "undefined" && typeof Buffer.byteLength === "function") {
+    return Buffer.byteLength(str, "utf8");
+  }
+  if (typeof Blob !== "undefined") {
+    return new Blob([str]).size;
+  }
+  return encodeURI(str).split(/%(?:u[0-9A-F]{4}|[0-9A-F]{2})/i).length - 1;
+}
+
 import { validateRemotePayload } from "../../../services/reasoning-backend/src/payload-validator.js";
 import { validateReasoningResponse } from "../../../services/reasoning-backend/src/response-validator.js";
 import { reasoningService } from "../../../services/reasoning-backend/src/reasoning-service.js";
@@ -231,7 +252,7 @@ export class SecureCommunicationClient {
       });
     }
 
-    const requestByteSize = Buffer.byteLength(serializedJson, "utf8");
+    const requestByteSize = getUtf8ByteLength(serializedJson);
     if (requestByteSize > this.config.MAX_REQUEST_SIZE_BYTES) {
       return Object.freeze({
         ok: false,
@@ -305,7 +326,7 @@ export class SecureCommunicationClient {
 
     // 8. RESPONSE SIZE & RESPONSE CONTENT SECURITY VALIDATION
     const responseJson = JSON.stringify(transportResult);
-    const responseByteSize = Buffer.byteLength(responseJson, "utf8");
+    const responseByteSize = getUtf8ByteLength(responseJson);
 
     if (responseByteSize > this.config.MAX_RESPONSE_SIZE_BYTES) {
       return Object.freeze({

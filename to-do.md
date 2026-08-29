@@ -18,46 +18,41 @@
 
 ## P0 — Critical
 
-*None currently blocking core execution. (All 17 verification scripts and 287 automated unit tests are passing).*
+*None currently blocking core execution. (All 17 verification scripts and 298 automated unit tests are passing).*
 
-[ ] Add `"type": "module"` declaration to root `package.json`
-* **Why**: Node.js emits `[MODULE_TYPELESS_PACKAGE_JSON]` warnings when importing `.js` files from `services/reasoning-backend/` and `tests/fixtures/` because the root `package.json` does not specify `"type": "module"`.
-* **Location**: [`package.json`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/package.json)
-* **Depends on**: None
-* **Expected result**: All `node --test` runs and script executions run completely clean with zero module typeless warnings.
-* **Evidence**: Warning logged during `npm run test:privacy` and `node scripts/run-sih-demo.mjs`.
+[x] Add `"type": "module"` declaration to root `package.json`
+* **Completed**: Added `"type": "module"` to root `package.json`. Node module typeless warnings eliminated.
 
 ---
 
 ## P1 — High Priority
 
-[ ] Configure Extension Build Bundler for `@privacy-agent/privacy-core`
-* **Why**: [`apps/extension/src/policy-runtime.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/apps/extension/src/policy-runtime.js#L1-L3) currently uses a temporary mirror stub. A production bundler (Rollup / esbuild / Vite) is needed to bundle the full `@privacy-agent/privacy-core` ESM package directly into the Chrome extension's background worker and content scripts.
-* **Location**: [`apps/extension/`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/apps/extension), [`package.json`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/package.json)
-* **Depends on**: Steps 1–17 core library code
-* **Expected result**: An `npm run build:extension` script that outputs bundled scripts into `apps/extension/dist/` ready to load in `chrome://extensions/`.
-* **Evidence**: Explicit code comment in [`apps/extension/src/policy-runtime.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/apps/extension/src/policy-runtime.js#L1-L3).
+[x] Configure Extension Build Bundler for `@privacy-agent/privacy-core`
+* **Completed**: Configured `esbuild` build script in [`scripts/build-extension.mjs`](file:///Users/shahrukh/Desktop/sih/scripts/build-extension.mjs) generating bundled distributions in `apps/extension/dist/` (`privacy-core.bundle.js`, `content-action-runtime.bundle.js`, `popup.bundle.js`). Run via `npm run build:extension`.
+
+[x] Implement Local DOM Action Driver & Fix False Success in `BrowserActionEngine`
+* **Completed**: Created [`packages/privacy-core/src/dom-driver.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/dom-driver.js), updated [`apps/extension/src/action-runtime.js`](file:///Users/shahrukh/Desktop/sih/apps/extension/src/action-runtime.js) with full action execution and message bridge, fixed `BrowserActionEngine` to eliminate false success and propagate driver failures.
 
 [ ] Implement Live Remote LLM / VLM Provider Adapter in Reasoning Backend
-* **Why**: [`services/reasoning-backend/src/reasoning-service.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/services/reasoning-backend/src/reasoning-service.js#L29-L99) currently runs `MockTestReasoningProvider`. A real HTTP client adapter is required to connect to external LLM endpoints (e.g. OpenAI GPT-4o-mini, Anthropic Claude 3.5 Sonnet, Gemini Flash, or local Ollama) in production.
-* **Location**: [`services/reasoning-backend/src/reasoning-service.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/services/reasoning-backend/src/reasoning-service.js), [`services/reasoning-backend/src/reasoning-config.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/services/reasoning-backend/src/reasoning-config.js)
+* **Why**: [`services/reasoning-backend/src/reasoning-service.js`](file:///Users/shahrukh/Desktop/sih/services/reasoning-backend/src/reasoning-service.js#L29-L99) currently runs `MockTestReasoningProvider`. A real HTTP client adapter is required to connect to external LLM endpoints (e.g. OpenAI GPT-4o-mini, Anthropic Claude 3.5 Sonnet, Gemini Flash, or local Ollama) in production.
+* **Location**: [`services/reasoning-backend/src/reasoning-service.js`](file:///Users/shahrukh/Desktop/sih/services/reasoning-backend/src/reasoning-service.js), [`services/reasoning-backend/src/reasoning-config.js`](file:///Users/shahrukh/Desktop/sih/services/reasoning-backend/src/reasoning-config.js)
 * **Depends on**: `validateRemotePayload`, `validateReasoningResponse`
 * **Expected result**: Provider adapter that receives sanitized JSON context, formats system/user prompts for the LLM, invokes the LLM API over HTTPS, and parses JSON output into contract-valid `BROWSER_ACTION_TYPES` proposals.
-* **Evidence**: Environment configuration in [`.env.example`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/.env.example) references `REASONING_BACKEND_URL` and `SECURE_TRANSPORT_MODE=REAL_REMOTE_TRANSPORT`.
+* **Evidence**: Environment configuration in [`.env.example`](file:///Users/shahrukh/Desktop/sih/.env.example) references `REASONING_BACKEND_URL` and `SECURE_TRANSPORT_MODE=REAL_REMOTE_TRANSPORT`.
 
 ---
 
 ## P2 — Medium Priority
 
 [ ] Bundle On-Device OCR Model Binaries / Tesseract.js Worker
-* **Why**: [`apps/extension/src/ocr-service.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/apps/extension/src/ocr-service.js#L86-L104) has fallback hooks for `globalThis.Tesseract`, but actual Tesseract WASM binaries or ONNX visual model weights are not packaged in the repository.
-* **Location**: [`apps/extension/src/ocr-service.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/apps/extension/src/ocr-service.js), [`packages/privacy-core/src/visual-model-adapter.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/privacy-core/src/visual-model-adapter.js)
+* **Why**: [`apps/extension/src/ocr-service.js`](file:///Users/shahrukh/Desktop/sih/apps/extension/src/ocr-service.js#L86-L104) has fallback hooks for `globalThis.Tesseract`, but actual Tesseract WASM binaries or ONNX visual model weights are not packaged in the repository.
+* **Location**: [`apps/extension/src/ocr-service.js`](file:///Users/shahrukh/Desktop/sih/apps/extension/src/ocr-service.js), [`packages/privacy-core/src/visual-model-adapter.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/visual-model-adapter.js)
 * **Depends on**: Extension build bundler
 * **Expected result**: Extension runs local visual OCR text extraction on screenshots without making external cloud API requests.
-* **Evidence**: [`packages/privacy-core/src/visual-model-adapter.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/privacy-core/src/visual-model-adapter.js).
+* **Evidence**: [`packages/privacy-core/src/visual-model-adapter.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/visual-model-adapter.js).
 
-[ ] Extend Extension Popup UI for End-to-End Task Automation
-* **Why**: [`apps/extension/popup.html`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/apps/extension/popup.html) currently only features buttons for "Capture Metadata" and "Scan Local PII". It needs an input field and execution trigger for end-to-end browser agent tasks.
+[x] Extend Extension Popup UI for End-to-End Task Automation
+* **Completed**: Added task runner input and execution trigger in [`apps/extension/popup.html`](file:///Users/shahrukh/Desktop/sih/apps/extension/popup.html) and [`apps/extension/src/popup.js`](file:///Users/shahrukh/Desktop/sih/apps/extension/src/popup.js) with real-time feedback and DOM action execution.
 * **Location**: [`apps/extension/popup.html`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/apps/extension/popup.html), [`apps/extension/src/popup.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/apps/extension/src/popup.js)
 * **Depends on**: Extension build bundler
 * **Expected result**: Users can type a task instruction (e.g., "Search for laptops"), see live sanitized context status, view vault authorization prompts, and monitor executed actions.

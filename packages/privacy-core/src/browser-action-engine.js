@@ -25,34 +25,16 @@ import {
   POLICY_ACTIONS,
   PROCESSING_DESTINATIONS
 } from "../../shared-types/src/privacy-contracts.js";
-import { ACTION_CONFIG, ACTION_SYSTEM_VERSION } from "./action-config.js";
+import {
+  ACTION_CONFIG,
+  ACTION_SYSTEM_VERSION,
+  validateNavigationProtocol
+} from "./action-config.js";
 import { evaluatePiiPolicyItem } from "./policy-engine.js";
 import { privacyVault } from "./privacy-vault.js";
+import { createDomDriver } from "./dom-driver.js";
 
-/**
- * Validates whether a URL protocol is permitted for navigation actions.
- *
- * @param {string} urlString
- * @param {Array<string>} permittedProtocols
- * @param {Array<string>} forbiddenProtocols
- * @returns {boolean}
- */
-export function validateNavigationProtocol(urlString, permittedProtocols = ACTION_CONFIG.PERMITTED_PROTOCOLS, forbiddenProtocols = ACTION_CONFIG.FORBIDDEN_PROTOCOLS) {
-  if (typeof urlString !== "string" || urlString.trim().length === 0) return false;
-  const lowerUrl = urlString.trim().toLowerCase();
-
-  for (const forbidden of forbiddenProtocols) {
-    if (lowerUrl.startsWith(forbidden)) return false;
-  }
-
-  try {
-    const parsed = new URL(urlString);
-    return permittedProtocols.includes(parsed.protocol);
-  } catch (err) {
-    // Relative URLs or malformed URLs that don't match permitted protocols
-    return false;
-  }
-}
+export { validateNavigationProtocol };
 
 /**
  * Modular Browser-Agent Action Engine Class
@@ -62,7 +44,7 @@ export class BrowserActionEngine {
     this.config = { ...ACTION_CONFIG, ...customConfig };
     this.status = ACTION_STATUS.UNINITIALIZED;
     this.vault = customConfig.vault || privacyVault;
-    this.domDriver = customConfig.domDriver || null;
+    this.domDriver = customConfig.domDriver !== undefined ? customConfig.domDriver : createDomDriver();
     this.lastProcessedAt = null;
   }
 
@@ -76,7 +58,7 @@ export class BrowserActionEngine {
     try {
       this.config = { ...this.config, ...customConfig };
       if (customConfig.vault) this.vault = customConfig.vault;
-      if (customConfig.domDriver) this.domDriver = customConfig.domDriver;
+      if (customConfig.domDriver !== undefined) this.domDriver = customConfig.domDriver;
 
       this.status = ACTION_STATUS.READY;
 
@@ -345,17 +327,73 @@ export class BrowserActionEngine {
       // Secret retrieved locally for injection into DOM target
       const rawSecret = vaultRetrieval.secretValue;
 
+      if (!this.domDriver || typeof this.domDriver.fillElement !== "function") {
+        return Object.freeze({
+          ok: false,
+          status: ACTION_RESULTS.ERROR,
+          actionType,
+          targetId: targetResolution.targetId,
+          error: "DOM driver is unavailable or does not support fillElement."
+        });
+      }
+
+      let fillResult = null;
       try {
-        if (this.domDriver && typeof this.domDriver.fillElement === "function") {
-          this.domDriver.fillElement(targetResolution.targetId, rawSecret);
-        }
+        fillResult = this.domDriver.fillElement(targetResolution.targetId, rawSecret);
+      } catch (err) {
+        return Object.freeze({
+          ok: false,
+          status: ACTION_RESULTS.ERROR,
+          actionType,
+          targetId: targetResolution.targetId,
+          error: err.message || "DOM driver fillElement execution threw an error."
+        });
       } finally {
         // Discard local secret reference immediately
       }
+
+      if (fillResult && fillResult.ok === false) {
+        return Object.freeze({
+          ok: false,
+          status: ACTION_RESULTS.ERROR,
+          actionType,
+          targetId: targetResolution.targetId,
+          error: fillResult.error || "DOM driver failed to fill element."
+        });
+      }
     } else {
       // Non-sensitive action execution (CLICK, SCROLL, SELECT, SUBMIT, WAIT, non-sensitive TYPE)
-      if (this.domDriver && typeof this.domDriver.execute === "function") {
-        this.domDriver.execute(actionType, targetResolution.targetId, parameters);
+      if (!this.domDriver || typeof this.domDriver.execute !== "function") {
+        return Object.freeze({
+          ok: false,
+          status: ACTION_RESULTS.ERROR,
+          actionType,
+          targetId: targetResolution.targetId,
+          error: "DOM driver is unavailable or does not support execute."
+        });
+      }
+
+      let execResult = null;
+      try {
+        execResult = this.domDriver.execute(actionType, targetResolution.targetId, parameters);
+      } catch (err) {
+        return Object.freeze({
+          ok: false,
+          status: ACTION_RESULTS.ERROR,
+          actionType,
+          targetId: targetResolution.targetId,
+          error: err.message || "DOM driver execute execution threw an error."
+        });
+      }
+
+      if (execResult && execResult.ok === false) {
+        return Object.freeze({
+          ok: false,
+          status: ACTION_RESULTS.ERROR,
+          actionType,
+          targetId: targetResolution.targetId,
+          error: execResult.error || "DOM driver failed to execute action."
+        });
       }
     }
 
