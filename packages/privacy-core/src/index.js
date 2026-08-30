@@ -125,6 +125,8 @@ export {
 export {
   SecureCommunicationClient,
   MockTestTransport,
+  OpenRouterTransport,
+  GroqTransport,
   createSecureCommunicationClient,
   secureCommunicationClient
 } from "./secure-communication-client.js";
@@ -146,6 +148,13 @@ export {
   SecurityAuditUtility,
   createSecurityAuditUtility
 } from "./security-audit-utility.js";
+export {
+  InteractiveElementRegistry,
+  createInteractiveElementRegistry,
+  interactiveElementRegistry,
+  isInteractiveElement,
+  extractElementDescription
+} from "./interactive-element-registry.js";
 
 
 

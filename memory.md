@@ -219,10 +219,10 @@ The project evolved from a high-level 7-stage concept into an explicit **17-step
 
 ## 12. Current Known State
 
-* **Core Engine**: Steps 1 through 17 are 100% implemented, verified, and passing 287 automated tests.
+* **Core Engine**: Steps 1 through 17 are 100% implemented, verified, and passing 309 automated tests.
 * **Demonstration**: SIH 2026 showcase runner is fully operational.
-* **Extension UI**: Minimal Manifest V3 extension exists in `apps/extension` with local metadata and PII scanning capabilities.
-* **Backend**: `ReasoningService` operates with `MockTestReasoningProvider` by default and is ready to accept remote LLM HTTP connectors.
+* **Extension UI**: Manifest V3 extension in `apps/extension` with local metadata, PII scanning, and Gemma 4 26B A4B task automation runner.
+* **Reasoning Integration**: `ReasoningService` and `OpenRouterProvider` support live/direct AI reasoning using `google/gemma-4-26b-a4b` via OpenRouter OpenAI-compatible endpoint with zero raw PII leakage.
 
 ---
 
@@ -232,10 +232,6 @@ The project evolved from a high-level 7-stage concept into an explicit **17-step
   * Initial implementation through Step 11: Monorepo layout, PII detection, DOM semantics, OCR fusion, Context Analyzer, Privacy Policy Engine, Secure Local Privacy Vault, Visual Model Adapter, and Sanitized Context Builder.
 * **2026-08-28T20:23:10+05:30 (Commit `3451b0b`)**:
   * Completed Steps 12 through 17: ONNX Runtime Web adapter, WebGPU manager with fallback, Browser Action Engine, Remote Reasoning Backend service, Secure Communication Client, End-to-End Coordinator, Latency Benchmark, Security Audit, Synthetic Datasets, Deployment Guide, and SIH Demo Walkthrough. 287 tests fully passing.
+* **2026-08-29T23:25:00+05:30**:
+  * Free Vision / Agent Model Integration: Implemented `ModelProvider` base class and `OpenRouterProvider` adapter for `google/gemma-4-26b-a4b`. Connected to `SecureCommunicationClient` (`OpenRouterTransport`) and Chrome extension popup with runtime key storage, structured tool mapping (`click`, `type`, `fill`, `scroll`, `wait`, `navigate`, `ask_user`), and strict policy enforcement. 309 tests passing.
 
----
-
-## 14. Unknowns
-
-* **Target Cloud LLM / VLM API**: The specific external LLM provider (OpenAI GPT-4o, Claude 3.5 Sonnet, Gemini 1.5 Flash, or self-hosted vLLM/Ollama) to be used in live cloud deployment has not yet been selected by the user.
-* **On-Device OCR Binary Weights**: Whether production will deploy Tesseract.js WASM binaries or ONNX quantized OCR models (e.g. PaddleOCR) packed directly into the Chrome extension bundle or loaded dynamically via CDN.

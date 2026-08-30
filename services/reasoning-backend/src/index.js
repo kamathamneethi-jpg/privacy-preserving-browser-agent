@@ -3,7 +3,7 @@
  * Completely isolated under services/reasoning-backend.
  */
 
-export { REASONING_SERVICE_VERSION, REASONING_CONFIG } from "./reasoning-config.js";
+export { REASONING_SERVICE_VERSION, REASONING_CONFIG, OPENROUTER_CONFIG, GROQ_CONFIG } from "./reasoning-config.js";
 export { validateRemotePayload } from "./payload-validator.js";
 export { validateReasoningResponse } from "./response-validator.js";
 export {
@@ -12,3 +12,12 @@ export {
   createReasoningService,
   reasoningService
 } from "./reasoning-service.js";
+export {
+  ModelProvider,
+  OpenRouterProvider,
+  createOpenRouterProvider,
+  GroqProvider,
+  createGroqProvider,
+  extractValidJson
+} from "./model-provider.js";
+

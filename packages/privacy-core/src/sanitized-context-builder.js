@@ -399,7 +399,9 @@ export class SanitizedContextBuilder {
       const candidatePayload = {
         status: SANITIZED_CONTEXT_STATUS.SANITIZED,
         version: CONTEXT_BUILDER_VERSION,
+        userTask: input.userTask ? String(input.userTask).slice(0, 500) : undefined,
         taskIntent: taskContext.taskIntent || "UNKNOWN",
+        interactiveElements: Array.isArray(input.interactiveElements) ? input.interactiveElements.slice(0, 100) : [],
         domTree: sanitizedDomTree || { tag: "empty" },
         visualBlocks: sanitizedVisualBlocks,
         tokenMapping,

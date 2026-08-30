@@ -9,24 +9,37 @@
   <body>
     <main>
       <h1>Privacy Browser Agent</h1>
-      <p class="hint">On-Device Privacy &amp; Browser Automation</p>
+      <p class="hint">On-Device Privacy &amp; Local Execution Authority</p>
 
       <section class="task-runner">
         <label for="task-input" style="font-size:12px; font-weight:bold; color:#4b5563; display:block; margin-bottom:4px;">Task Instruction:</label>
-        <input id="task-input" type="text" placeholder="e.g. Search for privacy agent features" style="width:100%; box-sizing:border-box; padding:8px; border:1px solid #d1d5db; border-radius:6px; margin-bottom:8px; font-size:13px;" />
-        <button id="run-task" type="button" style="background:#059669;">Run Agent Task</button>
+        <input id="task-input" type="text" placeholder="e.g. Search for lightweight laptops" style="width:100%; box-sizing:border-box; padding:8px; border:1px solid #d1d5db; border-radius:6px; margin-bottom:8px; font-size:13px;" />
+        <button id="run-task" type="button" style="background:#059669; width:100%; font-weight:bold;">Run Agent Task</button>
       </section>
 
-      <div style="margin-top:12px; border-top:1px solid #e5e7eb; padding-top:10px;">
-        <button id="capture" type="button">Capture page metadata</button>
-        <button id="scan" class="secondary" type="button">Scan page locally for PII</button>
-      </div>
+      <details style="margin-top:10px; font-size:12px; color:#4b5563; border:1px solid #e5e7eb; border-radius:6px; padding:6px 8px;">
+        <summary style="cursor:pointer; font-weight:bold;">Model Settings (Groq / OpenRouter)</summary>
+        <div style="margin-top:8px;">
+          <label for="provider-select" style="display:block; margin-bottom:2px; font-size:11px;">Provider:</label>
+          <select id="provider-select" style="width:100%; box-sizing:border-box; padding:5px; border:1px solid #d1d5db; border-radius:4px; font-size:12px; margin-bottom:6px;">
+            <option value="groq" selected>Groq Cloud (Ultra-Fast)</option>
+            <option value="openrouter">OpenRouter</option>
+          </select>
+          <label for="api-key-input" style="display:block; margin-bottom:2px; font-size:11px;">API Key:</label>
+          <input id="api-key-input" type="password" placeholder="gsk_... or sk-or-v1-..." style="width:100%; box-sizing:border-box; padding:6px; border:1px solid #d1d5db; border-radius:4px; font-size:12px; margin-bottom:6px;" />
+          <label for="model-input" style="display:block; margin-bottom:2px; font-size:11px;">Model ID:</label>
+          <input id="model-input" type="text" value="openai/gpt-oss-20b" placeholder="openai/gpt-oss-20b" style="width:100%; box-sizing:border-box; padding:6px; border:1px solid #d1d5db; border-radius:4px; font-size:12px; margin-bottom:6px;" />
+          <div style="display:flex; justify-content:flex-end; align-items:center;">
+            <button id="save-key" type="button" class="secondary" style="padding:4px 10px; font-size:11px;">Save Settings</button>
+          </div>
+        </div>
+      </details>
 
-      <p id="status" role="status">Ready. No page content is collected without your consent.</p>
+      <p id="status" role="status" style="margin-top:10px;">Ready. All PII and vault secrets remain 100% on-device.</p>
       
       <section id="task-results" hidden>
         <h2>Task Execution Results</h2>
-        <p id="task-summary" style="font-size:13px;"></p>
+        <p id="task-summary" style="font-size:12px;"></p>
         <ul id="task-actions" style="font-size:12px; padding-left:18px; margin:4px 0;"></ul>
       </section>
 

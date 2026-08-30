@@ -33,12 +33,8 @@
 [x] Implement Local DOM Action Driver & Fix False Success in `BrowserActionEngine`
 * **Completed**: Created [`packages/privacy-core/src/dom-driver.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/dom-driver.js), updated [`apps/extension/src/action-runtime.js`](file:///Users/shahrukh/Desktop/sih/apps/extension/src/action-runtime.js) with full action execution and message bridge, fixed `BrowserActionEngine` to eliminate false success and propagate driver failures.
 
-[ ] Implement Live Remote LLM / VLM Provider Adapter in Reasoning Backend
-* **Why**: [`services/reasoning-backend/src/reasoning-service.js`](file:///Users/shahrukh/Desktop/sih/services/reasoning-backend/src/reasoning-service.js#L29-L99) currently runs `MockTestReasoningProvider`. A real HTTP client adapter is required to connect to external LLM endpoints (e.g. OpenAI GPT-4o-mini, Anthropic Claude 3.5 Sonnet, Gemini Flash, or local Ollama) in production.
-* **Location**: [`services/reasoning-backend/src/reasoning-service.js`](file:///Users/shahrukh/Desktop/sih/services/reasoning-backend/src/reasoning-service.js), [`services/reasoning-backend/src/reasoning-config.js`](file:///Users/shahrukh/Desktop/sih/services/reasoning-backend/src/reasoning-config.js)
-* **Depends on**: `validateRemotePayload`, `validateReasoningResponse`
-* **Expected result**: Provider adapter that receives sanitized JSON context, formats system/user prompts for the LLM, invokes the LLM API over HTTPS, and parses JSON output into contract-valid `BROWSER_ACTION_TYPES` proposals.
-* **Evidence**: Environment configuration in [`.env.example`](file:///Users/shahrukh/Desktop/sih/.env.example) references `REASONING_BACKEND_URL` and `SECURE_TRANSPORT_MODE=REAL_REMOTE_TRANSPORT`.
+[x] Implement Live Remote LLM Provider Adapter (OpenRouter Gemma 4 26B A4B) in Reasoning Backend
+* **Completed**: Created [`services/reasoning-backend/src/model-provider.js`](file:///Users/shahrukh/Desktop/sih/services/reasoning-backend/src/model-provider.js) with `ModelProvider` base class and `OpenRouterProvider` adapter for `google/gemma-4-26b-a4b`. Integrated into `SecureCommunicationClient` (`OpenRouterTransport`) and popup UI with runtime API key storage, structured tool mapping (`click`, `type`, `fill`, `scroll`, `wait`, `navigate`, `ask_user`), and zero raw PII leakage. Tested with 11 focused tests in [`tests/openrouter-model-provider.test.mjs`](file:///Users/shahrukh/Desktop/sih/tests/openrouter-model-provider.test.mjs).
 
 ---
 

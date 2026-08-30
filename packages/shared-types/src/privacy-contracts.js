@@ -277,11 +277,16 @@ export const ACTION_STATUS = Object.freeze({
 export const BROWSER_ACTION_TYPES = Object.freeze({
   CLICK: "CLICK",
   TYPE: "TYPE",
-  FILL: "FILL",
+  CLEAR: "CLEAR",
   SELECT: "SELECT",
+  CHECK: "CHECK",
+  UNCHECK: "UNCHECK",
+  PRESS_KEY: "PRESS_KEY",
+  FILL: "FILL",
   SUBMIT: "SUBMIT",
   SCROLL: "SCROLL",
   NAVIGATE: "NAVIGATE",
+  GO_BACK: "GO_BACK",
   WAIT: "WAIT"
 });
 
@@ -297,6 +302,8 @@ export const ACTION_RESULTS = Object.freeze({
   DENIED_TARGET_NOT_FOUND: "DENIED_TARGET_NOT_FOUND",
   DENIED_STALE_TARGET: "DENIED_STALE_TARGET",
   DENIED_UNSAFE_ACTION: "DENIED_UNSAFE_ACTION",
+  FAILED_EXECUTION: "FAILED_EXECUTION",
+  NOT_EXECUTED: "NOT_EXECUTED",
   ERROR: "ERROR"
 });
 
@@ -305,6 +312,20 @@ export const ACTION_TARGET_TYPES = Object.freeze({
   SEMANTIC_TARGET: "SEMANTIC_TARGET",
   DOM_ELEMENT: "DOM_ELEMENT",
   OCR_REGION: "OCR_REGION"
+});
+
+export const INTERACTIVE_ELEMENT_SCHEMA = Object.freeze({
+  elementId: "string",
+  tag: "string",
+  role: "string",
+  text: "string",
+  ariaLabel: "string",
+  placeholder: "string",
+  name: "string",
+  type: "string",
+  value: "string",
+  checked: "boolean",
+  disabled: "boolean"
 });
 
 export const ACTION_REQUEST_SHAPE = Object.freeze({
@@ -329,6 +350,8 @@ export const REMOTE_REASONING_STATUS = Object.freeze({
 
 export const REASONING_PROVIDER_TYPES = Object.freeze({
   REAL_REMOTE: "REAL_REMOTE",
+  OPENROUTER: "OPENROUTER",
+  GROQ: "GROQ",
   MOCK_TEST: "MOCK_TEST"
 });
 
@@ -362,6 +385,8 @@ export const SECURE_COMMUNICATION_STATUS = Object.freeze({
 
 export const SECURE_TRANSPORT_TYPES = Object.freeze({
   REAL_REMOTE_TRANSPORT: "REAL_REMOTE_TRANSPORT",
+  OPENROUTER_TRANSPORT: "OPENROUTER_TRANSPORT",
+  GROQ_TRANSPORT: "GROQ_TRANSPORT",
   MOCK_TEST_TRANSPORT: "MOCK_TEST_TRANSPORT"
 });
 

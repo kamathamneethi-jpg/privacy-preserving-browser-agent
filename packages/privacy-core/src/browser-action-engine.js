@@ -33,6 +33,7 @@ import {
 import { evaluatePiiPolicyItem } from "./policy-engine.js";
 import { privacyVault } from "./privacy-vault.js";
 import { createDomDriver } from "./dom-driver.js";
+import { interactiveElementRegistry } from "./interactive-element-registry.js";
 
 export { validateNavigationProtocol };
 
@@ -149,25 +150,48 @@ export class BrowserActionEngine {
     }
 
     const targetType = targetRef.targetType || targetRef.type;
-    const targetId = targetRef.targetId || targetRef.id || targetRef.token;
+    const targetId = targetRef.targetId || targetRef.id || targetRef.token || targetRef.elementId;
 
     if (!targetId) {
       return { resolved: false, reason: ACTION_RESULTS.DENIED_INVALID_TARGET };
     }
 
-    // Check if target is present in pageState or DOM representation
+    // Global targets (window, document, page_root) are always valid for scrolling/navigation
+    if (["window", "document", "page_root"].includes(targetId)) {
+      return {
+        resolved: true,
+        targetId,
+        targetType: ACTION_TARGET_TYPES.DOM_ELEMENT
+      };
+    }
+
+    if (pageState.isStale || targetRef.isStale) {
+      return { resolved: false, reason: ACTION_RESULTS.DENIED_STALE_TARGET, targetId };
+    }
+
+    // 1. Check interactive elements array in pageState
+    const interactiveElements = pageState.interactiveElements || [];
+    const inInteractive = interactiveElements.some(el => el.elementId === targetId || el.id === targetId || el.name === targetId);
+
+    // 2. Check general page nodes / visual blocks
     const pageNodes = pageState.domNodes || pageState.nodes || pageState.visualBlocks || [];
-    const isPresent = pageNodes.length === 0 || pageNodes.some((node) => {
+    const inNodes = pageNodes.some((node) => {
       if (!node) return false;
       return (
         node.id === targetId ||
         node.token === targetId ||
         node.targetId === targetId ||
+        node.elementId === targetId ||
         node.placeholder === targetId
       );
     });
 
-    if (pageState.isStale || targetRef.isStale) {
+    // 3. Check active InteractiveElementRegistry
+    const registryRes = interactiveElementRegistry.resolveElement(targetId, pageState.snapshotId);
+
+    const isPresent = inInteractive || inNodes || (registryRes.resolved && !registryRes.isStale) || (pageNodes.length === 0 && interactiveElements.length === 0);
+
+    if (registryRes.isStale) {
       return { resolved: false, reason: ACTION_RESULTS.DENIED_STALE_TARGET, targetId };
     }
 
