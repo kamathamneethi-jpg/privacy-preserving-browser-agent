@@ -40,7 +40,7 @@ SECURE_TRANSPORT_MODE=REAL_REMOTE_TRANSPORT
 1. Open Chrome and navigate to `chrome://extensions/`.
 2. Enable **Developer mode** toggle in the top-right corner.
 3. Click **Load unpacked** and select the folder:
-   `c:\Users\ashri\.codex\.chatgpt-projects\g-p-6a905d6f723c81918ea039190416dff7\apps\extension`
+   `/Users/shahrukh/Desktop/sih/apps/extension`
 4. Confirm Manifest V3 extension popup loads cleanly.
 
 ---

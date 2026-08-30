@@ -10,7 +10,7 @@ Its primary objective is to allow AI-driven browser automation and webpage compr
 
 ## 2. Original Plan
 
-As documented in early architectural notes ([`README.md`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/README.md) and [`docs/architecture.md`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/docs/architecture.md)), the project was originally conceived as a 7-stage roadmap:
+As documented in early architectural notes ([`README.md`](file:///Users/shahrukh/Desktop/sih/README.md) and [`docs/architecture.md`](file:///Users/shahrukh/Desktop/sih/docs/architecture.md)), the project was originally conceived as a 7-stage roadmap:
 1. Monorepo and workspace setup.
 2. Minimal Chrome Extension to capture safe page metadata.
 3. Local privacy policy engine with safe defaults (`REDACT`, `TOKENIZE`, `LOCAL_ONLY`, `ALLOW`).
@@ -99,22 +99,22 @@ The project evolved from a high-level 7-stage concept into an explicit **17-step
 
 ### Major Modules & Packages
 
-1. [`packages/shared-types`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/shared-types):
-   * [`src/privacy-contracts.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/shared-types/src/privacy-contracts.js): Immutable constants, enums, and data contracts (`POLICY_ACTIONS`, `TASK_INTENT_TYPES`, `SENSITIVITY_LEVELS`, `PROCESSING_DESTINATIONS`, `VAULT_ENTRY_STATES`, `WEBGPU_STATUS`, `BROWSER_ACTION_TYPES`, `SECURE_COMMUNICATION_STATUS`, `E2E_WORKFLOW_STATUS`).
-2. [`packages/privacy-core`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/privacy-core):
-   * [`detection.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/privacy-core/src/detection.js), [`dom-semantics.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/privacy-core/src/dom-semantics.js), [`fusion.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/privacy-core/src/fusion.js): Multi-signal perception engine.
-   * [`context-analyzer.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/privacy-core/src/context-analyzer.js): Task intent and entity relevance engine.
-   * [`policy-engine.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/privacy-core/src/policy-engine.js): 4-action privacy policy decision engine.
-   * [`privacy-vault.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/privacy-core/src/privacy-vault.js): In-memory temporary local vault.
-   * [`visual-model-adapter.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/privacy-core/src/visual-model-adapter.js), [`onnx-runtime-adapter.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/privacy-core/src/onnx-runtime-adapter.js), [`webgpu-manager.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/privacy-core/src/webgpu-manager.js): Hardware-aware on-device visual perception and ML inference.
-   * [`sanitized-context-builder.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/privacy-core/src/sanitized-context-builder.js): Safe representation transformer.
-   * [`browser-action-engine.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/privacy-core/src/browser-action-engine.js): Local action validation and execution authority.
-   * [`secure-communication-client.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/privacy-core/src/secure-communication-client.js): Secure transport boundary client.
-   * [`browser-agent-coordinator.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/privacy-core/src/browser-agent-coordinator.js): Master pipeline orchestrator.
-   * [`benchmark-utility.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/privacy-core/src/benchmark-utility.js), [`environment-reporter.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/privacy-core/src/environment-reporter.js), [`security-audit-utility.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/privacy-core/src/security-audit-utility.js): Operational and compliance tools.
-3. [`services/reasoning-backend`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/services/reasoning-backend):
-   * [`reasoning-service.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/services/reasoning-backend/src/reasoning-service.js), [`payload-validator.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/services/reasoning-backend/src/payload-validator.js), [`response-validator.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/services/reasoning-backend/src/response-validator.js): Independent remote reasoning boundary service.
-4. [`apps/extension`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/apps/extension):
+1. [`packages/shared-types`](file:///Users/shahrukh/Desktop/sih/packages/shared-types):
+   * [`src/privacy-contracts.js`](file:///Users/shahrukh/Desktop/sih/packages/shared-types/src/privacy-contracts.js): Immutable constants, enums, and data contracts (`POLICY_ACTIONS`, `TASK_INTENT_TYPES`, `SENSITIVITY_LEVELS`, `PROCESSING_DESTINATIONS`, `VAULT_ENTRY_STATES`, `WEBGPU_STATUS`, `BROWSER_ACTION_TYPES`, `SECURE_COMMUNICATION_STATUS`, `E2E_WORKFLOW_STATUS`).
+2. [`packages/privacy-core`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core):
+   * [`detection.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/detection.js), [`dom-semantics.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/dom-semantics.js), [`fusion.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/fusion.js): Multi-signal perception engine.
+   * [`context-analyzer.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/context-analyzer.js): Task intent and entity relevance engine.
+   * [`policy-engine.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/policy-engine.js): 4-action privacy policy decision engine.
+   * [`privacy-vault.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/privacy-vault.js): In-memory temporary local vault.
+   * [`visual-model-adapter.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/visual-model-adapter.js), [`onnx-runtime-adapter.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/onnx-runtime-adapter.js), [`webgpu-manager.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/webgpu-manager.js): Hardware-aware on-device visual perception and ML inference.
+   * [`sanitized-context-builder.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/sanitized-context-builder.js): Safe representation transformer.
+   * [`browser-action-engine.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/browser-action-engine.js): Local action validation and execution authority.
+   * [`secure-communication-client.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/secure-communication-client.js): Secure transport boundary client.
+   * [`browser-agent-coordinator.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/browser-agent-coordinator.js): Master pipeline orchestrator.
+   * [`benchmark-utility.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/benchmark-utility.js), [`environment-reporter.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/environment-reporter.js), [`security-audit-utility.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/security-audit-utility.js): Operational and compliance tools.
+3. [`services/reasoning-backend`](file:///Users/shahrukh/Desktop/sih/services/reasoning-backend):
+   * [`reasoning-service.js`](file:///Users/shahrukh/Desktop/sih/services/reasoning-backend/src/reasoning-service.js), [`payload-validator.js`](file:///Users/shahrukh/Desktop/sih/services/reasoning-backend/src/payload-validator.js), [`response-validator.js`](file:///Users/shahrukh/Desktop/sih/services/reasoning-backend/src/response-validator.js): Independent remote reasoning boundary service.
+4. [`apps/extension`](file:///Users/shahrukh/Desktop/sih/apps/extension):
    * Chrome MV3 extension popup UI and content scripts for browser-level metadata capture, PII scanning, OCR hook, and DOM action execution.
 
 ---
@@ -123,11 +123,11 @@ The project evolved from a high-level 7-stage concept into an explicit **17-step
 
 * **287 Automated Tests Across 14 Test Suites**: 100% passing test suite exercising policy decisions, spatial localization, robust detection, context analysis, vault security, OCR, sanitized context generation, ONNX runtime, WebGPU acceleration, browser actions, remote reasoning, secure transport, and end-to-end pipelines.
 * **17 Verification Scripts**: Full validation suite verifying all structural, contract, and pipeline invariants.
-* **Full SIH Demonstration Runner**: [`scripts/run-sih-demo.mjs`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/scripts/run-sih-demo.mjs) verifying:
+* **Full SIH Demonstration Runner**: [`scripts/run-sih-demo.mjs`](file:///Users/shahrukh/Desktop/sih/scripts/run-sih-demo.mjs) verifying:
   1. Non-sensitive product search.
   2. Sensitive payment form filling keeping credit card number strictly local in the vault while sending tokenized/redacted context remotely.
   3. Malicious page script injection rejection.
-* **Deployment & Walkthrough Documentation**: [`DEPLOYMENT.md`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/DEPLOYMENT.md) and [`DEMO_WALKTHROUGH.md`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/DEMO_WALKTHROUGH.md).
+* **Deployment & Walkthrough Documentation**: [`DEPLOYMENT.md`](file:///Users/shahrukh/Desktop/sih/DEPLOYMENT.md) and [`DEMO_WALKTHROUGH.md`](file:///Users/shahrukh/Desktop/sih/DEMO_WALKTHROUGH.md).
 
 ---
 
@@ -178,11 +178,11 @@ The project evolved from a high-level 7-stage concept into an explicit **17-step
 ## 8. Problems Solved
 
 1. **Luhn Verified Credit Card Algorithm**:
-   * *Solution*: Implemented `passesLuhn()` in [`packages/privacy-core/src/detection.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/privacy-core/src/detection.js) and [`apps/extension/src/content-pii.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/apps/extension/src/content-pii.js) to filter out non-card number sequences.
+   * *Solution*: Implemented `passesLuhn()` in [`packages/privacy-core/src/detection.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/detection.js) and [`apps/extension/src/content-pii.js`](file:///Users/shahrukh/Desktop/sih/apps/extension/src/content-pii.js) to filter out non-card number sequences.
 2. **Target Resolution & Stale Target Protection**:
-   * *Solution*: Created `resolveTarget()` in [`packages/privacy-core/src/browser-action-engine.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/privacy-core/src/browser-action-engine.js) with priority ordering (`TOKEN_REFERENCE` $\rightarrow$ `SEMANTIC_TARGET` $\rightarrow$ `DOM_ELEMENT` $\rightarrow$ `OCR_REGION`) and explicit stale target rejection (`DENIED_STALE_TARGET`).
+   * *Solution*: Created `resolveTarget()` in [`packages/privacy-core/src/browser-action-engine.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/browser-action-engine.js) with priority ordering (`TOKEN_REFERENCE` $\rightarrow$ `SEMANTIC_TARGET` $\rightarrow$ `DOM_ELEMENT` $\rightarrow$ `OCR_REGION`) and explicit stale target rejection (`DENIED_STALE_TARGET`).
 3. **Pre-Serialization and Recursive Deep Inspection**:
-   * *Solution*: Added recursive content inspection in [`services/reasoning-backend/src/payload-validator.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/services/reasoning-backend/src/payload-validator.js) and pre-serialization checks in [`packages/privacy-core/src/secure-communication-client.js`](file:///c:/Users/ashri/.codex/.chatgpt-projects/g-p-6a905d6f723c81918ea039190416dff7/packages/privacy-core/src/secure-communication-client.js).
+   * *Solution*: Added recursive content inspection in [`services/reasoning-backend/src/payload-validator.js`](file:///Users/shahrukh/Desktop/sih/services/reasoning-backend/src/payload-validator.js) and pre-serialization checks in [`packages/privacy-core/src/secure-communication-client.js`](file:///Users/shahrukh/Desktop/sih/packages/privacy-core/src/secure-communication-client.js).
 
 ---
 
@@ -219,10 +219,11 @@ The project evolved from a high-level 7-stage concept into an explicit **17-step
 
 ## 12. Current Known State
 
-* **Core Engine**: Steps 1 through 17 are 100% implemented, verified, and passing 309 automated tests.
-* **Demonstration**: SIH 2026 showcase runner is fully operational.
-* **Extension UI**: Manifest V3 extension in `apps/extension` with local metadata, PII scanning, and Gemma 4 26B A4B task automation runner.
-* **Reasoning Integration**: `ReasoningService` and `OpenRouterProvider` support live/direct AI reasoning using `google/gemma-4-26b-a4b` via OpenRouter OpenAI-compatible endpoint with zero raw PII leakage.
+* **Core Engine**: Steps 1 through 17 are 100% implemented, verified, and passing 309 automated privacy tests.
+* **Chrome Extension**: Manifest V3 extension in `apps/extension` with dynamic DOM perception (`InteractiveElementRegistry`), local PII masking, and multi-step Re-Act execution loop (`MAX_STEPS = 6`).
+* **Reasoning Integrations**: Supports both Groq (`openai/gpt-oss-20b`) and OpenRouter models with automatic `.env` key injection and zero raw secrets over the wire.
+* **Observability**: Live terminal log server (`npm run dev:logs`) streaming pipeline events in real time.
+* **On-Device ML Training Pipeline**: `models/sih_training_pipeline.py` provides an end-to-end 5-stage pipeline to train YOLOv8 (visual PII) and ViT (context classification) and export to ONNX Runtime Web.
 
 ---
 
@@ -233,5 +234,15 @@ The project evolved from a high-level 7-stage concept into an explicit **17-step
 * **2026-08-28T20:23:10+05:30 (Commit `3451b0b`)**:
   * Completed Steps 12 through 17: ONNX Runtime Web adapter, WebGPU manager with fallback, Browser Action Engine, Remote Reasoning Backend service, Secure Communication Client, End-to-End Coordinator, Latency Benchmark, Security Audit, Synthetic Datasets, Deployment Guide, and SIH Demo Walkthrough. 287 tests fully passing.
 * **2026-08-29T23:25:00+05:30**:
-  * Free Vision / Agent Model Integration: Implemented `ModelProvider` base class and `OpenRouterProvider` adapter for `google/gemma-4-26b-a4b`. Connected to `SecureCommunicationClient` (`OpenRouterTransport`) and Chrome extension popup with runtime key storage, structured tool mapping (`click`, `type`, `fill`, `scroll`, `wait`, `navigate`, `ask_user`), and strict policy enforcement. 309 tests passing.
+  * Free Vision / Agent Model Integration: Implemented `ModelProvider` base class and `OpenRouterProvider` adapter for `google/gemma-4-26b-a4b`. Connected to `SecureCommunicationClient` and Chrome extension popup with runtime key storage and strict policy enforcement. 309 tests passing.
+* **2026-08-30T18:40:00+05:30**:
+  * Dynamic DOM-Based Browser Actions & Live Terminal Streaming: Implemented generic element discovery (`el_1`, `el_2`, bboxes) and WebSocket log relay (`scripts/extension-log-server.mjs`). Performed end-to-end real Chrome browser testing across Test Cases A through F.
+* **2026-08-30-31**:
+  * Multi-Step Re-Act Execution & ML Training Pipeline:
+    1. Implemented iterative perception-action loop (`MAX_STEPS = 6`) with page settlement pauses in `apps/extension/src/popup.js`.
+    2. Implemented URL auto-navigation from internal tabs (`chrome://newtab`, `about:blank`).
+    3. Enhanced checkbox, radio button, and eCommerce filter perception (`.a-checkbox-label`, `li[id^="p_"] a`).
+    4. Added search query keyword extraction and "Add to Cart" action disambiguation.
+    5. Created 5-stage Machine Learning training pipeline (`models/sih_training_pipeline.py`) for YOLOv8 and ViT on Mac Metal / CUDA / CPU.
+    6. Updated all project documentation (`AGENTS.md`, `README.md`, `to-do.md`, `progress.md`, `memory.md`). All 309 tests passing.
 

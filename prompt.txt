@@ -1,433 +1,309 @@
-Task: Integrate a Free Vision/Agent Model into the Chrome Extension
-
-We need to connect our Chrome extension Browser Agent to a free LLM provider for agent reasoning.
-
-Model
-
-Use:
-
-Gemma 4 26B A4B — free
-
-Prefer OpenRouter as the provider because it gives us access to the free model through a standard OpenAI-compatible API.
-
-Do not hardcode the API key anywhere in the repository.
-
-Use an environment/config mechanism appropriate for the existing extension architecture.
-
-⸻
-
-First: Understand the Existing Project
-
-Before modifying anything:
-
-1. Inspect the repository structure.
-2. Read:
-    * memory.md
-    * progress.md
-    * to-do.md
-3. Identify:
-    * Chrome extension entry points
-    * background/service worker
-    * content scripts
-    * existing Browser Agent implementation
-    * existing privacy-core integration
-    * existing DOM analyzer
-    * screenshot pipeline
-    * existing model/provider abstractions
-    * existing tool/action execution system
-4. Do not duplicate functionality that already exists.
-5. Follow the existing architecture and coding conventions.
-
-Do not start implementing until you understand where the LLM should sit in the current architecture.
-
-⸻
-
-Target Architecture
-
-The model must sit behind the local privacy boundary.
-
-The architecture should be:
-
-                     USER
-                       │
-                       ▼
-                User Instruction
-                       │
-                       ▼
-              ┌─────────────────┐
-              │ Browser Agent   │
-              └────────┬────────┘
-                       │
-              ┌────────┴─────────┐
-              │                  │
-              ▼                  ▼
-           DOM Data          Screenshot
-              │                  │
-              ▼                  ▼
-        DOM Analyzer        Local Vision
-              │                  │
-              └────────┬─────────┘
-                       ▼
-                Privacy Core
-        ┌──────────────┼──────────────┐
-        │              │              │
-        ▼              ▼              ▼
-    PII Detection   Policy Engine   Privacy Vault
-        │              │
-        └───────┬──────┘
-                ▼
-        Sanitized Context
-                │
-                ▼
-       Gemma 4 26B A4B
-          (OpenRouter)
-                │
-                ▼
-        Structured Tool Call
-                │
-                ▼
-       Local Policy Engine
-                │
-          ┌─────┴─────┐
-          ▼           ▼
-       ALLOW        DENY
-          │
-          ▼
-    Browser Action
-
-The cloud model must never receive raw private information that the local privacy layer has classified as protected.
-
-⸻
-
-Model Responsibilities
-
-Gemma should handle:
-
-* natural-language instruction understanding
-* browser task planning
-* reasoning about sanitized DOM state
-* reasoning about sanitized screenshots
-* selecting browser tools
-* producing structured action requests
-
-Gemma must NOT be the final authority for whether an action is allowed.
-
-The local privacy/policy layer remains authoritative.
-
-⸻
-
-Browser Tools
-
-Inspect the existing action system first.
-
-If a tool abstraction already exists, use it.
-
-Otherwise, create a minimal structured tool interface similar to:
-
-click(element_id)
-type(element_id, text)
-scroll(direction)
-navigate(url)
-read(element_id)
-press_key(key)
-ask_user(question)
-
-Do NOT expose arbitrary JavaScript execution or unrestricted Chrome APIs to the model.
-
-The model should only be able to request predefined browser actions.
-
-⸻
-
-Structured Model Output
-
-The model should return structured output rather than free-form text.
-
-Example:
-
-{
-  "action": "click",
-  "element_id": "checkout_button",
-  "reason": "The user requested checkout."
-}
-
-For typing:
-
-{
-  "action": "type",
-  "element_id": "email_field",
-  "text": "<SANITIZED_EMAIL>",
-  "reason": "The form requires an email address."
-}
-
-For asking the user:
-
-{
-  "action": "ask_user",
-  "question": "The website requires additional information that I cannot safely infer."
-}
-
-Define a strict schema and validate model output before executing anything.
-
-Invalid model output must never reach the browser action executor.
-
-⸻
-
-Privacy Boundary
-
-This is a core requirement.
-
-Before sending context to OpenRouter:
-
-1. Collect DOM/screenshot information.
-2. Run it through the existing local privacy-core pipeline.
-3. Detect sensitive information.
-4. Apply the existing privacy policy.
-5. Replace protected information with safe placeholders/tokens where appropriate.
-6. Build the sanitized context.
-7. Only send the sanitized context to Gemma.
-
-Example:
-
-Raw:
-
-Name: Shahrukh
-Email: example@gmail.com
-Phone: +91XXXXXXXXXX
-Order: #123456
-
-Model-visible context should look more like:
-
-Name: <PERSON_1>
-Email: <EMAIL_1>
-Phone: <PHONE_1>
-Order: <ORDER_ID_1>
-
-Use the existing privacy vault/token mapping if one already exists.
-
-Do NOT implement a second independent privacy system.
-
-⸻
-
-Screenshot Handling
-
-Inspect the existing screenshot pipeline.
-
-If the existing system can sanitize screenshots locally, use that pipeline.
-
-Do not automatically upload raw screenshots containing private information to OpenRouter.
-
-If screenshot sanitization is not yet implemented, clearly isolate that limitation instead of silently bypassing the privacy boundary.
-
-The model integration must not weaken the project’s privacy guarantees.
-
-⸻
-
-API Layer
-
-Create a clean model-provider abstraction.
-
-For example:
-
-ModelProvider
-    └── OpenRouterProvider
-            └── Gemma 4 26B A4B
-
-Do not scatter OpenRouter-specific API calls throughout the extension.
-
-The Browser Agent should interact with an abstraction such as:
-
-generateAgentResponse(context)
-
-rather than directly calling fetch() to OpenRouter from multiple places.
-
-⸻
-
-API Key Security
-
-Do not:
-
-* commit API keys
-* hardcode API keys
-* place secrets in Git
-* expose secrets in source control
-* print API keys to logs
-
-Check the existing project’s configuration strategy before deciding how credentials should be supplied.
-
-Also explain the security implications of putting an OpenRouter key directly into a client-side Chrome extension.
-
-If the current architecture necessarily exposes the key to the extension, document this clearly rather than pretending the key is secure.
-
-⸻
-
-Error Handling
-
-Handle:
-
-* API timeout
-* network failure
-* rate limits
-* provider errors
-* invalid model output
-* malformed JSON
-* missing model response
-* context too large
-* unavailable model
-* authentication failure
-
-The extension must fail safely.
-
-If the model fails, it should NOT automatically execute an uncertain action.
-
-⸻
-
-Logging
-
-Do not log:
-
-* raw PII
-* API keys
-* private page content
-* unsanitized screenshots
-* sensitive model prompts
-
-Logs should contain safe debugging information such as:
-
-Agent request created
-Sanitized context generated
-Model request sent
-Model response received
-Action proposed: click
-Policy decision: ALLOW
-Action executed
-
-⸻
-
-Configuration
-
-Add configuration for:
-
-provider = openrouter
-model = google/gemma-4-26b-a4b
-
-Use the exact model identifier returned by the provider/API rather than assuming the identifier.
-
-Before implementation, verify the currently available OpenRouter model identifier and API requirements.
-
-Do not silently substitute another model.
-
-⸻
-
-Testing
-
-Add tests for at least:
-
-1. Normal task
-
-"Open the shopping website and search for laptops."
-
-Expected:
-
-instruction
-→ sanitized context
-→ model
-→ structured action
-→ policy check
-→ browser action
-
-2. PII
-
-Give the agent a page containing:
-
-email
-phone
-address
-credit card-like data
-
-Verify that protected information does not enter the model request in raw form.
-
-3. Invalid model output
-
-Return malformed JSON.
-
-Expected:
-
-NO browser action
-
-4. Policy denial
-
-Have the model request an action that the local policy engine rejects.
-
-Expected:
-
-model → action
-       ↓
-policy → DENY
-       ↓
-browser action NOT executed
-
-5. API failure
-
-Simulate an OpenRouter failure.
-
-Expected:
-
-safe failure
-no unauthorized browser action
-
-⸻
-
-Important Architectural Constraint
-
-Do NOT implement:
-
-Website
-   ↓
-Raw DOM + Raw Screenshot
-   ↓
-Cloud LLM
-   ↓
-Chrome API
-
-That defeats the main privacy architecture of this project.
-
-The required architecture is:
-
-Website
-   ↓
-Local Perception
-   ↓
-Local Privacy Core
-   ↓
-Sanitized Context
-   ↓
-LLM
-   ↓
-Structured Action
-   ↓
-Local Policy Check
-   ↓
-Browser Action
-
-⸻
-
-Deliverables
-
-After implementation:
-
-1. Show all files changed.
-2. Explain where the model integration lives.
-3. Explain how the privacy boundary is enforced.
-4. Explain how the model communicates with the Browser Agent.
-5. Explain how actions are validated.
-6. Explain how API credentials are handled.
-7. Add/update tests.
-8. Update progress.md, memory.md, and to-do.md to reflect the completed integration.
-9. Run the relevant tests/build.
-10. Report any architectural limitations honestly.
-
-Do not make unrelated refactors.
-
-Do not replace existing working components merely to introduce the model.
-
-The goal is a minimal, secure, modular integration of Gemma 4 26B A4B into the existing Browser Agent, while keeping the local privacy core as the authoritative privacy and action-control layer.
+You are an autonomous ML training agent. Your goal is to build, train, 
+and export two high-precision PII detection models for a browser privacy 
+extension. You do not stop until both models meet the minimum accuracy 
+thresholds defined below. You self-heal every error you encounter.
+
+════════════════════════════════════════════════════════════
+MISSION
+════════════════════════════════════════════════════════════
+
+Train two models:
+  1. YOLOv8n — detects PII regions in screenshots
+     (faces, credit cards, ID documents, password fields)
+  2. ViT (google/vit-base-patch16-224) — classifies browser 
+     page context
+     (safe_page, pii_present, form_page, payment_page)
+
+Export both to ONNX for browser deployment.
+
+Do not exit until:
+  YOLO mAP50        >= 0.75
+  YOLO mAP50-95     >= 0.50
+  ViT val accuracy  >= 0.80
+
+════════════════════════════════════════════════════════════
+MINIMUM ACCURACY THRESHOLDS — NON NEGOTIABLE
+════════════════════════════════════════════════════════════
+
+YOLO:
+  mAP50     >= 0.75   (if below, retrain with more epochs + augmentation)
+  mAP50-95  >= 0.50   (if below, increase mosaic, mixup, add more data)
+  Per-class precision >= 0.70 for all 5 classes
+  Per-class recall    >= 0.65 for all 5 classes
+
+ViT:
+  val accuracy  >= 0.80   (if below, unfreeze more layers, train longer)
+  val loss      <= 0.40   (if above, reduce LR, add dropout)
+  per-class F1  >= 0.75 for all 4 classes
+
+If any threshold is not met after training:
+  - diagnose WHY (check confusion matrix, check class balance)
+  - fix the root cause (more data, augmentation, hyperparameters)
+  - retrain
+  - re-evaluate
+  - repeat until all thresholds are met
+  - only then export
+
+════════════════════════════════════════════════════════════
+SELF HEALING RULES — FOLLOW THESE EXACTLY
+════════════════════════════════════════════════════════════
+
+Rule 1 — NEVER exit on an error. Catch it, diagnose it, fix it, retry.
+
+Rule 2 — Dataset download failures:
+  If HuggingFace download fails:
+    → retry 3 times with exponential backoff
+    → if still failing, try alternate dataset ID variations
+    → if all fail, generate synthetic replacement data 
+      that covers the same class
+    → log what was replaced and why
+    → continue pipeline
+
+Rule 3 — Training failures:
+  If CUDA/MPS OOM error:
+    → halve the batch size
+    → retry
+  If loss is NaN:
+    → halve the learning rate
+    → restart training from scratch
+    → retry
+  If model is not converging after 20 epochs:
+    → diagnose class imbalance
+    → apply class weights
+    → add stronger augmentation
+    → retrain from scratch
+
+Rule 4 — Accuracy below threshold after first training run:
+  YOLO below threshold:
+    → Step 1: Check per-class metrics — identify weakest class
+    → Step 2: Generate 500 more synthetic samples for that class
+    → Step 3: Increase epochs by 25
+    → Step 4: Add stronger augmentation (higher mosaic, mixup)
+    → Step 5: Retrain
+    → Step 6: Re-evaluate
+    → Repeat up to 5 times before escalating strategy
+    
+  ViT below threshold:
+    → Step 1: Unfreeze last 4 transformer blocks
+    → Step 2: Reduce LR to 5e-6
+    → Step 3: Train for 10 more epochs
+    → Step 4: Re-evaluate
+    → If still failing: add dropout 0.3 before classifier head
+    → Retrain from scratch with new config
+    → Repeat until threshold met
+
+Rule 5 — ONNX export failures:
+  → Try opset 12 first
+  → If fails, try opset 11
+  → If fails, try opset 14
+  → For ViT, if full export fails, export just the backbone
+  → Log what was changed
+
+Rule 6 — Data quality issues:
+  If a dataset has fewer than 500 samples for any class:
+    → generate synthetic samples to bring it to 500 minimum
+    → use albumentations for augmentation to reach 1000 per class
+    → log what was generated
+
+════════════════════════════════════════════════════════════
+DATASETS TO USE
+════════════════════════════════════════════════════════════
+
+For YOLO detection (5 classes):
+  Class 0 — face
+    Primary:   HuggingFace "wider_face"
+    Alternate: HuggingFace "CASIA-WebFace" face crops
+    Fallback:  generate synthetic face bounding box overlays
+               on random background images
+
+  Class 1 — card_number (text on card)
+    Primary:   generate synthetic via Faker
+               (1500 samples minimum)
+    No external dataset needed
+
+  Class 2 — id_document
+    Primary:   pip install midv500 → midv500.download()
+    Alternate: HuggingFace search "identity document detection"
+    Fallback:  generate synthetic document overlays
+
+  Class 3 — password_field
+    Primary:   generate synthetic browser screenshots 
+               with password input fields using Selenium
+               or Pillow with fake form UI
+    Fallback:  crop DOM-detected password fields from 
+               any available browser screenshots
+
+  Class 4 — credit_card (full card image)
+    Primary:   generate synthetic via Faker + Pillow
+               (1500 samples minimum)
+    No external dataset needed
+
+For ViT classification (4 classes):
+  Class 0 — safe_page
+    Primary:   HuggingFace "osunlp/Mind2Web" 
+               filter tasks with no PII keywords
+
+  Class 1 — pii_present
+    Primary:   Mind2Web samples with email/phone/name visible
+
+  Class 2 — form_page
+    Primary:   Mind2Web samples with login/register tasks
+    Supplement: WebSRC dataset from Stanford
+
+  Class 3 — payment_page
+    Primary:   Mind2Web samples with pay/checkout/billing tasks
+    Supplement: synthetic payment page screenshots via Pillow
+
+Minimum samples per class before training:
+  YOLO:  500 per class (2500 total minimum)
+  ViT:   300 per class (1200 total minimum)
+  
+If minimums not met after all download attempts:
+  Generate synthetic data until minimums are reached.
+  Log everything generated.
+
+════════════════════════════════════════════════════════════
+HARDWARE
+════════════════════════════════════════════════════════════
+
+Detect device automatically:
+  if torch.backends.mps.is_available()  → use "mps"  (Mac Metal)
+  elif torch.cuda.is_available()        → use "cuda" 
+  else                                  → use "cpu", warn user
+
+Batch size defaults:
+  MPS:  8
+  CUDA: 16
+  CPU:  4
+
+If OOM on any device → halve batch size → retry
+
+════════════════════════════════════════════════════════════
+TRAINING CONFIG
+════════════════════════════════════════════════════════════
+
+YOLO initial config:
+  model:    yolov8n.pt
+  epochs:   75
+  imgsz:    640
+  patience: 15
+  optimizer: AdamW
+  lr0:      0.001
+  mosaic:   0.9
+  mixup:    0.2
+  flipud:   0.0   (no vertical flip — screenshots are upright)
+  fliplr:   0.5
+  hsv_h:    0.015
+  hsv_s:    0.7
+  hsv_v:    0.4
+
+ViT initial config:
+  base model:  google/vit-base-patch16-224
+  freeze:      all layers except last 2 transformer blocks + head
+  epochs:      15
+  lr:          2e-5
+  optimizer:   AdamW
+  scheduler:   cosine annealing
+  warmup:      2 epochs
+  dropout:     0.1
+
+════════════════════════════════════════════════════════════
+EVALUATION — RUN AFTER EVERY TRAINING RUN
+════════════════════════════════════════════════════════════
+
+For YOLO:
+  - Run model.val() on test split
+  - Print mAP50, mAP50-95
+  - Print per-class precision, recall, F1
+  - Generate and save confusion matrix to exports/yolo_confusion.png
+  - Generate and save PR curve to exports/yolo_pr_curve.png
+  - Check every threshold
+  - If any threshold fails → trigger self-heal rules above
+
+For ViT:
+  - Run full val loop
+  - Print overall accuracy, loss
+  - Print per-class F1 using sklearn classification_report
+  - Generate confusion matrix to exports/vit_confusion.png
+  - Check every threshold
+  - If any threshold fails → trigger self-heal rules above
+
+════════════════════════════════════════════════════════════
+EXPORT — ONLY WHEN ALL THRESHOLDS ARE MET
+════════════════════════════════════════════════════════════
+
+YOLO export:
+  format:   onnx
+  opset:    12
+  imgsz:    640
+  simplify: True
+  dynamic:  False
+  output:   exports/yolo_pii.onnx
+
+ViT export:
+  format:         onnx
+  opset:          14
+  input shape:    (1, 3, 224, 224)
+  input name:     pixel_values
+  output name:    logits
+  output:         exports/vit_context.onnx
+
+After export verify:
+  - Load both ONNX models with onnxruntime
+  - Run inference on 5 test samples each
+  - Confirm output shapes are correct
+  - If verification fails → do not mark as done → fix and re-export
+
+════════════════════════════════════════════════════════════
+LOGGING
+════════════════════════════════════════════════════════════
+
+Maintain a file: exports/training_log.txt
+
+Log every:
+  - Dataset download attempt + result
+  - Synthetic data generation (how many, which class)
+  - Training run start (config used)
+  - Evaluation result (all metrics)
+  - Threshold check (pass/fail per metric)
+  - Self-heal action taken (what failed, what was changed)
+  - Export attempt + result
+  - Final summary when done
+
+════════════════════════════════════════════════════════════
+FINAL STATE — ONLY EXIT WHEN ALL OF THESE ARE TRUE
+════════════════════════════════════════════════════════════
+
+   [ ] YOLO mAP50              >= 0.80
+   [ ] YOLO mAP50-95           >= 0.60
+   [ ] YOLO per-class precision >= 0.85 all classes
+   [ ] YOLO per-class recall    >= 0.90 all classes
+   [ ] YOLO per-class F1        >= 0.85 all classes
+   [ ] ViT val accuracy         >= 0.80
+   [ ] ViT val loss             <= 0.40
+   [ ] ViT per-class F1         >= 0.80 all classes
+   [ ] ViT sensitive-class recall >= 0.90
+   [ ] End-to-end PII recall    >= 0.95
+   [ ] PII leakage rate         <= 0.01
+   [ ] yolo_pii.onnx     exists and verified
+   [ ] vit_context.onnx  exists and verified
+   [ ] training_log.txt  complete
+
+If any checkbox is unchecked → do not exit → fix → recheck.
+
+Print "PIPELINE COMPLETE — ALL THRESHOLDS MET" only when 
+every checkbox above is checked.
+
+════════════════════════════════════════════════════════════
+FILE REFERENCE
+════════════════════════════════════════════════════════════
+
+Base code is in sih_training_pipeline.py
+Wrap it, extend it, rewrite sections as needed.
+The pipeline structure is a starting point — 
+you are authorized to modify any part of it 
+to meet the accuracy thresholds.
+
+Do not ask for confirmation. 
+Do not pause for input. 
+Self-heal and continue until done.
