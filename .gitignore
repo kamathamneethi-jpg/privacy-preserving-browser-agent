@@ -14,6 +14,16 @@ coverage/
 *.pem
 *.crx
 
+# Datasets, ML weights and artifacts
+datasets/
+training/
+*.pt
+*.onnx
+*.zip
+*.tar.gz
+__pycache__/
+*.pyc
+
 # Logs and operating-system files
 *.log
 .DS_Store

@@ -16,74 +16,114 @@ Raw sensitive data **NEVER** leaves the client's browser. The extension detects 
 
 ---
 
+## 🎯 WebPII Object Detection (YOLO11n Fine-Tuning)
+
+This sub-project fine-tunes a pretrained **YOLO11n** (`yolo11n.pt`) detector for on-device detection of 16 categories of Personally Identifiable Information (PII) on rendered webpage screenshots.
+
+### Key Experiment Details
+- **Architecture**: Ultralytics **YOLO11n** (Nano) starting from pretrained `yolo11n.pt` weights (**fine-tuning**, not training from scratch).
+- **Dataset**: `datasets/webpii_yolo/`
+  - **Train**: 40,384 images, 40,384 labels (469,135 annotations)
+  - **Test**: 4,481 images, 4,481 labels (51,715 annotations)
+  - **Total**: 44,865 images, 520,850 annotations across 16 classes
+- **16 PII Classes**:
+  ```text
+  0: NAME             4: LOCATION         8: SECURITY_CODE    12: GIFT_CODE
+  1: EMAIL            5: POSTCODE         9: USERNAME         13: COMPANY
+  2: PHONE            6: DATE_OF_BIRTH   10: PASSWORD         14: COUNTRY
+  3: ADDRESS          7: PAYMENT_CARD    11: PROMO_CODE       15: OTHER_PII
+  ```
+
+---
+
+## 💻 Workflows & Commands
+
+### A. Mac Preparation Workflow (Validation Only — NO Training on Mac)
+
+The Mac environment is strictly used for code writing, syntax verification, and dry runs. **Model training is NOT executed on macOS.**
+
+```bash
+# 1. Navigate to workspace
+cd ~/Desktop/sih
+
+# 2. Check environment (verifies Python, PyTorch, Ultralytics, YAML)
+python3 scripts/check_environment.py
+
+# 3. Verify dataset integrity (counts, 1-to-1 image-label pairs, coords, 16 classes)
+python3 scripts/verify_dataset.py
+
+# 4. Perform a dry run (loads config, validates parameters, DOES NOT train)
+python3 scripts/train_yolo.py --dry-run
+```
+
+---
+
+### B. NVIDIA RTX Laptop Workflow (GPU Training & Evaluation)
+
+Copy the project repository and `datasets/webpii_yolo` to your NVIDIA RTX laptop.
+
+#### 1. Setup Environment on RTX Laptop
+```bash
+cd /path/to/sih
+
+# Install PyTorch with CUDA support (match your CUDA version, e.g. CUDA 12.1):
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+# Install requirements
+pip install -r requirements.txt
+```
+
+#### 2. Run Diagnostics & Pre-Flight
+```bash
+# Check GPU and CUDA availability
+python scripts/check_environment.py
+
+# Verify dataset structure
+python scripts/verify_dataset.py
+
+# Run RTX GPU pre-flight check (verifies GPU memory and checks all configs without training)
+python scripts/train_yolo.py --preflight
+```
+
+#### 3. Execute Training
+If pre-flight passes, start training:
+
+```bash
+# Default training (batch size 16):
+python scripts/train_yolo.py --batch 16
+
+# If CUDA Out-Of-Memory occurs, reduce batch size:
+python scripts/train_yolo.py --batch 8
+
+# If still Out-Of-Memory:
+python scripts/train_yolo.py --batch 4
+```
+
+> Training outputs are saved under: `training/webpii_16class_yolo11n/`
+> The main trained model weights are saved at: `training/webpii_16class_yolo11n/weights/best.pt`
+
+#### 4. Evaluate Trained Model on Test Set
+```bash
+python scripts/evaluate_yolo.py
+```
+This loads `training/webpii_16class_yolo11n/weights/best.pt` and evaluates against the 4,481 test images in `images/test`, reporting overall and per-class Precision, Recall, mAP@50, and mAP@50-95, and saves results to `training/webpii_16class_yolo11n/evaluation/evaluation_summary.json`.
+
+---
+
 ## 📁 Repository Layout
 
 ```text
 apps/extension/             Chrome Extension (Manifest V3 popup, DOM perception, action runtime)
 packages/privacy-core/      On-device PII detection, tokenization, vault, & DOM registry
 services/reasoning-backend/ Sanitized remote reasoning adapter & payload validation
-models/                     SIH 2026 On-device ML training pipeline (YOLOv8 + ViT + ONNX)
-scripts/                    Build tools, live terminal log server, and sanity testers
+models/                     SIH 2026 On-device ML training pipeline
+datasets/webpii_yolo/       44,865 image WebPII dataset in YOLO format (train: 40,384, test: 4,481)
+scripts/                    Build tools, dataset verifier, training, and evaluation scripts
+├── verify_dataset.py       Non-destructive dataset integrity checker
+├── check_environment.py    Cross-platform hardware & CUDA diagnostic tool
+├── train_yolo.py           GPU training runner with --dry-run and --preflight safety modes
+└── evaluate_yolo.py        Full test-split metric evaluator (mAP50, mAP50-95, per-class)
 tests/                      309+ automated privacy, security, and DOM action test suites
-```
-
----
-
-## 🚀 Quickstart & Workflows
-
-### 1. Install & Build
-```bash
-# Install NPM dependencies
-npm install
-
-# Build the Chrome extension bundle (outputs to apps/extension/dist/)
-npm run build:extension
-```
-
-### 2. Live Terminal Observability
-```bash
-# Start the live terminal logging relay server (displays real-time agent execution)
-npm run dev:logs
-```
-
-### 3. Load the Extension in Chrome
-1. Go to `chrome://extensions` in Chrome.
-2. Toggle on **Developer mode**.
-3. Click **Load unpacked** and select `apps/extension/`.
-
-### 4. Run Automated Test Suites
-```bash
-# Run all 309 automated privacy & security test suites
-npm run test:privacy
-
-# Run DOM action driver & Groq model integration tests
-node --test tests/generic-dom-actions.test.mjs tests/groq-model-provider.test.mjs
-```
-
----
-
-## 🧠 On-Device Machine Learning Pipeline (`models/sih_training_pipeline.py`)
-
-Train on-device vision models (YOLOv8 for visual PII & ViT for context classification) and export to **ONNX Runtime Web**:
-
-```bash
-# Install Python ML dependencies
-python3 models/sih_training_pipeline.py --stage install
-
-# Download / generate open datasets (WIDER FACE, MIDV-500, Synthetic cards, WebSRC, Mind2Web)
-python3 models/sih_training_pipeline.py --stage download
-
-# Preprocess into YOLO & ViT datasets
-python3 models/sih_training_pipeline.py --stage preprocess
-
-# Train YOLOv8n detector
-python3 models/sih_training_pipeline.py --stage train_yolo
-
-# Train ViT classifier
-python3 models/sih_training_pipeline.py --stage train_vit
-
-# Export to ONNX for browser deployment
-python3 models/sih_training_pipeline.py --stage export
 ```
 
 ---
@@ -94,4 +134,3 @@ python3 models/sih_training_pipeline.py --stage export
 - **[`to-do.md`](file:///Users/shahrukh/Desktop/sih/to-do.md)** — Active roadmap and task status.
 - **[`progress.md`](file:///Users/shahrukh/Desktop/sih/progress.md)** — Detailed historical changelog.
 - **[`DEMO_WALKTHROUGH.md`](file:///Users/shahrukh/Desktop/sih/DEMO_WALKTHROUGH.md)** — Step-by-step verification flows.
-
