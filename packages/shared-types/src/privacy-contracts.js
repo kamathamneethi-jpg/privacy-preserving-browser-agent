@@ -11,7 +11,33 @@ export const SAFE_REMOTE_VALUE_SHAPE = Object.freeze({
 export const PII_SOURCE_TYPES = Object.freeze({
   DOM: "dom",
   OCR: "ocr",
-  FUSION: "fusion"
+  FUSION: "fusion",
+  GLINER: "gliner",
+  REGEX: "regex",
+  HYBRID: "hybrid"
+});
+
+export const DOM_TEXT_NODE_SHAPE = Object.freeze({
+  nodeId: "string",
+  elementPath: "string",
+  text: "string",
+  source: "string",
+  bbox: {
+    x: "number",
+    y: "number",
+    width: "number",
+    height: "number"
+  }
+});
+
+export const PII_DETECTION_SHAPE = Object.freeze({
+  type: "string",
+  value: "string",
+  start: "number",
+  end: "number",
+  confidence: "number",
+  source: "string",
+  nodeId: "string"
 });
 
 export const LOCALIZED_PII_ITEM_SHAPE = Object.freeze({

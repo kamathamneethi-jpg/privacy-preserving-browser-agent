@@ -21,6 +21,9 @@ import {
 import { REASONING_CONFIG, REASONING_SERVICE_VERSION } from "./reasoning-config.js";
 import { validateRemotePayload } from "./payload-validator.js";
 import { validateReasoningResponse } from "./response-validator.js";
+import { LlmReasoningProvider } from "./llm-provider.js";
+
+export { LlmReasoningProvider };
 
 /**
  * Mock Reasoning Provider for Node.js automated testing.

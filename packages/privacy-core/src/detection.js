@@ -238,4 +238,13 @@ export function detectPiiMultiSignal({ domItems = [], ocrBlocks = [], domElement
   return fuseDetectedPiiItems(rawDetections);
 }
 
-export { PrivacyDecision, analyzeDomElementSemantics, fuseDetectedPiiItems };
+export {
+  PrivacyDecision,
+  analyzeDomElementSemantics,
+  fuseDetectedPiiItems
+};
+export { extractDomTextNodes } from "./dom-extractor.js";
+export { glinerAdapter, GlinerAdapter } from "./gliner-adapter.js";
+export { hybridPiiDetector, HybridPiiDetector } from "./hybrid-pii-detector.js";
+export { redactTextString, redactDomNodes } from "./dom-redactor.js";
+export { GLINER_MODEL_METADATA, GLINER_CONFIG, GLINER_TARGET_LABELS, GLINER_TAXONOMY_MAP } from "./gliner-config.js";

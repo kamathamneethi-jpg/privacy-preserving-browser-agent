@@ -1,660 +1,732 @@
-You are working on an existing Privacy-Preserving Browser Agent repository.
-
-IMPORTANT:
-Do NOT redesign the architecture.
-Do NOT replace the existing privacy/security pipeline.
-Do NOT create duplicate policy, PII detection, sanitization, vault, reasoning, or action-validation logic.
-
-Your job is to finish the existing implementation and make the Chrome extension actually execute the browser-agent pipeline end-to-end.
-
-==================================================
-CURRENT REPOSITORY
-==================================================
-
-Relevant structure:
-
-apps/
-  extension/
-    manifest.json
-    popup.html
-    popup.js
-    src/
-      action-runtime.js
-      content-metadata.js
-      content-pii.js
-      ocr-service.js
-      policy-runtime.js
-
-packages/
-  privacy-core/
-    src/
-      browser-action-engine.js
-      browser-agent-coordinator.js
-      detection.js
-      context-analyzer.js
-      policy.js
-      policy-engine.js
-      privacy-vault.js
-      sanitized-context-builder.js
-      secure-communication-client.js
-      secure-communication-config.js
-      ...
-  shared-types/
-    src/
-      privacy-contracts.js
-
-services/
-  reasoning-backend/
-    src/
-      index.js
-      payload-validator.js
-      reasoning-config.js
-      reasoning-service.js
-      response-validator.js
-
-scripts/
-  check-step14-actions.mjs
-  check-step15-reasoning.mjs
-  check-step16-secure-communication.mjs
-  check-step17-e2e.mjs
-
-tests/
-  browser-action.test.mjs
-  end-to-end-privacy.test.mjs
-  remote-reasoning.test.mjs
-  secure-communication.test.mjs
-  ...
-
-==================================================
-WHAT HAS BEEN VERIFIED
-==================================================
-
-The repository already contains:
-
-- Step 1-13 privacy/perception infrastructure
-- Step 14 BrowserActionEngine
-- Step 15 ReasoningService
-- Step 16 SecureCommunicationClient
-- Step 17 BrowserAgentCoordinator
-- local PII detection
-- policy enforcement
-- privacy vault
-- sanitized reasoning payload construction
-- response validation
-- action validation
-- stale target protection
-- secure transport validation
-- Chrome extension MVP
-
-BROWSER_ACTION_TYPES includes at least:
-CLICK
-FILL
-SCROLL
-
-and action-config.js references:
-CLICK
-TYPE
-FILL
-SELECT
-SUBMIT
-SCROLL
-NAVIGATE
-WAIT
+# Task: Integrate a Small Local GLiNER Model for DOM PII Detection and Redaction
 
-Verify the complete contract instead of assuming it.
+We are building a Chrome browser extension that acts as a local privacy middleware for AI browser agents.
 
-==================================================
-CRITICAL CURRENT BUG / GAP
-==================================================
+The immediate goal is to implement a **small, fast, fully local PII detector for DOM content** using GLiNER.
 
-packages/privacy-core/src/browser-action-engine.js currently contains:
+Do NOT use an external API for PII detection.
+Do NOT send DOM content to OpenAI, Anthropic, Google, Hugging Face Inference API, or any cloud service.
+The model must run locally.
 
-    this.domDriver = customConfig.domDriver || null;
+## 1. First inspect the existing project
 
-and execution roughly does:
+Before modifying anything:
 
-    if (this.domDriver && typeof this.domDriver.execute === "function") {
-        this.domDriver.execute(actionType, targetResolution.targetId, parameters);
-    }
+1. Inspect the repository structure.
+2. Identify:
 
-If domDriver is null, execution is silently skipped but executeAction() can still return:
+   * Chrome extension entry points
+   * content scripts
+   * background/service worker
+   * privacy-core package
+   * existing DOM analyzer
+   * existing PII detection code
+   * existing model-loading code
+   * build system
+   * package manager
+3. Read the existing architecture and determine the correct place for the DOM PII detector.
+4. Do not create a parallel architecture if an existing privacy-core/DOM pipeline already exists.
+5. Reuse existing interfaces wherever possible.
 
-    ok: true
-    status: ACTION_RESULTS.COMPLETED
-
-This is a FALSE SUCCESS bug.
-
-The project also currently has:
+Explain briefly which files will be modified and why before implementation.
 
-apps/extension/src/action-runtime.js
-
-which exposes:
+---
 
-    globalThis.ActionRuntime = {
-        performClick,
-        performInput,
-        performScroll
-    }
+# 2. Model selection
 
-but this runtime is not actually connected to BrowserActionEngine.
+Use a **small GLiNER checkpoint suitable for local inference**.
 
-Searches previously showed no meaningful integration for:
-
-domDriver
-recommendedActions
-executeAction
-ActionRuntime
-
-outside the relevant implementation files.
+Before downloading anything:
 
-The Chrome manifest currently loads:
+1. Check the official GLiNER/Hugging Face model repository.
+2. Identify the smallest practical checkpoint that supports custom entity labels and local inference.
+3. Prefer a model that can realistically be converted/exported to a browser-compatible runtime.
+4. Record:
 
-    src/policy-runtime.js
-    src/ocr-service.js
-    src/content-pii.js
-    src/content-metadata.js
+   * exact model name
+   * model repository
+   * model size
+   * license
+   * expected inference framework
+   * whether ONNX/browser inference is supported
+5. Do NOT assume that a Python-only GLiNER implementation can simply run inside a Chrome extension.
 
-but does NOT load a content action execution bridge.
+If the selected checkpoint cannot realistically run inside the browser, determine the correct local deployment approach rather than pretending it can.
 
-==================================================
-PRIMARY OBJECTIVE
-==================================================
+---
+After selecting the checkpoint, actually download the model files into the
+project's local model directory and integrate them into the extension.
 
-Make the existing architecture actually work end-to-end:
+Do not stop at recommending a model.
 
-User task
-  ↓
-BrowserAgentCoordinator
-  ↓
-local perception / PII detection
-  ↓
-task intent
-  ↓
-sanitized context
-  ↓
-SecureCommunicationClient
-  ↓
-ReasoningService / reasoning provider
-  ↓
-validated recommendedActions
-  ↓
-BrowserActionEngine
-  ↓
-local DOM driver
-  ↓
-Chrome content script
-  ↓
-actual webpage DOM action
+The implementation is considered incomplete until:
+1. The model files exist locally.
+2. The extension can load them.
+3. A real DOM string can be passed to the model.
+4. The model returns PII detections.
+5. Those detections reach the existing policy engine.
+6. A test DOM is successfully sanitized.
+7. The complete flow works without an internet connection after the
+   model/dependencies have been installed.
 
-BrowserActionEngine MUST remain the absolute execution authority.
+Show the exact model directory structure and explain every model file
+that is required.
 
-The remote reasoning layer must NEVER execute browser actions directly.
+# 3. Architecture requirement
 
-==================================================
-PART 1 — AUDIT BEFORE MODIFYING
-==================================================
+Implement this pipeline:
 
-First inspect the complete repository.
-
-Specifically inspect:
-
-1. package.json
-2. packages/privacy-core/package.json
-3. packages/shared-types/package.json
-4. apps/extension/manifest.json
-5. packages/shared-types/src/privacy-contracts.js
-6. packages/privacy-core/src/action-config.js
-7. packages/privacy-core/src/browser-action-engine.js
-8. packages/privacy-core/src/browser-agent-coordinator.js
-9. packages/privacy-core/src/index.js
-10. apps/extension/src/action-runtime.js
-11. apps/extension/src/popup.js
-12. all Step 14-17 verification scripts
-13. all relevant tests
-
-Determine:
-- which modules are Node-only
-- which modules can execute in a Chrome extension
-- which modules access Node APIs such as Buffer
-- which modules access browser APIs
-- whether ES modules are currently configured
-- whether any package imports are workspace-relative
-- whether there are existing build scripts
-- whether esbuild is already installed
-- whether package-lock/package manager state is consistent
-
-Do NOT make changes until this audit is understood.
-
-==================================================
-PART 2 — FIX THE DOM ACTION EXECUTION BRIDGE
-==================================================
-
-Implement the missing local DOM execution bridge.
-
-Preferred architecture:
-
-BrowserActionEngine
-    ↓
-DOM Driver abstraction
-    ↓
-Chrome extension messaging
-    ↓
-content-action-runtime.js
-    ↓
-actual DOM
-
-Do NOT let BrowserActionEngine directly depend on arbitrary webpage DOM APIs.
-
-Create the minimum required implementation.
-
-For example, a DOM driver can live under:
-
-packages/privacy-core/src/dom-driver.js
-
-and an extension-side runtime can live under:
-
-apps/extension/src/content-action-runtime.js
-
-Use Chrome runtime/tab messaging appropriately.
-
-The extension-side runtime must perform only local DOM operations.
-
-Supported actions should correspond to the actual BROWSER_ACTION_TYPES contract.
-
-At minimum implement:
-
-CLICK
-TYPE
-FILL
-SELECT
-SUBMIT
-SCROLL
-WAIT
-
-NAVIGATE must follow the existing navigation security rules and must not permit:
-javascript:
-data:
-file:
-blob:
-about:
-
-Do not bypass BrowserActionEngine validation.
-
-==================================================
-PART 3 — FIX FALSE SUCCESS
-==================================================
-
-BrowserActionEngine must NEVER return COMPLETED when no execution mechanism actually executed the action.
-
-If a required DOM driver is unavailable:
-
-return a deterministic failure such as:
-
-ok: false
-status: appropriate ACTION_RESULTS error
-actionType
-targetId
-
-with no secrets or PII.
-
-If domDriver.execute() returns failure, propagate a sanitized failure result.
-
-Do not silently swallow execution failures.
-
-Preserve the existing zero-secret-leakage guarantee.
-
-==================================================
-PART 4 — TARGET RESOLUTION
-==================================================
-
-Preserve existing stale-target protection.
-
-The action engine should resolve opaque target IDs against current page state.
-
-Do not introduce unsafe arbitrary selectors from remote reasoning unless they are explicitly allowed by the existing action contract.
-
-The content runtime should resolve only the validated target representation supplied by the action engine.
-
-Do not allow arbitrary JavaScript execution.
-
-==================================================
-PART 5 — SENSITIVE FORM FILLING
-==================================================
-
-Preserve Step 9 Vault isolation.
-
-Remote reasoning must NEVER receive raw secrets.
-
-Sensitive FILL actions must continue to:
-
-- require explicit authorization
-- require a vault reference
-- require purpose matching
-- require local destination
-- retrieve the secret only locally
-- inject it into the DOM locally
-- never place the raw secret into an action result
-- never log the raw secret
-
-Do not change this security model.
-
-==================================================
-PART 6 — CONNECT THE COORDINATOR
-==================================================
-
-BrowserAgentCoordinator must remain the orchestrator.
-
-It should:
-
-1. receive user task
-2. collect page representation
-3. detect PII
-4. determine task intent
-5. build sanitized payload
-6. send only sanitized payload to reasoning
-7. receive structured action proposals
-8. pass EVERY action through BrowserActionEngine
-9. have BrowserActionEngine use the DOM driver
-10. return sanitized execution results
-
-Do NOT let the coordinator directly manipulate the DOM.
-
-Do NOT let the reasoning provider execute actions.
-
-Do NOT duplicate Step 14 validation inside the coordinator.
-
-Inspect whether decidePrivacyPolicy is genuinely required in the orchestration flow. If existing Step 11/policy modules already enforce it, do not duplicate the logic merely to satisfy comments. Fix actual correctness, not superficial structure.
-
-==================================================
-PART 7 — CONNECT CHROME EXTENSION
-==================================================
-
-Update manifest.json only as necessary.
-
-The content script must include the action runtime.
-
-Preserve existing:
-- metadata capture
-- PII scanner
-- OCR
-- policy runtime
-
-Do not break current popup functionality.
-
-The extension should be able to receive action commands from the extension-side runtime and execute them against the active page.
-
-==================================================
-PART 8 — BUNDLE PRIVACY CORE WITH ESBUILD
-==================================================
-
-After the runtime architecture is correct, implement the bundling plan.
-
-Use ESBUILD unless the repository audit reveals a concrete incompatibility.
-
-Reason:
-This is a browser extension/runtime package, not a frontend application.
-The goal is a minimal, deterministic bundle with low configuration overhead.
-
-Add esbuild as a development dependency if necessary.
-
-Create an explicit build script/configuration.
-
-The bundle must include the required privacy-core runtime code instead of depending on Node/workspace package resolution inside Chrome.
-
-Do NOT bundle Node-only server code into the browser unless it is genuinely required.
-
-Pay particular attention to browser compatibility:
-
-- Buffer usage
-- node: imports
-- Node globals
-- filesystem APIs
-- server-only modules
-- remote backend modules
-
-If browser-compatible replacements are needed, use small explicit adapters rather than hacks.
-
-The resulting extension must load in Chrome without Node.js.
-
-==================================================
-PART 9 — SEPARATE BROWSER AND BACKEND RUNTIMES
-==================================================
-
-Do not accidentally bundle:
-
-services/reasoning-backend
-
-into the Chrome extension if it is intended to remain a backend.
-
-The browser bundle should contain only the client-side/privacy-core functionality needed locally.
-
-If MockTestTransport currently imports reasoningService directly, preserve it for Node tests but create a clean browser-safe transport boundary for the real extension.
-
-The architecture should be:
-
-Chrome extension
-    ↓
-SecureCommunicationClient
-    ↓
-HTTPS reasoning backend
-
-while tests may use:
-
-SecureCommunicationClient
-    ↓
-MockTestTransport
-    ↓
-Mock ReasoningService
-
-Do not confuse test transport with production browser transport.
-
-==================================================
-PART 10 — REAL EXTENSION ENTRYPOINT
-==================================================
-
-The extension currently has popup.js but does not appear to have a real agent orchestration entrypoint.
-
-Implement the minimum necessary mechanism so that the popup or extension background/service-worker layer can trigger an agent task.
-
-Do not invent a large UI.
-
-A simple flow is sufficient:
-
-Popup
-  ↓
-active tab
-  ↓
-request page representation
-  ↓
-agent coordinator
-  ↓
-reasoning
-  ↓
-action engine
-  ↓
-content script
-  ↓
 DOM
+↓
+DOM text extraction
+↓
+Text normalization/chunking
+↓
+Fast deterministic PII rules
+↓
+GLiNER local inference
+↓
+Unified PII detections
+↓
+Privacy policy engine
+↓
+DOM redaction/sanitization
+↓
+Sanitized DOM/context
+↓
+AI agent
 
-Use the existing architecture wherever possible.
+The detector should NOT directly make the final privacy decision.
 
-If a service worker/background script is necessary, add it cleanly and update manifest.json.
+Separate:
 
-==================================================
-PART 11 — TESTING
-==================================================
+### Detection
 
-Run all existing tests.
+"What PII exists?"
 
-At minimum run:
+from:
 
-npm test
+### Policy
+
+"Is this PII allowed for this task?"
+
+from:
+
+### Redaction
+
+"How should the DOM be modified?"
+
+---
+
+# 4. Hybrid detection
+
+Do not use GLiNER for obvious patterns if a deterministic rule is faster.
+
+Implement a hybrid detector.
+
+Use regex/rules for:
+
+* EMAIL
+* PHONE
+* CREDIT_CARD
+* IP_ADDRESS
+* URL where appropriate
+* obvious ID patterns where reliable
+
+Use GLiNER for semantic entities such as:
+
+* NAME
+* PERSON
+* ADDRESS
+* ORGANIZATION
+* LOCATION
+* PASSPORT_NUMBER where supported
+* NATIONAL_ID where supported
+* OTHER sensitive entities defined by our taxonomy
+
+The exact supported labels should be verified against the selected GLiNER model.
+
+---
+
+# 5. Normalize our PII taxonomy
+
+Create a mapping between GLiNER labels and our project's normalized PII classes.
+
+Use the project's existing taxonomy if one already exists.
+
+Do not invent a second incompatible taxonomy.
+
+For example:
+
+```text
+PERSON → NAME
+EMAIL → EMAIL
+PHONE_NUMBER → PHONE
+ADDRESS → ADDRESS
+CREDIT_CARD → CREDIT_CARD
+PASSPORT → PASSPORT
+```
+
+Document every mapping.
+
+---
+
+# 6. DOM extraction
+
+Implement a DOM extraction layer that identifies meaningful user-visible content.
+
+Handle at minimum:
+
+* text nodes
+* input values
+* textarea values
+* select values
+* contenteditable elements
+* relevant ARIA/accessibility text
+* labels associated with form fields
+
+Avoid blindly serializing the entire DOM.
+
+Do not send:
+
+* scripts
+* styles
+* irrelevant metadata
+* hidden implementation details
+
+unless they are genuinely required by the existing agent architecture.
+
+Preserve the relationship between detected text and its original DOM element.
+
+Example internal representation:
+
+```typescript
+interface DOMTextNode {
+  nodeId: string;
+  elementPath: string;
+  text: string;
+  source:
+    | "text"
+    | "input"
+    | "textarea"
+    | "select"
+    | "contenteditable"
+    | "aria";
+}
+```
+
+---
+
+# 7. Detection output
+
+Create a normalized interface such as:
+
+```typescript
+interface PIIDetection {
+  type: string;
+  value: string;
+  start: number;
+  end: number;
+  confidence: number;
+  source: "regex" | "gliner";
+  nodeId?: string;
+}
+```
+
+Example:
+
+```json
+{
+  "type": "EMAIL",
+  "value": "john@example.com",
+  "confidence": 0.98,
+  "source": "regex",
+  "nodeId": "node-42"
+}
+```
 
 and:
 
-node scripts/check-step14-actions.mjs
-node scripts/check-step15-reasoning.mjs
-node scripts/check-step16-secure-communication.mjs
-node scripts/check-step17-e2e.mjs
+```json
+{
+  "type": "NAME",
+  "value": "John Smith",
+  "confidence": 0.91,
+  "source": "gliner",
+  "nodeId": "node-17"
+}
+```
 
-If npm test does not exist, inspect package.json and use the actual configured test command.
+---
 
-Add focused tests for:
+# 8. Model loading
 
-1. CLICK execution through the DOM driver
-2. TYPE execution
-3. FILL execution
-4. SELECT execution
-5. SUBMIT execution
-6. SCROLL execution
-7. WAIT execution
-8. missing DOM driver → failure, NOT success
-9. DOM driver execution failure → failure
-10. stale target rejection
-11. remote destination rejection
-12. javascript: rejection
-13. sensitive action without authorization → rejection
-14. sensitive action with vault authorization → local execution
-15. raw secret absent from output
-16. raw secret absent from remote reasoning payload
-17. dangerous JavaScript rejection
-18. extension bundle builds successfully
+The model must be downloaded once and stored locally.
 
-==================================================
-PART 12 — EXTENSION BUILD VERIFICATION
-==================================================
+Do NOT download model weights every time a page is analyzed.
 
-After building:
+Implement:
 
-1. Verify output bundle files exist.
-2. Verify manifest references existing files.
-3. Verify no unresolved workspace imports remain.
-4. Verify browser bundle does not require Node.js.
-5. Verify extension can load in Chrome.
-6. Verify content scripts load without syntax/runtime errors.
-7. Verify a simple CLICK action actually changes the webpage.
-8. Verify a TYPE action actually changes a field.
-9. Verify FILL uses the local vault and does not expose the secret.
-10. Verify the action result reports actual execution status.
+```text
+Extension startup
+      ↓
+Check local model availability
+      ↓
+Load model
+      ↓
+Keep model available for inference
+```
 
-Do not claim browser execution works merely because unit tests pass.
+If browser storage is appropriate, use the existing extension architecture.
 
-==================================================
-PART 13 — SECURITY AUDIT
-==================================================
+If model files need to be bundled or served as extension assets, implement that correctly.
 
-After implementation, search the browser runtime for:
+Do not hard-code a remote inference endpoint.
 
-fetch(
-XMLHttpRequest
-WebSocket
-axios
-eval(
-new Function(
-javascript:
-rawPassword
-vaultSecret
-secretValue
-document.cookie
-localStorage
+---
 
-Classify each occurrence.
+# 9. Browser compatibility
 
-Do not blindly delete legitimate validation strings or test fixtures.
+Determine whether the selected GLiNER checkpoint can run using:
 
-Confirm:
+* ONNX Runtime Web
+* Transformers.js
+* WebAssembly
+* WebGPU
 
-RAW DOM
-RAW PII
-SCREENSHOTS
-OCR BUFFERS
-VAULT SECRETS
+Prefer the lightest practical browser-compatible approach.
 
-never cross the remote reasoning boundary.
+Do not introduce a Python server merely because the original GLiNER package is Python-based.
 
-==================================================
-PART 14 — DO NOT BREAK EXISTING SECURITY
-==================================================
+The target architecture is:
 
-Preserve:
+```text
+Chrome Extension
+      ↓
+Local JavaScript/TypeScript
+      ↓
+Local model runtime
+      ↓
+Local model weights
+      ↓
+PII detections
+```
 
-- Step 8 policy enforcement
-- Step 9 vault isolation
-- Step 11 sanitization boundary
-- Step 14 execution authority
-- Step 15 independent payload validation
-- Step 15 response validation
-- Step 16 secure communication validation
-- HTTPS enforcement
-- stale request protection
-- retry classification
-- zero-secret logging
-- zero-PII remote payload invariant
+No network request containing user DOM data should be required.
 
-Do not weaken validation simply to make tests pass.
+---
 
-If an existing test conflicts with the intended security architecture, explain the conflict before changing security behavior.
+# 10. Privacy guarantee
 
-==================================================
-PART 15 — FINAL DELIVERABLE
-==================================================
+Add a hard architectural guarantee:
 
-At the end provide:
+```text
+DOM data → local preprocessing → local PII model
+```
 
-1. Exact files created
-2. Exact files modified
-3. Why each file changed
-4. Build command
-5. Test command
-6. Test results
-7. Extension loading result
-8. Actual browser action execution result
-9. Remaining known limitations
-10. Security invariants verified
+not:
 
-Do NOT merely say "implemented successfully".
+```text
+DOM data → cloud API → PII model
+```
 
-Show evidence.
+Add comments/documentation explaining this privacy boundary.
 
-==================================================
-IMPORTANT DEVELOPMENT RULE
-==================================================
+If any dependency makes a network request during inference, identify it and eliminate or isolate it.
 
-Work incrementally.
+---
 
-First:
-AUDIT
+# 11. Redaction
 
-Then:
-FIX DOM DRIVER + ACTION RUNTIME
+Do not immediately destroy the original DOM.
 
-Then:
-FIX FALSE SUCCESS
+Implement a sanitization layer.
 
-Then:
-CONNECT COORDINATOR
+For example:
 
-Then:
-BUNDLE WITH ESBUILD
+Original:
 
-Then:
-RUN TESTS
+```text
+Name: John Smith
+Email: john@example.com
+Phone: +91 9876543210
+```
 
-Then:
-VERIFY CHROME EXTENSION
+After policy evaluation:
 
-Do not make unrelated refactors.
+```text
+Name: John Smith
+Email: john@example.com
+Phone: [REDACTED]
+```
 
-Do not replace working modules.
+The redaction layer must preserve:
 
-Do not create duplicate action engines.
+* DOM structure
+* element identity
+* non-sensitive text
+* form semantics
+* agent usability
 
-Do not bypass BrowserActionEngine.
+The agent should receive the sanitized representation, not the raw sensitive value.
 
-Do not put raw secrets into logs, messages, reasoning payloads, or test output.
+---
 
-The final architecture must have ONE execution authority:
+# 12. Policy engine
 
-BrowserActionEngine.
+Create or integrate with the existing policy engine.
 
-The browser content script is only the local execution mechanism.
+The model should NOT decide:
+
+```text
+PHONE = REDACT
+```
+
+based solely on its classification.
+
+Instead:
+
+```text
+PII Detection
++
+User Policy
++
+Agent Intent/Task Context
++
+Data necessity
+=
+Final Policy Decision
+```
+
+For the initial prototype, support policies such as:
+
+```text
+ALLOW
+REDACT
+ALLOW_IF_REQUIRED
+ALWAYS_REDACT
+```
+
+Example:
+
+```text
+PHONE
+Policy = ALLOW_IF_REQUIRED
+Task = Book flight
+Required = true
+→ ALLOW
+```
+
+Example:
+
+```text
+PASSPORT
+Policy = ALWAYS_REDACT
+→ REDACT
+```
+
+---
+
+# 13. Confidence thresholds
+
+Implement configurable confidence thresholds.
+
+For example:
+
+```typescript
+const GLINER_THRESHOLD = 0.5;
+```
+
+Do not hard-code the final value without benchmarking.
+
+Make it configurable so we can test:
+
+```text
+0.3
+0.4
+0.5
+0.6
+0.7
+```
+
+and determine the best precision/recall tradeoff.
+
+---
+
+# 14. Avoid duplicate detections
+
+If regex and GLiNER detect the same entity:
+
+```text
+EMAIL john@example.com
+```
+
+merge them into one detection.
+
+Define deterministic precedence rules.
+
+For example:
+
+```text
+Regex EMAIL
++
+GLiNER EMAIL
+→
+one EMAIL detection
+```
+
+Do not produce duplicate redactions.
+
+---
+
+# 15. Performance requirement
+
+This is specifically intended for a browser privacy middleware, so performance matters.
+
+Measure:
+
+1. Model loading time
+2. First inference latency
+3. Warm inference latency
+4. DOM extraction time
+5. Regex detection time
+6. GLiNER inference time
+7. Total sanitization time
+8. Memory usage if measurable
+
+Test with:
+
+* small DOM
+* medium DOM
+* large DOM
+* form-heavy DOM
+
+Example benchmark:
+
+```text
+100 DOM text nodes
+500 DOM text nodes
+1000 DOM text nodes
+5000 DOM text nodes
+```
+
+Report:
+
+```text
+DOM size
+Extraction ms
+Regex ms
+GLiNER ms
+Total ms
+```
+
+Do not claim that the model is "fast" without measuring it.
+
+---
+
+# 16. Accuracy evaluation
+
+Use the project's existing WebPII/PII dataset if available.
+
+Evaluate at minimum:
+
+```text
+Precision
+Recall
+F1
+False Positive Rate
+False Negative Rate
+```
+
+Evaluate each important entity type separately:
+
+```text
+NAME
+EMAIL
+PHONE
+ADDRESS
+PASSPORT
+CREDIT_CARD
+```
+
+Create a small test set specifically representing browser DOM content.
+
+Include examples such as:
+
+```html
+<label>Name</label>
+<input value="John Smith">
+
+<label>Email</label>
+<input value="john@example.com">
+
+<label>Phone</label>
+<input value="+91 9876543210">
+```
+
+Also test non-PII:
+
+```text
+Apple
+Google
+Delhi
+John Smith Restaurant
+Example Company
+```
+
+This is important because semantic NER models can generate false positives.
+
+---
+
+# 17. Unit tests
+
+Add tests for:
+
+### Detection
+
+```text
+Email detected
+Phone detected
+Name detected
+Address detected
+Credit card detected
+```
+
+### False positives
+
+```text
+Company name should not automatically become PERSON
+Normal number should not automatically become PHONE
+Normal text should not become ADDRESS
+```
+
+### Redaction
+
+```text
+PII is replaced
+non-PII remains unchanged
+DOM structure remains valid
+multiple PII entities are handled
+overlapping detections are handled
+```
+
+### Policy
+
+```text
+ALLOW → retained
+REDACT → sanitized
+ALWAYS_REDACT → sanitized
+ALLOW_IF_REQUIRED + required → retained
+ALLOW_IF_REQUIRED + unnecessary → sanitized
+```
+
+---
+
+# 18. Developer/debug mode
+
+Add a development-only debug output.
+
+Example:
+
+```text
+[PrivacyCore]
+DOM nodes: 142
+Regex detections: 4
+GLiNER detections: 3
+Merged detections: 6
+Redacted: 2
+Allowed: 4
+Inference: 38ms
+```
+
+Do NOT print actual sensitive values in production logs.
+
+For debug mode, mask values:
+
+```text
+PHONE: +91******3210
+EMAIL: jo***@example.com
+```
+
+---
+
+# 19. Failure handling
+
+The extension must remain functional if:
+
+* model fails to load
+* model inference fails
+* browser does not support the required runtime
+* DOM is extremely large
+* malformed DOM content is encountered
+
+Define a safe fallback policy.
+
+Do NOT silently send raw sensitive data to the external AI agent just because the model failed.
+
+The fallback should follow the existing project's privacy policy and fail-safe design.
+
+---
+
+# 20. Deliverables
+
+Implement all required code and provide:
+
+1. Exact model/checkpoint used.
+2. Exact source/download location.
+3. Model license.
+4. Model size.
+5. Browser inference runtime.
+6. Files added/modified.
+7. Installation/build instructions.
+8. How model weights are stored.
+9. How the extension loads the model.
+10. How DOM text reaches the model.
+11. Example detection output.
+12. Example redacted DOM.
+13. Unit tests.
+14. Benchmark results.
+15. Accuracy results.
+16. Known limitations.
+
+Also update the project documentation with a section:
+
+# Local DOM PII Detection
+
+Explain the complete flow:
+
+```text
+DOM
+ ↓
+Extraction
+ ↓
+Regex
+ ↓
+GLiNER
+ ↓
+Detection merging
+ ↓
+Policy engine
+ ↓
+Redaction
+ ↓
+Sanitized agent context
+```
+
+---
+
+# Important constraints
+
+* No cloud PII inference.
+* No external API for DOM analysis.
+* No sending raw DOM to a remote model.
+* Do not introduce a large LLM.
+* Do not use YOLO/ViT for normal DOM text.
+* Do not make GLiNER responsible for final allow/redact decisions.
+* Do not rewrite the existing architecture unnecessarily.
+* Do not claim browser compatibility until it is actually tested.
+* Do not claim performance until it is benchmarked.
+* Do not expose raw PII in logs.
+* Keep model loading and inference local.
+
+Start by inspecting the repository and determining the exact integration point. Then verify the current smallest practical GLiNER checkpoint and browser runtime before writing implementation code.

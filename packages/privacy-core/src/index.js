@@ -146,6 +146,38 @@ export {
   SecurityAuditUtility,
   createSecurityAuditUtility
 } from "./security-audit-utility.js";
+export {
+  extractDomTextNodes,
+  generateDomNodeId
+} from "./dom-extractor.js";
+export {
+  GLINER_MODEL_METADATA,
+  GLINER_TARGET_LABELS,
+  GLINER_TAXONOMY_MAP,
+  GLINER_CONFIG
+} from "./gliner-config.js";
+export {
+  GlinerAdapter,
+  glinerAdapter
+} from "./gliner-adapter.js";
+export {
+  HybridPiiDetector,
+  hybridPiiDetector
+} from "./hybrid-pii-detector.js";
+export {
+  redactTextString,
+  redactDomNodes
+} from "./dom-redactor.js";
+export {
+  YoloDetector,
+  yoloDetector,
+  YOLO_TARGET_CLASSES,
+  YOLO_CONFIG
+} from "./yolo-detector.js";
+export {
+  redactImageRegions,
+  REDACTION_STYLES
+} from "./image-redactor.js";
 
 
 

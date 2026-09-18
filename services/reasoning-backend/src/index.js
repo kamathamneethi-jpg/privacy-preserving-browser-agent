@@ -9,6 +9,7 @@ export { validateReasoningResponse } from "./response-validator.js";
 export {
   ReasoningService,
   MockTestReasoningProvider,
+  LlmReasoningProvider,
   createReasoningService,
   reasoningService
 } from "./reasoning-service.js";
