@@ -52,9 +52,13 @@ function cleanAttributes(attrs = {}) {
       continue;
     }
     if (typeof value === "string") {
-      cleaned[key] = value.length > SANITIZER_CONFIG.MAX_TEXT_LENGTH
-        ? value.slice(0, SANITIZER_CONFIG.MAX_TEXT_LENGTH)
-        : value;
+      let val = value;
+      if (/<script\b|eval\(|new Function\(|javascript:/i.test(val)) {
+        val = val.replace(/javascript:/gi, "#").replace(/eval\(.*?\)/gi, "[NEUTRALIZED_CODE]");
+      }
+      cleaned[key] = val.length > SANITIZER_CONFIG.MAX_TEXT_LENGTH
+        ? val.slice(0, SANITIZER_CONFIG.MAX_TEXT_LENGTH)
+        : val;
     } else if (typeof value === "number" || typeof value === "boolean") {
       cleaned[key] = value;
     }
@@ -274,6 +278,12 @@ export class SanitizedContextBuilder {
 
     // Pattern redaction on any remaining node text
     if (typeof nodeText === "string") {
+      if (/<script\b|eval\(|new Function\(|javascript:/i.test(nodeText)) {
+        nodeText = nodeText
+          .replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gi, "[SCRIPT_REMOVED]")
+          .replace(/eval\(.*?\)/gi, "[NEUTRALIZED_CODE]")
+          .replace(/javascript:/gi, "#");
+      }
       nodeText = nodeText
         .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[EMAIL_REDACTED]")
         .replace(/(?:\+?\d[\d(). -]{7,}\d)/g, "[PHONE_REDACTED]")
@@ -399,7 +409,9 @@ export class SanitizedContextBuilder {
       const candidatePayload = {
         status: SANITIZED_CONTEXT_STATUS.SANITIZED,
         version: CONTEXT_BUILDER_VERSION,
+        userTask: input.userTask ? String(input.userTask).slice(0, 500) : undefined,
         taskIntent: taskContext.taskIntent || "UNKNOWN",
+        interactiveElements: Array.isArray(input.interactiveElements) ? input.interactiveElements.slice(0, 100) : [],
         domTree: sanitizedDomTree || { tag: "empty" },
         visualBlocks: sanitizedVisualBlocks,
         tokenMapping,

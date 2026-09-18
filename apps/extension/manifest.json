@@ -7,10 +7,10 @@
     "default_title": "Privacy-Preserving Browser Agent",
     "default_popup": "popup.html"
   },
-  "permissions": ["activeTab"],
+  "permissions": ["activeTab", "storage", "scripting"],
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
+      "matches": ["http://*/*", "https://*/*", "<all_urls>"],
       "js": ["src/policy-runtime.js", "src/ocr-service.js", "src/content-pii.js", "src/content-metadata.js", "src/action-runtime.js"],
       "run_at": "document_idle"
     }

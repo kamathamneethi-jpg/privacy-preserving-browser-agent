@@ -14,22 +14,36 @@ import {
   BROWSER_ACTION_TYPES
 } from "../../shared-types/src/privacy-contracts.js";
 import { ACTION_CONFIG, validateNavigationProtocol } from "./action-config.js";
+import { interactiveElementRegistry } from "./interactive-element-registry.js";
 
 /**
  * Resolves a DOM element within the current document context safely.
  *
  * @param {string} targetId
  * @param {Document} [doc=document]
+ * @param {string} [snapshotId]
+ * @param {object} [registry]
  * @returns {Element|null}
  */
-export function resolveDomElement(targetId, doc = (typeof document !== "undefined" ? document : null)) {
-  if (!doc || !targetId || typeof targetId !== "string") return null;
+export function resolveDomElement(targetId, doc = (typeof document !== "undefined" ? document : null), snapshotId = null, registry = interactiveElementRegistry) {
+  if (!targetId || typeof targetId !== "string") return null;
 
-  // 1. Direct ID lookup
+  // 1. Check interactive element registry first (handles el_1, el_2, etc.)
+  const activeRegistry = registry || interactiveElementRegistry;
+  if (activeRegistry && typeof activeRegistry.resolveElement === "function") {
+    const registryLookup = activeRegistry.resolveElement(targetId, snapshotId);
+    if (registryLookup.resolved && registryLookup.element) {
+      return registryLookup.element;
+    }
+  }
+
+  if (!doc) return null;
+
+  // 2. Direct ID lookup
   const byId = doc.getElementById(targetId);
   if (byId) return byId;
 
-  // 2. Safe attribute lookup (data-testid, data-id, name)
+  // 3. Safe attribute lookup (data-testid, data-id, name)
   try {
     const escaped = typeof CSS !== "undefined" && typeof CSS.escape === "function"
       ? CSS.escape(targetId)
@@ -38,7 +52,7 @@ export function resolveDomElement(targetId, doc = (typeof document !== "undefine
     const byAttr = doc.querySelector(`[data-testid="${escaped}"], [data-id="${escaped}"], [name="${escaped}"]`);
     if (byAttr) return byAttr;
 
-    // 3. Fallback standard CSS selector if safe
+    // 4. Fallback standard CSS selector if safe
     if (!/[<>()\[\]'"`=]/.test(targetId)) {
       const byQuery = doc.querySelector(`#${escaped}`);
       if (byQuery) return byQuery;
@@ -58,6 +72,7 @@ export class DomDriver {
     this.config = { ...ACTION_CONFIG, ...customConfig };
     this.customExecutor = customConfig.executor || null;
     this.tabId = customConfig.tabId || null;
+    this.registry = customConfig.registry || interactiveElementRegistry;
     this.executionHistory = [];
   }
 
@@ -128,8 +143,9 @@ export class DomDriver {
       });
     }
 
-    // Real Browser DOM Execution
-    if (typeof document !== "undefined") {
+    // Real Browser DOM Execution or Registered Element Execution
+    const resolvedElement = resolveDomElement(targetId, undefined, undefined, this.registry);
+    if (typeof document !== "undefined" || resolvedElement) {
       return this._executeOnRealDom(actionType, targetId, parameters);
     }
 
@@ -218,50 +234,140 @@ export class DomDriver {
   }
 
   /**
-   * Internal execution against actual document DOM.
+   * Internal execution against actual document DOM or registered element.
    * @private
    */
   _executeOnRealDom(actionType, targetId, parameters) {
+    const safeDispatch = (element, type, detail = {}) => {
+      if (!element || typeof element.dispatchEvent !== "function") return;
+      try {
+        if (typeof Event !== "undefined") {
+          element.dispatchEvent(new Event(type, { bubbles: true, cancelable: true }));
+        } else {
+          element.dispatchEvent({ type, ...detail, bubbles: true, cancelable: true });
+        }
+      } catch {}
+    };
+
     try {
+      const getElement = (id) => resolveDomElement(id, undefined, undefined, this.registry);
+
       switch (actionType) {
         case BROWSER_ACTION_TYPES.CLICK: {
-          const element = resolveDomElement(targetId);
+          const element = getElement(targetId);
           if (!element) {
             return { ok: false, actionType, targetId, error: `Target element '${targetId}' not found in DOM.` };
           }
+          if (typeof element.focus === "function") element.focus();
           if (typeof element.click === "function") {
             element.click();
           } else {
-            element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+            safeDispatch(element, "click");
           }
           return { ok: true, actionType, targetId };
         }
 
         case BROWSER_ACTION_TYPES.TYPE: {
-          const element = resolveDomElement(targetId);
+          const element = getElement(targetId);
           if (!element) {
             return { ok: false, actionType, targetId, error: `Target element '${targetId}' not found in DOM.` };
           }
+          if (typeof element.focus === "function") element.focus();
           const text = typeof parameters.text === "string" ? parameters.text : (parameters.value || "");
           element.value = text;
-          element.dispatchEvent(new Event("input", { bubbles: true }));
-          element.dispatchEvent(new Event("change", { bubbles: true }));
+          safeDispatch(element, "input");
+          safeDispatch(element, "change");
           return { ok: true, actionType, targetId };
         }
 
+        case BROWSER_ACTION_TYPES.CLEAR: {
+          const element = getElement(targetId);
+          if (!element) {
+            return { ok: false, actionType, targetId, error: `Target element '${targetId}' not found in DOM.` };
+          }
+          if (typeof element.focus === "function") element.focus();
+          element.value = "";
+          safeDispatch(element, "input");
+          safeDispatch(element, "change");
+          return { ok: true, actionType, targetId };
+        }
+
+        case BROWSER_ACTION_TYPES.CHECK: {
+          const element = getElement(targetId);
+          if (!element) {
+            return { ok: false, actionType, targetId, error: `Target element '${targetId}' not found in DOM.` };
+          }
+          if (element.checked !== true) {
+            element.checked = true;
+            safeDispatch(element, "change");
+            safeDispatch(element, "click");
+          }
+          return { ok: true, actionType, targetId };
+        }
+
+        case BROWSER_ACTION_TYPES.UNCHECK: {
+          const element = getElement(targetId);
+          if (!element) {
+            return { ok: false, actionType, targetId, error: `Target element '${targetId}' not found in DOM.` };
+          }
+          if (element.checked !== false) {
+            element.checked = false;
+            safeDispatch(element, "change");
+            safeDispatch(element, "click");
+          }
+          return { ok: true, actionType, targetId };
+        }
+
+        case BROWSER_ACTION_TYPES.PRESS_KEY: {
+          const element = getElement(targetId) || (typeof document !== "undefined" ? document.activeElement || document.body : null);
+          const key = parameters.key || "Enter";
+          if (element) {
+            safeDispatch(element, "keydown", { key });
+            safeDispatch(element, "keypress", { key });
+            safeDispatch(element, "keyup", { key });
+            if (key === "Enter" && (element.tagName === "INPUT" || element.tagName === "BUTTON")) {
+              const form = element.form || element.closest?.("form");
+              if (form && typeof form.requestSubmit === "function") {
+                form.requestSubmit();
+              }
+            }
+          }
+          return { ok: true, actionType, targetId };
+        }
+
+        case BROWSER_ACTION_TYPES.GO_BACK: {
+          if (typeof window !== "undefined" && window.history && typeof window.history.back === "function") {
+            window.history.back();
+            return { ok: true, actionType, targetId: "window" };
+          }
+          return { ok: true, actionType, targetId: "window", simulated: true };
+        }
+
         case BROWSER_ACTION_TYPES.SELECT: {
-          const element = resolveDomElement(targetId);
+          const element = getElement(targetId);
           if (!element) {
             return { ok: false, actionType, targetId, error: `Target element '${targetId}' not found in DOM.` };
           }
           const val = parameters.value || parameters.option || "";
-          element.value = val;
-          element.dispatchEvent(new Event("change", { bubbles: true }));
+          // If select element, try matching value or option textContent
+          if (element.tagName === "SELECT" && Array.isArray(Array.from(element.options || []))) {
+            const match = Array.from(element.options).find(opt => 
+              opt.value === val || opt.textContent?.trim().toLowerCase() === String(val).trim().toLowerCase()
+            );
+            if (match) {
+              element.value = match.value;
+            } else {
+              element.value = val;
+            }
+          } else {
+            element.value = val;
+          }
+          safeDispatch(element, "change");
           return { ok: true, actionType, targetId };
         }
 
         case BROWSER_ACTION_TYPES.SUBMIT: {
-          const element = resolveDomElement(targetId);
+          const element = getElement(targetId);
           if (!element) {
             return { ok: false, actionType, targetId, error: `Target element '${targetId}' not found in DOM.` };
           }
@@ -272,23 +378,28 @@ export class DomDriver {
           } else if (typeof element.click === "function") {
             element.click();
           } else {
-            element.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+            safeDispatch(element, "submit");
           }
           return { ok: true, actionType, targetId };
         }
 
         case BROWSER_ACTION_TYPES.SCROLL: {
-          const scrollX = Number(parameters.scrollX) || 0;
-          const scrollY = Number(parameters.scrollY) || 0;
-          if (targetId && targetId !== "window" && targetId !== "document") {
+          let scrollX = Number(parameters.scrollX) || 0;
+          let scrollY = Number(parameters.scrollY) || 0;
+          const direction = String(parameters.direction || "").toLowerCase();
+          const amount = Number(parameters.amount) || 500;
+          if (direction === "down") scrollY = amount;
+          else if (direction === "up") scrollY = -amount;
+
+          if (targetId && targetId !== "window" && targetId !== "document" && targetId !== "page_root") {
             const element = resolveDomElement(targetId);
-            if (element && typeof element.scrollTo === "function") {
-              element.scrollTo({ left: scrollX, top: scrollY, behavior: "smooth" });
+            if (element && typeof element.scrollBy === "function") {
+              element.scrollBy({ left: scrollX, top: scrollY, behavior: "smooth" });
               return { ok: true, actionType, targetId };
             }
           }
-          if (typeof window !== "undefined" && typeof window.scrollTo === "function") {
-            window.scrollTo({ left: scrollX, top: scrollY, behavior: "smooth" });
+          if (typeof window !== "undefined" && typeof window.scrollBy === "function") {
+            window.scrollBy({ left: scrollX, top: scrollY, behavior: "smooth" });
           }
           return { ok: true, actionType, targetId };
         }

@@ -38,6 +38,37 @@ const nodeBuiltinsPlugin = {
   }
 };
 
+import fs from "node:fs";
+
+function loadEnvConfig() {
+  const envPath = resolve(rootDir, ".env");
+  const envVars = {};
+  if (fs.existsSync(envPath)) {
+    const lines = fs.readFileSync(envPath, "utf-8").split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const idx = trimmed.indexOf("=");
+      if (idx > 0) {
+        const key = trimmed.slice(0, idx).trim();
+        const val = trimmed.slice(idx + 1).trim();
+        envVars[key] = val;
+      }
+    }
+  }
+  return envVars;
+}
+
+const env = loadEnvConfig();
+const envDefines = {
+  "process.env.NODE_ENV": '"production"',
+  "process.env.GROQ_API_KEY": JSON.stringify(env.GROQ_API_KEY || process.env.GROQ_API_KEY || ""),
+  "process.env.GROQ_MODEL": JSON.stringify(env.GROQ_MODEL || process.env.GROQ_MODEL || "openai/gpt-oss-20b"),
+  "process.env.OPENROUTER_API_KEY": JSON.stringify(env.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY || ""),
+  "process.env.OPENROUTER_MODEL": JSON.stringify(env.OPENROUTER_MODEL || process.env.OPENROUTER_MODEL || "google/gemma-4-26b-a4b-it:free"),
+  "process.env.SECURE_TRANSPORT_MODE": JSON.stringify(env.SECURE_TRANSPORT_MODE || process.env.SECURE_TRANSPORT_MODE || "GROQ_TRANSPORT")
+};
+
 async function buildExtension() {
   console.log("Building Privacy-Preserving Browser Agent Chrome Extension...");
 
@@ -55,9 +86,7 @@ async function buildExtension() {
     platform: "browser",
     target: ["chrome110", "es2022"],
     plugins: [nodeBuiltinsPlugin],
-    define: {
-      "process.env.NODE_ENV": '"production"'
-    }
+    define: envDefines
   });
 
   // 3. Bundle Content Scripts (Perception + Semantics + OCR + ActionRuntime)
@@ -69,7 +98,8 @@ async function buildExtension() {
     outfile: resolve(distDir, "content-action-runtime.bundle.js"),
     platform: "browser",
     target: ["chrome110", "es2022"],
-    plugins: [nodeBuiltinsPlugin]
+    plugins: [nodeBuiltinsPlugin],
+    define: envDefines
   });
 
   // 4. Bundle Extension Popup UI Script
@@ -81,7 +111,8 @@ async function buildExtension() {
     outfile: resolve(distDir, "popup.bundle.js"),
     platform: "browser",
     target: ["chrome110", "es2022"],
-    plugins: [nodeBuiltinsPlugin]
+    plugins: [nodeBuiltinsPlugin],
+    define: envDefines
   });
 
   console.log("✔ Extension build completed successfully: files generated in apps/extension/dist/");

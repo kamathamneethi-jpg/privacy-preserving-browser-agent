@@ -49,7 +49,7 @@ export class BrowserAgentCoordinator {
    * @returns {object} { ok: boolean, state: string }
    */
   initialize() {
-    this.status = E2E_WORKFLOW_STATUS.UNINITIALIZED;
+    this.status = E2E_WORKFLOW_STATUS.READY;
     if (this.commClient.getClientStatus() !== SECURE_COMMUNICATION_STATUS.READY) {
       this.commClient.initialize();
     }
@@ -94,7 +94,9 @@ export class BrowserAgentCoordinator {
       const sanitizedResult = buildSanitizedReasoningPayload({
         domTree: pageStateOptions.domTree || { tagName: "body", children: [] },
         text: pageText,
+        userTask,
         taskIntent,
+        interactiveElements: pageStateOptions.interactiveElements || [],
         detectedPii: piiMatches
       });
 
@@ -115,7 +117,8 @@ export class BrowserAgentCoordinator {
       this.status = E2E_WORKFLOW_STATUS.REASONING;
       const transportStart = Date.now();
 
-      const commResult = await this.commClient.sendSanitizedPayload(sanitizedResult.payload);
+      const timeoutMs = taskRequest.timeoutMs || this.config.timeoutMs;
+      const commResult = await this.commClient.sendSanitizedPayload(sanitizedResult.payload, timeoutMs ? { timeoutMs } : {});
 
       this.benchmark.recordStepLatency("transportMs", Date.now() - transportStart);
       this.benchmark.recordStepLatency("reasoningMs", Date.now() - transportStart);
@@ -137,13 +140,32 @@ export class BrowserAgentCoordinator {
 
       const recommendedActions = commResult.recommendedActions || [];
       const executionResults = [];
+      let anyFailed = false;
+      let firstFailureError = null;
 
       this.status = E2E_WORKFLOW_STATUS.EXECUTING;
 
-      for (const actionProposal of recommendedActions) {
-        // EVERY action proposal MUST be validated and executed through Step 14 BrowserActionEngine!
+      for (let i = 0; i < recommendedActions.length; i++) {
+        const actionProposal = recommendedActions[i];
+
+        // Dependent Action Protection: If previous required action failed, halt subsequent actions
+        if (anyFailed) {
+          executionResults.push(Object.freeze({
+            ok: false,
+            status: ACTION_RESULTS.NOT_EXECUTED,
+            actionType: actionProposal.actionType || "UNKNOWN",
+            targetId: actionProposal.target?.id || actionProposal.target?.elementId || "unresolved",
+            error: "Execution halted: dependent preceding action failed."
+          }));
+          continue;
+        }
+
         const actionResult = this.actionEngine.executeAction(actionProposal, {
-          pageState: { nodes: pageStateOptions.nodes || [{ id: actionProposal.target?.id }] },
+          pageState: {
+            interactiveElements: pageStateOptions.interactiveElements,
+            snapshotId: pageStateOptions.snapshotId,
+            nodes: pageStateOptions.nodes || (pageStateOptions.interactiveElements ? [] : undefined)
+          },
           policyItem: pageStateOptions.policyItem,
           vaultSecret: pageStateOptions.vaultSecret
         });
@@ -152,20 +174,30 @@ export class BrowserAgentCoordinator {
           this.benchmark.recordSuccessfulAction();
         } else {
           this.benchmark.recordDeniedAction();
+          anyFailed = true;
+          firstFailureError = actionResult.error || actionResult.status || "Action failed execution.";
         }
 
         executionResults.push(actionResult);
       }
 
       this.benchmark.recordStepLatency("actionExecutionMs", Date.now() - actionStart);
-      this.status = E2E_WORKFLOW_STATUS.COMPLETED;
+
+      const successfulCount = executionResults.filter(r => r.ok && r.status === ACTION_RESULTS.COMPLETED).length;
+      const failedCount = executionResults.filter(r => !r.ok || r.status !== ACTION_RESULTS.COMPLETED).length;
+
+      const isWorkflowSuccess = !anyFailed && (recommendedActions.length === 0 || successfulCount > 0);
+      this.status = isWorkflowSuccess ? E2E_WORKFLOW_STATUS.COMPLETED : E2E_WORKFLOW_STATUS.DENIED;
 
       return Object.freeze({
-        ok: true,
-        status: E2E_WORKFLOW_STATUS.COMPLETED,
+        ok: isWorkflowSuccess,
+        status: this.status,
         taskIntent,
         recommendedActionsCount: recommendedActions.length,
+        successfulActionsCount: successfulCount,
+        failedActionsCount: failedCount,
         executionResults: Object.freeze(executionResults),
+        error: isWorkflowSuccess ? undefined : (firstFailureError || "One or more browser actions failed."),
         metrics: this.benchmark.endBenchmark()
       });
     } catch (err) {

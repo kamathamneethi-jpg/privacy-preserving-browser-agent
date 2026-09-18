@@ -1,0 +1,14 @@
+# WebPII YOLO11n Fine-Tuning & Evaluation Requirements
+# Standard cross-platform dependencies (CPU on Mac, CUDA on RTX Laptop)
+
+ultralytics>=8.3.0
+torch>=2.0.0
+torchvision>=0.15.0
+pyyaml>=6.0
+
+# NOTE FOR NVIDIA RTX GPU USERS:
+# If you are setting up on an NVIDIA RTX laptop, ensure you install the CUDA-enabled PyTorch build
+# matching your installed CUDA toolkit / drivers, for example:
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# or
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118

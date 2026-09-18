@@ -49,6 +49,7 @@ export function getUtf8ByteLength(str) {
 import { validateRemotePayload } from "../../../services/reasoning-backend/src/payload-validator.js";
 import { validateReasoningResponse } from "../../../services/reasoning-backend/src/response-validator.js";
 import { reasoningService } from "../../../services/reasoning-backend/src/reasoning-service.js";
+import { OpenRouterProvider, GroqProvider } from "../../../services/reasoning-backend/src/model-provider.js";
 
 /**
  * Mock Transport for Node.js automated testing.
@@ -77,6 +78,69 @@ export class MockTestTransport {
     };
   }
 }
+
+/**
+ * OpenRouter Transport for agent reasoning via OpenRouter API (Gemma 4 26B A4B).
+ * Transmits Step 11 sanitized payloads to OpenRouter using OpenAI-compatible completion format.
+ */
+export class OpenRouterTransport {
+  constructor(config = {}) {
+    this.transportType = SECURE_TRANSPORT_TYPES.OPENROUTER_TRANSPORT;
+    this.provider = config.provider || new OpenRouterProvider(config);
+  }
+
+  async sendRequest(requestEnvelope, options = {}) {
+    const { correlationId, timestamp, sanitizedPayload } = requestEnvelope;
+    const response = await this.provider.processRequest(sanitizedPayload, options);
+
+    return {
+      ok: response.ok,
+      status: response.status || (response.ok ? 200 : 400),
+      statusCode: response.ok ? 200 : 400,
+      error: response.error,
+      recommendedActions: response.recommendedActions || [],
+      reasoningSummary: response.reasoningSummary || "",
+      metadata: {
+        transportType: this.transportType,
+        providerType: this.provider.providerType,
+        correlationId,
+        timestamp: Date.now()
+      }
+    };
+  }
+}
+
+/**
+ * Groq Transport for ultra-low latency agent reasoning via Groq Cloud API (e.g. openai/gpt-oss-20b).
+ * Transmits Step 11 sanitized payloads to Groq API using OpenAI-compatible completion format.
+ */
+export class GroqTransport {
+  constructor(config = {}) {
+    this.transportType = SECURE_TRANSPORT_TYPES.GROQ_TRANSPORT;
+    this.provider = config.provider || new GroqProvider(config);
+  }
+
+  async sendRequest(requestEnvelope, options = {}) {
+    const { correlationId, timestamp, sanitizedPayload } = requestEnvelope;
+    const response = await this.provider.processRequest(sanitizedPayload, options);
+
+    return {
+      ok: response.ok,
+      status: response.status || (response.ok ? 200 : 400),
+      statusCode: response.ok ? 200 : 400,
+      error: response.error,
+      recommendedActions: response.recommendedActions || [],
+      reasoningSummary: response.reasoningSummary || "",
+      metadata: {
+        transportType: this.transportType,
+        providerType: this.provider.providerType,
+        correlationId,
+        timestamp: Date.now()
+      }
+    };
+  }
+}
+
 
 /**
  * Modular Secure Communication Client Class
@@ -273,13 +337,14 @@ export class SecureCommunicationClient {
       try {
         this.status = SECURE_COMMUNICATION_STATUS.TRANSMITTING;
 
+        const timeoutMs = Number(options.timeoutMs ?? this.config.REQUEST_TIMEOUT_MS);
         transportResult = await Promise.race([
-          this.transport.sendRequest(requestEnvelope, { headers: authHeaders, endpointUrl: activeEndpoint }),
+          this.transport.sendRequest(requestEnvelope, { headers: authHeaders, endpointUrl: activeEndpoint, timeoutMs }),
           new Promise((_, reject) => setTimeout(() => {
             const timeoutErr = new Error("Transport request timeout.");
             timeoutErr.statusCode = 408; // 408 Request Timeout is retryable
             reject(timeoutErr);
-          }, this.config.REQUEST_TIMEOUT_MS))
+          }, timeoutMs))
         ]);
 
         if (transportResult && (transportResult.ok || transportResult.statusCode === 200)) {
@@ -287,10 +352,11 @@ export class SecureCommunicationClient {
         }
 
         const statusCode = Number(transportResult?.statusCode || 500);
+        const errorMessage = transportResult?.error || `Transport status code '${statusCode}'.`;
 
         // NEVER retry non-retryable status codes (400, 401, 403, 422) or security errors
         if (this.config.NON_RETRYABLE_STATUS_CODES.includes(statusCode)) {
-          lastError = new Error(`Non-retryable transport status code '${statusCode}'.`);
+          lastError = new Error(errorMessage);
           break;
         }
 
@@ -300,7 +366,7 @@ export class SecureCommunicationClient {
           continue;
         }
 
-        lastError = new Error(`Transport returned error status code '${statusCode}'.`);
+        lastError = new Error(errorMessage);
         break;
       } catch (err) {
         const isTimeout = err.message?.includes("timeout") || err.statusCode === 408;

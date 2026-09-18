@@ -34,3 +34,22 @@ export const REASONING_CONFIG = Object.freeze({
     "authorizationtoken"
   ])
 });
+
+export const OPENROUTER_CONFIG = Object.freeze({
+  PROVIDER_NAME: "openrouter",
+  DEFAULT_MODEL: "google/gemma-4-26b-a4b",
+  API_URL: "https://openrouter.ai/api/v1/chat/completions",
+  REQUEST_TIMEOUT_MS: 30000,
+  DEFAULT_TEMPERATURE: 0.1,
+  MAX_TOKENS: 1024
+});
+
+export const GROQ_CONFIG = Object.freeze({
+  PROVIDER_NAME: "groq",
+  DEFAULT_MODEL: "openai/gpt-oss-20b",
+  API_URL: "https://api.groq.com/openai/v1/chat/completions",
+  REQUEST_TIMEOUT_MS: 20000,
+  DEFAULT_TEMPERATURE: 0.1,
+  MAX_TOKENS: 1024
+});
+

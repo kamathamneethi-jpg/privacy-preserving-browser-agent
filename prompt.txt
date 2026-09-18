@@ -244,8 +244,605 @@ Example:
   "nodeId": "node-42"
 }
 ```
+=======
+I am preparing a YOLO object-detection training project on my Mac.
+The actual training will NOT happen on this Mac.
 
-and:
+I will copy the finished project and dataset to a friend's NVIDIA RTX laptop.
+Your job is to create a robust, portable training project that can be executed on the RTX laptop with minimal/no manual fixes.
+
+IMPORTANT:
+DO NOT START MODEL TRAINING.
+DO NOT RUN A TRAINING EPOCH.
+DO NOT DOWNLOAD OR REGENERATE THE DATASET.
+DO NOT MODIFY THE DATASET.
+DO NOT CHANGE THE CLASS TAXONOMY.
+DO NOT MERGE TRAIN AND TEST.
+DO NOT ADD ViT.
+DO NOT ADD Visual Mamba.
+DO NOT ADD OCR.
+DO NOT add any other model.
+
+For now the ONLY model is pretrained YOLO11n.
+
+============================================================
+PROJECT ROOT
+============================================================
+
+The project root is:
+
+~/Desktop/sih
+
+The WebPII YOLO dataset is already present at:
+
+~/Desktop/sih/datasets/webpii_yolo
+
+Do NOT create another copy of the dataset.
+
+============================================================
+DATASET
+============================================================
+
+The dataset is already converted to YOLO object-detection format.
+
+Structure:
+
+datasets/
+└── webpii_yolo/
+    ├── images/
+    │   ├── train/
+    │   └── test/
+    │
+    ├── labels/
+    │   ├── train/
+    │   └── test/
+    │
+    └── data.yaml
+
+Dataset statistics:
+
+TRAIN:
+40,384 images
+40,384 label files
+469,135 annotations
+
+TEST:
+4,481 images
+4,481 label files
+51,715 annotations
+
+The dataset has already been verified for matching image/label counts.
+
+The test split MUST remain completely separate from training.
+
+For YOLO, data.yaml currently uses:
+
+train: images/train
+val: images/test
+
+This is intentional for the current baseline.
+
+DO NOT create a new random validation split.
+
+============================================================
+16 CLASSES
+============================================================
+
+The exact class IDs are:
+
+0  NAME
+1  EMAIL
+2  PHONE
+3  ADDRESS
+4  LOCATION
+5  POSTCODE
+6  DATE_OF_BIRTH
+7  PAYMENT_CARD
+8  SECURITY_CODE
+9  USERNAME
+10 PASSWORD
+11 PROMO_CODE
+12 GIFT_CODE
+13 COMPANY
+14 COUNTRY
+15 OTHER_PII
+
+Do NOT:
+
+- rename classes
+- reorder classes
+- remove classes
+- merge classes
+- create new classes
+- change class IDs
+
+The existing annotations were generated using these 16 classes.
+
+============================================================
+MODEL
+============================================================
+
+For this experiment use ONLY:
+
+YOLO11n
+
+Use the pretrained:
+
+yolo11n.pt
+
+This is NOT training from scratch.
+
+The experiment is:
+
+pretrained YOLO11n
+        ↓
+fine-tuning on WebPII
+        ↓
+16-class PII detector
+
+Do not use a larger YOLO model.
+
+Do not use YOLO11s/m/l/x.
+
+Do not use YOLOv8.
+
+Do not use YOLOv10.
+
+Do not use custom model architecture.
+
+The model should start from pretrained yolo11n.pt weights.
+
+============================================================
+GOAL
+============================================================
+
+Create a reliable training/evaluation project.
+
+The Mac is ONLY used to:
+
+1. Write the code.
+2. Validate dataset structure.
+3. Validate Python syntax.
+4. Validate configuration.
+5. Validate that the scripts can import required packages.
+6. Perform CPU-only dry runs that DO NOT train the model.
+7. Package the project for the RTX laptop.
+
+The RTX laptop will be used for:
+
+1. Actual GPU training.
+2. Validation.
+3. Final test evaluation.
+
+============================================================
+FILES TO CREATE
+============================================================
+
+Create:
+
+sih/
+├── datasets/
+│   └── webpii_yolo/
+│       ├── images/
+│       │   ├── train/
+│       │   └── test/
+│       ├── labels/
+│       │   ├── train/
+│       │   └── test/
+│       └── data.yaml
+│
+├── scripts/
+│   ├── verify_dataset.py
+│   ├── check_environment.py
+│   ├── train_yolo.py
+│   └── evaluate_yolo.py
+│
+├── requirements.txt
+│
+└── README.md
+
+Do not create unnecessary dataset copies.
+
+============================================================
+1. verify_dataset.py
+============================================================
+
+Create:
+
+scripts/verify_dataset.py
+
+This script MUST NOT train anything.
+
+It must verify:
+
+A. Dataset root exists.
+
+B. data.yaml exists.
+
+C. images/train exists.
+
+D. images/test exists.
+
+E. labels/train exists.
+
+F. labels/test exists.
+
+G. Count train images.
+
+Expected:
+
+40,384
+
+H. Count train labels.
+
+Expected:
+
+40,384
+
+I. Count test images.
+
+Expected:
+
+4,481
+
+J. Count test labels.
+
+Expected:
+
+4,481
+
+K. Verify every train image has a corresponding label.
+
+L. Verify every train label has a corresponding image.
+
+M. Verify every test image has a corresponding label.
+
+N. Verify every test label has a corresponding image.
+
+O. Read data.yaml.
+
+P. Verify exactly 16 classes.
+
+Q. Verify class IDs are 0 through 15.
+
+R. Verify names exactly match:
+
+NAME
+EMAIL
+PHONE
+ADDRESS
+LOCATION
+POSTCODE
+DATE_OF_BIRTH
+PAYMENT_CARD
+SECURITY_CODE
+USERNAME
+PASSWORD
+PROMO_CODE
+GIFT_CODE
+COMPANY
+COUNTRY
+OTHER_PII
+
+S. Inspect label files.
+
+Every non-empty label line must contain exactly:
+
+5 values
+
+in the form:
+
+class_id x_center y_center width height
+
+T. Verify class IDs are integers from 0 to 15.
+
+U. Verify normalized coordinates are within valid YOLO ranges.
+
+For x_center, y_center, width, height:
+
+0 <= value <= 1
+
+V. Detect malformed label files.
+
+W. Report the first few problematic files if errors exist.
+
+X. Do NOT modify any files.
+
+The final output should clearly say:
+
+DATASET VERIFICATION PASSED
+
+or:
+
+DATASET VERIFICATION FAILED
+
+If it fails, exit with a non-zero status.
+
+============================================================
+2. check_environment.py
+============================================================
+
+Create:
+
+scripts/check_environment.py
+
+This script must NOT train.
+
+It should report:
+
+Python version
+
+PyTorch version if installed
+
+Torchvision version if installed
+
+Ultralytics version if installed
+
+CUDA availability
+
+CUDA version if available
+
+GPU name if available
+
+GPU count if available
+
+GPU memory if available
+
+Operating system
+
+CPU architecture
+
+It must work on BOTH:
+
+- Mac
+- NVIDIA RTX laptop
+
+On the Mac it is acceptable to report:
+
+CUDA available: False
+
+because the Mac does not have NVIDIA CUDA.
+
+The script must NOT treat the absence of CUDA on the Mac as a failure.
+
+However, if this script is run on the RTX laptop and CUDA is unavailable, clearly report:
+
+WARNING: NVIDIA CUDA is not available.
+
+Do not automatically train on CPU.
+
+============================================================
+3. train_yolo.py
+============================================================
+
+Create:
+
+scripts/train_yolo.py
+
+This is the actual training script.
+
+BUT:
+
+It must NEVER automatically start training merely because the script is imported or inspected.
+
+Training must happen only when the user explicitly executes:
+
+python scripts/train_yolo.py
+
+The script must use:
+
+from ultralytics import YOLO
+
+model = YOLO("yolo11n.pt")
+
+Use the local dataset:
+
+datasets/webpii_yolo/data.yaml
+
+Do NOT use:
+
+/content/drive/MyDrive/...
+
+That was the old Google Colab path.
+
+Use relative paths based on the project root so the project remains portable.
+
+============================================================
+TRAINING CONFIGURATION
+============================================================
+
+Default training parameters:
+
+model:
+yolo11n.pt
+
+data:
+datasets/webpii_yolo/data.yaml
+
+epochs:
+50
+
+imgsz:
+640
+
+batch:
+16
+
+device:
+0
+
+workers:
+4
+
+pretrained:
+True
+
+cache:
+False
+
+patience:
+10
+
+project:
+training
+
+name:
+webpii_16class_yolo11n
+
+Use mixed precision / AMP if supported by Ultralytics.
+
+Do NOT use dataset caching because the dataset is large and the RTX laptop may have limited storage.
+
+============================================================
+COMMAND LINE ARGUMENTS
+============================================================
+
+train_yolo.py must support:
+
+--batch
+
+--epochs
+
+--imgsz
+
+--workers
+
+--device
+
+--name
+
+Examples:
+
+python scripts/train_yolo.py --batch 16
+
+python scripts/train_yolo.py --batch 8
+
+python scripts/train_yolo.py --batch 4
+
+python scripts/train_yolo.py --batch 16 --epochs 50
+
+Defaults should remain:
+
+batch = 16
+epochs = 50
+imgsz = 640
+workers = 4
+device = 0
+
+============================================================
+GPU SAFETY
+============================================================
+
+Before training starts, perform environment checks.
+
+If running on the RTX laptop:
+
+Verify:
+
+torch.cuda.is_available()
+
+If CUDA is unavailable:
+
+DO NOT silently fall back to CPU.
+
+Instead stop and print:
+
+CUDA/NVIDIA GPU was not detected.
+Training was NOT started.
+Install the correct NVIDIA/PyTorch environment and try again.
+
+If the selected device is GPU 0, verify that GPU 0 exists.
+
+Print:
+
+GPU:
+GPU name:
+GPU memory:
+
+BEFORE TRAINING STARTS.
+
+============================================================
+CRITICAL TRAINING SAFETY
+============================================================
+
+Do not start training during:
+
+- import
+- validation
+- dataset checking
+- README generation
+- syntax checking
+- environment checking
+
+Training only begins after the user explicitly runs:
+
+python scripts/train_yolo.py
+
+Do not put training code at module import level.
+
+Use:
+
+if __name__ == "__main__":
+
+properly.
+
+============================================================
+OUTPUT
+============================================================
+
+Training outputs should be stored under:
+
+training/
+
+Use:
+
+training/webpii_16class_yolo11n/
+
+Expected:
+
+training/
+└── webpii_16class_yolo11n/
+    ├── weights/
+    │   ├── best.pt
+    │   └── last.pt
+    ├── results.csv
+    ├── results.png
+    └── other Ultralytics outputs
+
+Do not overwrite an existing completed experiment.
+
+If the output directory already exists, either:
+
+1. automatically create a unique run name, OR
+2. stop and ask the user.
+
+Do not silently destroy an existing experiment.
+
+============================================================
+4. evaluate_yolo.py
+============================================================
+
+Create:
+
+scripts/evaluate_yolo.py
+
+This script must NOT train.
+
+It should load:
+
+training/webpii_16class_yolo11n/weights/best.pt
+
+and evaluate against:
+
+datasets/webpii_yolo/data.yaml
+
+The test/validation path comes from:
+
+val: images/test
+
+The script must clearly state that the test split is being used.
+
+Report:
 
 ```json
 {
@@ -730,3 +1327,366 @@ Sanitized agent context
 * Keep model loading and inference local.
 
 Start by inspecting the repository and determining the exact integration point. Then verify the current smallest practical GLiNER checkpoint and browser runtime before writing implementation code.
+=======
+overall precision
+
+overall recall
+
+mAP50
+
+mAP50-95
+
+per-class precision
+
+per-class recall
+
+per-class AP50
+
+per-class AP50-95
+
+Use the exact 16 class names.
+
+Save evaluation results under:
+
+training/webpii_16class_yolo11n/evaluation/
+
+Do not modify the test dataset.
+
+============================================================
+5. ERROR HANDLING
+============================================================
+
+All scripts should fail clearly rather than producing misleading results.
+
+Examples:
+
+If dataset is missing:
+
+ERROR: WebPII dataset not found.
+
+If data.yaml is missing:
+
+ERROR: data.yaml not found.
+
+If yolo11n.pt is missing:
+
+Clearly explain that Ultralytics needs to download the pretrained weights.
+
+If Ultralytics is missing:
+
+Clearly say:
+
+pip install -r requirements.txt
+
+If CUDA is unavailable during training:
+
+STOP.
+
+Do not train on CPU.
+
+If GPU memory is insufficient:
+
+Explain that the user should retry with:
+
+--batch 8
+
+or:
+
+--batch 4
+
+Do not silently change the batch size.
+
+If a label is malformed:
+
+report the file.
+
+If class IDs are invalid:
+
+report the file and class ID.
+
+If train/test paths are invalid:
+
+stop.
+
+============================================================
+6. REQUIREMENTS
+============================================================
+
+Create requirements.txt.
+
+It should include the minimum packages required for:
+
+- Ultralytics YOLO
+- PyTorch
+- torchvision
+- PyYAML
+
+Do not blindly pin a CUDA-specific PyTorch wheel in requirements.txt if that makes the project incompatible with the RTX laptop's installed CUDA environment.
+
+The README must explain that the NVIDIA-compatible PyTorch installation may need to be installed according to the RTX laptop's CUDA/PyTorch compatibility.
+
+Do not install CUDA packages on the Mac.
+
+============================================================
+7. MAC VALIDATION
+============================================================
+
+After creating the scripts, DO NOT TRAIN.
+
+Run only:
+
+python -m py_compile scripts/verify_dataset.py
+python -m py_compile scripts/check_environment.py
+python -m py_compile scripts/train_yolo.py
+python -m py_compile scripts/evaluate_yolo.py
+
+Fix ALL syntax errors.
+
+Then run:
+
+python scripts/check_environment.py
+
+Then run:
+
+python scripts/verify_dataset.py
+
+The dataset verification must pass.
+
+DO NOT run:
+
+python scripts/train_yolo.py
+
+on the Mac.
+
+============================================================
+8. DRY RUN REQUIREMENT
+============================================================
+
+Create a safe validation mode for train_yolo.py:
+
+--dry-run
+
+Example:
+
+python scripts/train_yolo.py --dry-run
+
+When --dry-run is used:
+
+- load the configuration
+- verify the dataset
+- verify model configuration
+- verify required packages
+- verify GPU status
+- print the exact training configuration
+- DO NOT start training
+- DO NOT execute an epoch
+- DO NOT modify the dataset
+
+The script must clearly output:
+
+DRY RUN COMPLETE
+TRAINING WAS NOT STARTED
+
+The dry run should be safe to execute on the Mac.
+
+If CUDA is unavailable during dry run, do not fail merely because it is a Mac.
+
+Instead report:
+
+CUDA unavailable on this machine.
+GPU training validation must be performed on the RTX laptop.
+
+============================================================
+9. RTX PRE-FLIGHT MODE
+============================================================
+
+Also support:
+
+python scripts/train_yolo.py --preflight
+
+This mode is intended to run on the RTX laptop BEFORE training.
+
+It must:
+
+- check Python
+- check PyTorch
+- check CUDA
+- check GPU
+- check GPU memory
+- check Ultralytics
+- check dataset
+- check data.yaml
+- check yolo11n.pt availability/downloadability
+- check output directory
+- print training configuration
+
+Then STOP.
+
+It must NOT train.
+
+Output:
+
+PRE-FLIGHT PASSED
+TRAINING WAS NOT STARTED
+
+If anything is wrong:
+
+PRE-FLIGHT FAILED
+TRAINING WAS NOT STARTED
+
+============================================================
+10. README
+============================================================
+
+Create a detailed README.md.
+
+Explain:
+
+A. What the project does.
+
+B. This experiment uses:
+
+YOLO11n pretrained weights.
+
+C. It is fine-tuning, NOT training from scratch.
+
+D. Dataset:
+
+WebPII.
+
+E. 16 PII classes.
+
+F. Train/test counts.
+
+G. Mac preparation workflow.
+
+H. RTX laptop workflow.
+
+Include exact commands.
+
+MAC:
+
+cd ~/Desktop/sih
+
+python scripts/check_environment.py
+
+python scripts/verify_dataset.py
+
+python scripts/train_yolo.py --dry-run
+
+DO NOT TRAIN ON MAC.
+
+RTX:
+
+cd /path/to/sih
+
+python scripts/check_environment.py
+
+python scripts/verify_dataset.py
+
+python scripts/train_yolo.py --preflight
+
+If preflight passes:
+
+python scripts/train_yolo.py --batch 16
+
+If CUDA out-of-memory:
+
+python scripts/train_yolo.py --batch 8
+
+If still out-of-memory:
+
+python scripts/train_yolo.py --batch 4
+
+Evaluation:
+
+python scripts/evaluate_yolo.py
+
+Explain:
+
+best.pt
+
+is the main trained model.
+
+============================================================
+11. FINAL PROJECT CHECK
+============================================================
+
+After creating all files, perform these checks on the Mac:
+
+1. Python syntax check.
+
+2. Import check.
+
+3. Dataset verification.
+
+4. data.yaml verification.
+
+5. Dry run.
+
+6. Check that no script automatically starts training.
+
+7. Check that all paths are portable.
+
+8. Check that no path contains:
+
+/content/drive/
+
+9. Check that train and test remain separate.
+
+10. Check that exactly 16 classes are used.
+
+11. Check that class IDs remain unchanged.
+
+12. Check that no dataset files were modified.
+
+13. Check that no unnecessary dataset copy was created.
+
+14. Check that training requires explicit execution.
+
+============================================================
+12. IMPORTANT: DO NOT HIDE ERRORS
+============================================================
+
+If you encounter an error while developing the scripts:
+
+DO NOT simply remove the check.
+
+DO NOT suppress the exception.
+
+DO NOT use try/except to hide failures.
+
+DO NOT silently change the dataset.
+
+DO NOT silently change class IDs.
+
+DO NOT silently change batch size.
+
+DO NOT silently switch to CPU.
+
+Fix the actual problem.
+
+After fixing it, rerun the relevant validation.
+
+============================================================
+13. FINAL RESPONSE
+============================================================
+
+After implementing everything, report:
+
+1. Files created.
+2. Files modified.
+3. Dataset verification result.
+4. Python syntax result.
+5. Import result.
+6. Dry-run result.
+7. Whether any training was started.
+
+Training MUST say:
+
+NOT STARTED
+
+Then give me the exact commands I should give my friend for the RTX laptop.
+
+Do not tell me training succeeded because training has NOT been run yet.
+>>>>>>> 9696b4d2652a9bcaf9c72fb1031135954769424f

@@ -111,6 +111,11 @@ export {
   resolveDomElement
 } from "./dom-driver.js";
 export {
+  InteractiveElementRegistry,
+  createInteractiveElementRegistry,
+  interactiveElementRegistry
+} from "./interactive-element-registry.js";
+export {
   BrowserActionEngine,
   createBrowserActionEngine,
   browserActionEngine,
@@ -125,6 +130,8 @@ export {
 export {
   SecureCommunicationClient,
   MockTestTransport,
+  OpenRouterTransport,
+  GroqTransport,
   createSecureCommunicationClient,
   secureCommunicationClient
 } from "./secure-communication-client.js";
