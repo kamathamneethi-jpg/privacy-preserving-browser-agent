@@ -405,14 +405,30 @@
 
   if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-      if (message?.type === "SCAN_LOCAL_PII") {
-        sendResponse({ ok: true, summary: scanPage() });
+      if (message?.type === "SCAN_LOCAL_PII" || message?.type === "DETECT_AND_LOCALIZE_PAGE_PII") {
+        try {
+          const summary = scanPage();
+          sendResponse({ ok: true, summary });
+        } catch (err) {
+          sendResponse({ ok: false, error: err.message || "Failed to scan page PII." });
+        }
+        return true;
       } else if (message?.type === "CLEAR_LOCAL_HIGHLIGHTS") {
-        clearLocalHighlights();
-        sendResponse({ ok: true });
+        try {
+          clearLocalHighlights();
+          sendResponse({ ok: true });
+        } catch (err) {
+          sendResponse({ ok: false, error: err.message });
+        }
+        return true;
       } else if (message?.type === "HIGHLIGHT_LOCAL_PII") {
-        const summary = scanPage();
-        sendResponse({ ok: true, summary });
+        try {
+          const summary = scanPage();
+          sendResponse({ ok: true, summary });
+        } catch (err) {
+          sendResponse({ ok: false, error: err.message });
+        }
+        return true;
       }
     });
   }
