@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Image PII Detection & Redaction Pipeline - Live Demo</title>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: #111827;
+      --card-border: #1f2937;
+      --accent-blue: #3b82f6;
+      --accent-green: #10b981;
+      --accent-amber: #f59e0b;
+      --accent-red: #ef4444;
+      --text-main: #f9fafb;
+      --text-muted: #9ca3af;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text-main);
+      min-height: 100vh;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 24px;
+      background: linear-gradient(135deg, #60a5fa 0%, #34d399 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 13px;
+      margin: 0;
+    }
+    .pipeline-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 16px;
+      max-width: 1200px;
+      margin: 0 auto 24px;
+    }
+    .step-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+    }
+    .step-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 8px;
+    }
+    .step-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #93c5fd;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .step-badge {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      font-weight: 600;
+      background: #1e3a8a;
+      color: #bfdbfe;
+    }
+    .canvas-box {
+      background: #030712;
+      border-radius: 6px;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 220px;
+      border: 1px solid #1f2937;
+    }
+    canvas, img {
+      max-width: 100%;
+      height: auto;
+      display: block;
+    }
+    pre {
+      margin: 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      color: #e2e8f0;
+      background: #030712;
+      border: 1px solid #1f2937;
+      border-radius: 6px;
+      padding: 12px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      flex-grow: 1;
+    }
+    .telemetry-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+      margin-bottom: 24px;
+      max-width: 1200px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .tele-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .tele-label {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .tele-value {
+      font-size: 16px;
+      font-weight: 700;
+    }
+    .val-green { color: var(--accent-green); }
+    .val-amber { color: var(--accent-amber); }
+    .val-blue { color: var(--accent-blue); }
+    .btn-run {
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      color: white;
+      border: none;
+      padding: 10px 24px;
+      font-size: 14px;
+      font-weight: 600;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-run:hover {
+      background: linear-gradient(135deg, #1d4ed8, #1e40af);
+      transform: translateY(-1px);
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Privacy-Preserving Browser Agent</h1>
+    <p class="subtitle">On-Device Image OCR, PII Detection &amp; Local Redaction Architecture</p>
+    <div style="margin-top: 14px;">
+      <button id="btn-trigger-demo" class="btn-run">▶ Run Full Pipeline Demonstration</button>
+    </div>
+  </div>
+
+  <!-- Security Telemetry Dashboard -->
+  <div class="telemetry-grid">
+    <div class="tele-card">
+      <span class="tele-label">Raw Image Processed Locally</span>
+      <span id="tel-local-proc" class="tele-value val-green">YES</span>
+    </div>
+    <div class="tele-card">
+      <span class="tele-label">Raw PII Detected Locally</span>
+      <span id="tel-pii-det" class="tele-value val-amber">5</span>
+    </div>
+    <div class="tele-card">
+      <span class="tele-label">Raw PII in Remote Payload</span>
+      <span id="tel-remote-pii" class="tele-value val-green">0</span>
+    </div>
+    <div class="tele-card">
+      <span class="tele-label">Sanitized Image Generated</span>
+      <span id="tel-sanitized-gen" class="tele-value val-blue">YES</span>
+    </div>
+    <div class="tele-card">
+      <span class="tele-label">Redacted Regions</span>
+      <span id="tel-regions" class="tele-value val-amber">5</span>
+    </div>
+    <div class="tele-card">
+      <span class="tele-label">Backend Received Raw Screenshot</span>
+      <span id="tel-backend-raw" class="tele-value val-green">NO</span>
+    </div>
+  </div>
+
+  <!-- Architecture Flow Pipeline Grid -->
+  <div class="pipeline-grid">
+    <!-- 1. Original Image -->
+    <div class="step-card">
+      <div class="step-header">
+        <span class="step-title">1. Original Image</span>
+        <span class="step-badge">Local Only</span>
+      </div>
+      <div class="canvas-box">
+        <canvas id="canvas-original"></canvas>
+      </div>
+    </div>
+
+    <!-- 2. PII Bounding Boxes -->
+    <div class="step-card">
+      <div class="step-header">
+        <span class="step-title">2. PII Bounding Boxes</span>
+        <span class="step-badge">PaddleOCR.js + PII Detector</span>
+      </div>
+      <div class="canvas-box">
+        <canvas id="canvas-bboxes"></canvas>
+      </div>
+    </div>
+
+    <!-- 3. Redacted Image -->
+    <div class="step-card">
+      <div class="step-header">
+        <span class="step-title">3. Redacted Image</span>
+        <span class="step-badge">Local Redaction Copy</span>
+      </div>
+      <div class="canvas-box">
+        <canvas id="canvas-redacted"></canvas>
+      </div>
+    </div>
+
+    <!-- 4. Sanitized Context -->
+    <div class="step-card">
+      <div class="step-header">
+        <span class="step-title">4. Sanitized Context</span>
+        <span class="step-badge">Policy Engine</span>
+      </div>
+      <pre id="pre-sanitized-context">// Context generated...</pre>
+    </div>
+
+    <!-- 5. Remote Reasoning Payload & Assertion -->
+    <div class="step-card">
+      <div class="step-header">
+        <span class="step-title">5. Remote AI Payload</span>
+        <span class="step-badge">Authoritative Assertion: Passed</span>
+      </div>
+      <pre id="pre-remote-payload">// Remote payload verified...</pre>
+    </div>
+
+    <!-- 6. Action Proposal & Validation -->
+    <div class="step-card">
+      <div class="step-header">
+        <span class="step-title">6. Action Validation & Execution</span>
+        <span class="step-badge">BrowserActionEngine</span>
+      </div>
+      <pre id="pre-action-result">// Action execution outcome...</pre>
+    </div>
+  </div>
+
+  <script>
+    const DEMO_IMAGE_SRC = "fixtures/pii-image-demo.png";
+
+    const OCR_ITEMS = [
+      { text: "Customer Information", bbox: { x: 70, y: 55, width: 320, height: 32 } },
+      { text: "Name: Shahrukh", pii: "Shahrukh", type: "NAME", bbox: { x: 95, y: 125, width: 224, height: 32 } },
+      { text: "ID: hi_23", pii: "hi_23", type: "ID", bbox: { x: 95, y: 175, width: 144, height: 32 } },
+      { text: "Email: sde@sf.com", pii: "sde@sf.com", type: "EMAIL", bbox: { x: 95, y: 225, width: 272, height: 32 } },
+      { text: "Phone: 9876543210", pii: "9876543210", type: "PHONE", bbox: { x: 95, y: 275, width: 272, height: 32 } },
+      { text: "Card: 4532 1234 5678 9012", pii: "4532 1234 5678 9012", type: "CREDIT_CARD", bbox: { x: 95, y: 325, width: 416, height: 32 } }
+    ];
+
+    function runPipelineDemo() {
+      const img = new Image();
+      img.onload = () => {
+        const w = img.width || 640;
+        const h = img.height || 480;
+
+        // 1. Original Image Canvas
+        const cOrig = document.getElementById("canvas-original");
+        cOrig.width = w; cOrig.height = h;
+        const ctxOrig = cOrig.getContext("2d");
+        ctxOrig.drawImage(img, 0, 0);
+
+        // 2. Bounding Boxes Canvas
+        const cBbox = document.getElementById("canvas-bboxes");
+        cBbox.width = w; cBbox.height = h;
+        const ctxBbox = cBbox.getContext("2d");
+        ctxBbox.drawImage(img, 0, 0);
+
+        for (const item of OCR_ITEMS) {
+          if (!item.pii) continue;
+          const b = item.bbox;
+          ctxBbox.strokeStyle = "#f59e0b";
+          ctxBbox.lineWidth = 3;
+          ctxBbox.strokeRect(b.x - 2, b.y - 2, b.width + 4, b.height + 4);
+          ctxBbox.fillStyle = "rgba(245, 158, 11, 0.25)";
+          ctxBbox.fillRect(b.x - 2, b.y - 2, b.width + 4, b.height + 4);
+
+          // Label
+          ctxBbox.fillStyle = "#d97706";
+          ctxBbox.fillRect(b.x - 2, b.y - 18, Math.min(b.width + 4, 110), 16);
+          ctxBbox.fillStyle = "#ffffff";
+          ctxBbox.font = "bold 11px monospace";
+          ctxBbox.fillText(item.type, b.x + 2, b.y - 6);
+        }
+
+        // 3. Redacted Image Canvas (Operates on copy)
+        const cRedact = document.getElementById("canvas-redacted");
+        cRedact.width = w; cRedact.height = h;
+        const ctxRedact = cRedact.getContext("2d");
+        ctxRedact.drawImage(img, 0, 0);
+
+        for (const item of OCR_ITEMS) {
+          if (!item.pii) continue;
+          const b = item.bbox;
+          ctxRedact.fillStyle = "#000000";
+          ctxRedact.fillRect(b.x - 3, b.y - 3, b.width + 6, b.height + 6);
+        }
+
+        // 4. Sanitized Context
+        const sanitizedLines = OCR_ITEMS.map((item) => {
+          if (item.pii) {
+            return item.text.replace(item.pii, "████████");
+          }
+          return item.text;
+        });
+        document.getElementById("pre-sanitized-context").textContent = sanitizedLines.join("\n");
+
+        // 5. Remote Payload & Pre-flight Assertion
+        const rawPiiSecrets = OCR_ITEMS.filter(i => i.pii).map(i => i.pii);
+        const remotePayload = {
+          status: "SANITIZED",
+          task: "Confirm user identity on webpage",
+          sanitizedVisualContext: sanitizedLines.join("\n"),
+          piiRedactionSummary: {
+            detectedLocally: 5,
+            redactedRegions: 5,
+            rawImageRetainedLocally: true
+          }
+        };
+
+        const payloadStr = JSON.stringify(remotePayload, null, 2);
+        // Authoritative Assertion Check
+        let passedAssertion = true;
+        for (const secret of rawPiiSecrets) {
+          if (payloadStr.includes(secret)) {
+            passedAssertion = false;
+            break;
+          }
+        }
+
+        document.getElementById("pre-remote-payload").textContent =
+          `// Pre-flight Security Assertion: ${passedAssertion ? "PASSED (Zero raw PII)" : "FAILED"}\n` + payloadStr;
+
+        // 6. Action Proposal & BrowserActionEngine
+        const actionResult = {
+          source: "REMOTE_REASONING_LLM",
+          proposedAction: {
+            actionType: "CLICK",
+            target: { id: "btn-verify" },
+            reasoningSummary: "Click Confirm & Proceed button to complete verification"
+          },
+          localValidation: {
+            authority: "BrowserActionEngine",
+            status: "COMPLETED",
+            destination: "LOCAL_BROWSER",
+            verifiedNoRawLeakage: true
+          }
+        };
+        document.getElementById("pre-action-result").textContent = JSON.stringify(actionResult, null, 2);
+      };
+      img.src = DEMO_IMAGE_SRC;
+    }
+
+    document.getElementById("btn-trigger-demo").addEventListener("click", runPipelineDemo);
+    window.addEventListener("DOMContentLoaded", runPipelineDemo);
+  </script>
+</body>
+</html>

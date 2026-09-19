@@ -44,8 +44,8 @@ export class MockTestReasoningProvider {
     function extractNodes(root) {
       if (!root || typeof root !== "object") return [];
       const list = [];
-      if (root.id || root.token || root.targetId || root.tagName || root.type) list.push(root);
-      const children = root.children || root.domNodes || root.nodes || root.visualBlocks || [];
+      if (root.id || root.token || root.targetId || root.tagName || root.type || root.elementId) list.push(root);
+      const children = root.children || root.domNodes || root.nodes || root.visualBlocks || root.domTree?.children || root.interactiveElements || [];
       if (Array.isArray(children)) {
         for (const child of children) {
           list.push(...extractNodes(child));

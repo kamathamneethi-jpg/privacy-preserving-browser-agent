@@ -19,7 +19,7 @@ const distDir = resolve(extensionDir, "dist");
 const nodeBuiltinsPlugin = {
   name: "node-builtins-stub",
   setup(buildInstance) {
-    buildInstance.onResolve({ filter: /^node:/ }, (args) => ({
+    buildInstance.onResolve({ filter: /^(node:)?(fs|path|url|crypto|stream|util|buffer|events|os)/ }, (args) => ({
       path: args.path,
       namespace: "node-stub"
     }));

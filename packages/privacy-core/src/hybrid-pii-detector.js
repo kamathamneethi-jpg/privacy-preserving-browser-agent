@@ -14,8 +14,11 @@ import { GlinerAdapter, glinerAdapter } from "./gliner-adapter.js";
 import { GLINER_TARGET_LABELS, GLINER_CONFIG } from "./gliner-config.js";
 
 const EMAIL_PATTERN = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
-const PHONE_PATTERN = /(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g;
+const PHONE_PATTERN = /(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b|\b\d{10}\b/g;
 const CARD_PATTERN = /\b(?:\d{4}[-\s]?){3}\d{4}\b|\b\d{13,19}\b/g;
+const CARD_LABEL_PATTERN = /\b(?:Card|Credit Card|Card Number)\s*:\s*([0-9 -]{13,19})/gi;
+const NAME_LABEL_PATTERN = /\b(?:Name|Full Name|Customer Name|User Name)\s*:\s*([A-Za-z]+(?:\s+[A-Za-z]+)*)/gi;
+const ID_LABEL_PATTERN = /\b(?:ID|User ID|Customer ID|Account ID)\s*:\s*([A-Za-z0-9_#-]+)/gi;
 const IP_PATTERN = /\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b/g;
 const OTP_PATTERN = /\b(?:\d{4,8}|[A-Z0-9]{6})\b/g;
 const ACCOUNT_ID_PATTERN = /\b(?:[A-Z]{2}\d{2}[A-Z0-9]{11,30}|ACC-[A-Z0-9]{6,12})\b/g;
@@ -114,7 +117,7 @@ export class HybridPiiDetector {
       }
     }
 
-    // 3. Payment Card (with Luhn check)
+    // 3. Payment Card (with Luhn check or explicit card label)
     CARD_PATTERN.lastIndex = 0;
     for (const match of text.matchAll(CARD_PATTERN)) {
       if (passesLuhn(match[0])) {
@@ -123,6 +126,22 @@ export class HybridPiiDetector {
           value: match[0],
           start: match.index,
           end: match.index + match[0].length,
+          confidence: 0.95,
+          source: "regex",
+          ...(nodeId ? { nodeId } : {})
+        });
+      }
+    }
+    CARD_LABEL_PATTERN.lastIndex = 0;
+    for (const match of text.matchAll(CARD_LABEL_PATTERN)) {
+      const val = match[1]?.trim();
+      if (val && val.replace(/\D/g, "").length >= 13 && !detections.some((d) => d.value === val)) {
+        const start = match.index + match[0].indexOf(val);
+        detections.push({
+          type: PiiCategory.PAYMENT_CARD,
+          value: val,
+          start,
+          end: start + val.length,
           confidence: 0.95,
           source: "regex",
           ...(nodeId ? { nodeId } : {})
@@ -156,6 +175,95 @@ export class HybridPiiDetector {
         source: "regex",
         ...(nodeId ? { nodeId } : {})
       });
+    }
+
+    // 6. Name (labeled)
+    NAME_LABEL_PATTERN.lastIndex = 0;
+    for (const match of text.matchAll(NAME_LABEL_PATTERN)) {
+      const val = match[1]?.trim();
+      if (val && val.length >= 2) {
+        const start = match.index + match[0].indexOf(val);
+        detections.push({
+          type: PiiCategory.PERSON_NAME,
+          value: val,
+          start,
+          end: start + val.length,
+          confidence: 0.92,
+          source: "regex",
+          ...(nodeId ? { nodeId } : {})
+        });
+      }
+    }
+
+    // 7. ID (labeled)
+    ID_LABEL_PATTERN.lastIndex = 0;
+    for (const match of text.matchAll(ID_LABEL_PATTERN)) {
+      const val = match[1]?.trim();
+      if (val && val.length >= 2) {
+        const start = match.index + match[0].indexOf(val);
+        detections.push({
+          type: PiiCategory.ACCOUNT_IDENTIFIER,
+          value: val,
+          start,
+          end: start + val.length,
+          confidence: 0.90,
+          source: "regex",
+          ...(nodeId ? { nodeId } : {})
+        });
+      }
+    }
+
+    return detections;
+  }
+
+  /**
+   * Runs local PII detection against OCR recognized blocks.
+   * Preserves exact OCR bounding box and sets source: "IMAGE_OCR".
+   *
+   * @param {Array<{ text: string, bbox: object, confidence?: number }>} ocrBlocks
+   * @param {object} [options={}]
+   * @returns {Array<object>} Detected PII items with bounding boxes
+   */
+  detectPiiInOcrBlocks(ocrBlocks, options = {}) {
+    if (!Array.isArray(ocrBlocks) || ocrBlocks.length === 0) {
+      return [];
+    }
+
+    const detections = [];
+    let counter = 0;
+
+    for (const block of ocrBlocks) {
+      if (!block || typeof block.text !== "string" || !block.text.trim()) continue;
+      const text = block.text.trim();
+      const bbox = block.bbox || { x: 0, y: 0, width: 0, height: 0 };
+      const blockConf = typeof block.confidence === "number" ? block.confidence : 0.95;
+
+      const matches = this.detectWithDeterministicRules(text);
+
+      for (const match of matches) {
+        counter++;
+        let normalizedType = String(match.type).toUpperCase();
+        if (normalizedType === "PERSON_NAME" || normalizedType === "NAME") normalizedType = "NAME";
+        else if (normalizedType === "ACCOUNT_IDENTIFIER" || normalizedType === "ID") normalizedType = "ID";
+        else if (normalizedType === "PAYMENT_CARD" || normalizedType === "CREDIT_CARD") normalizedType = "CREDIT_CARD";
+        else if (normalizedType === "PHONE" || normalizedType === "PHONE_FIELD") normalizedType = "PHONE";
+        else if (normalizedType === "EMAIL" || normalizedType === "EMAIL_FIELD") normalizedType = "EMAIL";
+
+        detections.push({
+          id: `PII_IMG_${counter}`,
+          type: normalizedType,
+          category: normalizedType.toLowerCase(),
+          value: match.value,
+          confidence: Number(Math.min(1.0, blockConf * (match.confidence || 0.95)).toFixed(2)),
+          bbox: {
+            x: Math.round(bbox.x || 0),
+            y: Math.round(bbox.y || 0),
+            width: Math.round(bbox.width || 0),
+            height: Math.round(bbox.height || 0)
+          },
+          source: "IMAGE_OCR"
+        });
+      }
     }
 
     return detections;

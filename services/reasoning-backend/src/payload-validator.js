@@ -59,11 +59,11 @@ function recursiveInspect(value, visited = new Set()) {
       return { safe: false, reason: "Payload contains unmasked email address." };
     }
 
-    // 5. Check for unmasked phone numbers (excluding approved placeholders/tokens)
-    if (PHONE_PATTERN.test(value) && !value.includes("[REDACTED]") && !value.includes("{{TOKEN_") && !value.includes("[LOCAL_ONLY")) {
-      // Avoid false positive on numeric IDs or version numbers
+    // 5. Check for unmasked phone numbers (excluding approved placeholders/tokens and safe URLs)
+    if (PHONE_PATTERN.test(value) && !value.includes("[REDACTED]") && !value.includes("{{TOKEN_") && !value.includes("[LOCAL_ONLY") && !/^https?:\/\//i.test(value)) {
+      // Avoid false positive on numeric IDs, dates, or IP/port numbers
       const digits = value.replace(/\D/g, "");
-      if (digits.length >= 10 && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      if (digits.length >= 10 && !/^\d{4}-\d{2}-\d{2}$/.test(value) && !/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/.test(value)) {
         return { safe: false, reason: "Payload contains unmasked phone number." };
       }
     }

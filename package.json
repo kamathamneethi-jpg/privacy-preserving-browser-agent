@@ -31,12 +31,15 @@
     "check:step17": "node scripts/check-step17-e2e.mjs",
     "dev:logs": "node scripts/extension-log-server.mjs",
     "test": "npm run test:privacy",
-    "test:privacy": "node --test tests/privacy-policy.test.mjs tests/localization.test.mjs tests/robust-detection.test.mjs tests/context-analyzer.test.mjs tests/privacy-policy-engine.test.mjs tests/privacy-vault.test.mjs tests/on-device-ocr.test.mjs tests/sanitized-context.test.mjs tests/onnx-runtime.test.mjs tests/webgpu-acceleration.test.mjs tests/browser-action.test.mjs tests/remote-reasoning.test.mjs tests/secure-communication.test.mjs tests/end-to-end-privacy.test.mjs tests/gliner-hybrid-pii.test.mjs tests/llm-provider-backend.test.mjs tests/yolo-visual-redaction.test.mjs tests/dom-pii-deduplication.test.mjs tests/dom-pii-highlighting.test.mjs tests/extension-e2e-dom-redaction.test.mjs"
+    "test:privacy": "node --test tests/privacy-policy.test.mjs tests/localization.test.mjs tests/robust-detection.test.mjs tests/context-analyzer.test.mjs tests/privacy-policy-engine.test.mjs tests/privacy-vault.test.mjs tests/on-device-ocr.test.mjs tests/sanitized-context.test.mjs tests/onnx-runtime.test.mjs tests/webgpu-acceleration.test.mjs tests/browser-action.test.mjs tests/remote-reasoning.test.mjs tests/secure-communication.test.mjs tests/end-to-end-privacy.test.mjs tests/gliner-hybrid-pii.test.mjs tests/llm-provider-backend.test.mjs tests/yolo-visual-redaction.test.mjs tests/dom-pii-deduplication.test.mjs tests/dom-pii-highlighting.test.mjs tests/extension-e2e-dom-redaction.test.mjs tests/dom-pii-redaction-demo.test.mjs tests/image-pii-redaction.test.mjs"
   },
   "engines": {
     "node": ">=20"
   },
   "devDependencies": {
     "esbuild": "^0.28.2"
+  },
+  "dependencies": {
+    "@paddleocr/paddleocr-js": "^0.4.2"
   }
 }

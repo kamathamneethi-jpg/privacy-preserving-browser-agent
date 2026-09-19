@@ -183,8 +183,17 @@ export {
 } from "./yolo-detector.js";
 export {
   redactImageRegions,
+  redactImageLocally,
+  isBboxCompletelyCovered,
+  evaluateImagePiiPolicy,
   REDACTION_STYLES
 } from "./image-redactor.js";
+export {
+  ImageOCR,
+  recognizeImageText,
+  normalizeBoundingBox,
+  normalizeConfidence
+} from "./image-ocr.js";
 
 
 

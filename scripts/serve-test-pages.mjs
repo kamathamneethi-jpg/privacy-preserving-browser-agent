@@ -23,6 +23,20 @@ const server = http.createServer((req, res) => {
 
   const url = new URL(req.url, `http://${req.headers.host}`);
 
+  const demoTargetFile = path.resolve(rootDir, "tests/fixtures/demo-target-page.html");
+
+  if (url.pathname === "/demo" || url.pathname === "/demo-target") {
+    if (fs.existsSync(demoTargetFile)) {
+      const content = fs.readFileSync(demoTargetFile, "utf-8");
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(content);
+    } else {
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.end("Demo target fixture not found.");
+    }
+    return;
+  }
+
   if (url.pathname === "/" || url.pathname === "/interactive") {
     if (fs.existsSync(fixtureFile)) {
       const content = fs.readFileSync(fixtureFile, "utf-8");

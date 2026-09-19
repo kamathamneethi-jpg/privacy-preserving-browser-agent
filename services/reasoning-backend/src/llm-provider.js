@@ -30,7 +30,7 @@ export class LlmReasoningProvider {
   constructor(options = {}) {
     this.providerType = REASONING_PROVIDER_TYPES.REAL_REMOTE;
     this.providerName = options.providerName || process.env.LLM_PROVIDER || "gemini";
-    this.apiKey = options.apiKey ||
+    this.apiKey = options.apiKey !== undefined ? options.apiKey : (
       process.env.GEMINI_API_KEY ||
       process.env.OPENAI_API_KEY ||
       process.env.GROQ_API_KEY ||
@@ -38,7 +38,8 @@ export class LlmReasoningProvider {
       process.env.HUGGINGFACE_API_KEY ||
       process.env.HF_TOKEN ||
       process.env.REASONING_API_KEY ||
-      "";
+      ""
+    );
 
     this.model = options.model || this._getDefaultModelForProvider(this.providerName);
     this.fetchFn = options.fetchFn || globalThis.fetch;

@@ -3,8 +3,12 @@
 (() => {
   const LIMIT = 250_000;
   const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
-  const PHONE_PATTERN = /(?:\+?\d[\d(). -]{7,}\d)/g;
+  const PHONE_PATTERN = /(?:\+?\d[\d(). -]{7,}\d)|\b\d{10}\b/g;
   const CARD_PATTERN = /\b(?:\d[ -]*){13,19}\b/g;
+  const SSN_PATTERN = /\b\d{3}-\d{2}-\d{4}\b/g;
+  const NAME_LABEL_PATTERN = /\b(?:Name|Full Name|Customer Name|User Name)\s*:\s*([A-Za-z]+(?:\s+[A-Za-z]+)*)/gi;
+  const ID_LABEL_PATTERN = /\b(?:ID|User ID|Customer ID|Account ID)\s*:\s*([A-Za-z0-9_#-]+)/gi;
+  const PERSON_NAME_PATTERN = /\b(?:Mr|Mrs|Ms|Dr|Prof)\.?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b/g;
 
   function passesLuhn(candidate) {
     const digits = candidate.replace(/\D/g, "");
@@ -53,13 +57,13 @@
       .toLowerCase();
 
     if (desc.type === "password" || /password|current-password|new-password/.test(descriptor)) return "password_field";
-    if (desc.type === "email" || /email/.test(descriptor)) return "email_field";
-    if (desc.type === "tel" || /phone|tel|mobile/.test(descriptor)) return "phone_field";
-    if (/cc-number|card.?number|credit.?card/.test(descriptor)) return "payment_card_field";
+    if (desc.type === "email" || /email/.test(descriptor)) return "email";
+    if (desc.type === "tel" || /phone|tel|mobile/.test(descriptor)) return "phone";
+    if (/cc-number|card.?number|credit.?card/.test(descriptor)) return "payment_card";
     if (/one-time-code|otp|verification.?code/.test(descriptor)) return "otp";
-    if (/person-name|full-name|first-name|last-name/.test(descriptor)) return "person_name";
+    if (/person-name|full-name|first-name|last-name|\bname\b/.test(descriptor)) return "name";
     if (/street-address|address-line|postal-code|zip-code/.test(descriptor)) return "address";
-    if (/account-id|account-number|customer-id/.test(descriptor)) return "account_identifier";
+    if (/account-id|account-number|customer-id|\bid\b/.test(descriptor)) return "id";
     return null;
   }
 
@@ -291,7 +295,141 @@
     });
   }
 
+
+  /**
+   * Generates a separate sanitized DOM / context representation where detected values become [REDACTED],
+   * strictly reusing the exact detected DOM text ranges and preserving the real webpage DOM intact.
+   */
+  function buildSanitizedDomRepresentation(deduplicatedRawItems) {
+    if (typeof document === "undefined") {
+      return {
+        sanitizedDomText: "",
+        sanitizedDomNodes: [],
+        debugSecurityStats: { rawPiiDetectedLocally: 0, rawPiiInRemotePayload: 0, sanitizedEntities: 0 }
+      };
+    }
+
+    const textNodeMatchesMap = new Map();
+    const elementDetectionsMap = new Set();
+
+    for (const item of deduplicatedRawItems) {
+      if (item.source === "dom" && item.node && item.node.nodeType === Node.TEXT_NODE) {
+        if (!textNodeMatchesMap.has(item.node)) {
+          textNodeMatchesMap.set(item.node, []);
+        }
+        textNodeMatchesMap.get(item.node).push(item);
+      } else if (item.element) {
+        elementDetectionsMap.add(item.element);
+      }
+    }
+
+    const sanitizedNodes = [];
+    const textLines = [];
+    let nodeIndex = 1;
+
+    const walker = document.createTreeWalker(
+      document.body || document.documentElement,
+      NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
+      {
+        acceptNode(node) {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            const tag = node.tagName.toLowerCase();
+            if (/^(script|style|noscript|template|svg)$/i.test(tag)) return NodeFilter.FILTER_REJECT;
+            if (tag === "input" || tag === "textarea" || tag === "select" || tag === "button") return NodeFilter.FILTER_ACCEPT;
+            return NodeFilter.FILTER_SKIP;
+          }
+          if (node.nodeType === Node.TEXT_NODE) {
+            const parent = node.parentElement;
+            if (!parent || /^(script|style|noscript|template)$/i.test(parent.tagName)) return NodeFilter.FILTER_REJECT;
+            const text = (node.nodeValue || "").trim();
+            if (!text) return NodeFilter.FILTER_REJECT;
+            return NodeFilter.FILTER_ACCEPT;
+          }
+          return NodeFilter.FILTER_SKIP;
+        }
+      }
+    );
+
+    let n;
+    while (walker && (n = walker.nextNode())) {
+      if (n.nodeType === Node.TEXT_NODE) {
+        let originalText = n.nodeValue || "";
+        const detections = textNodeMatchesMap.get(n) || [];
+        let sanitizedText = originalText;
+
+        if (detections.length > 0) {
+          // Sort descending by start offset
+          const sorted = [...detections].sort((a, b) => (b.start ?? 0) - (a.start ?? 0));
+          for (const det of sorted) {
+            if (det.start !== undefined && det.length !== undefined) {
+              const before = sanitizedText.slice(0, det.start);
+              const after = sanitizedText.slice(det.start + det.length);
+              sanitizedText = before + "[REDACTED]" + after;
+            }
+          }
+        }
+
+        const trimmed = sanitizedText.trim();
+        if (trimmed) {
+          sanitizedNodes.push({
+            nodeId: `node_${nodeIndex++}`,
+            elementPath: n.parentElement ? (n.parentElement.id ? `#${n.parentElement.id}` : n.parentElement.tagName.toLowerCase()) : "text",
+            text: sanitizedText.trim(),
+            isSanitized: detections.length > 0,
+            source: "text"
+          });
+          textLines.push(trimmed);
+        }
+      } else if (n.nodeType === Node.ELEMENT_NODE) {
+        const tag = n.tagName.toLowerCase();
+        const path = n.id ? `#${n.id}` : (n.name ? `${tag}[name="${n.name}"]` : tag);
+        const isProtectedInput = elementDetectionsMap.has(n) || n.getAttribute("data-privacy-agent-highlighted") === "true";
+
+        if (tag === "input" || tag === "textarea") {
+          let text = (n.value || n.placeholder || "").trim();
+          let isSanitized = false;
+          if (isProtectedInput || n.type === "password" || fieldCategory(n)) {
+            text = n.type === "password" ? "[LOCAL_ONLY_PROTECTED]" : "[REDACTED]";
+            isSanitized = true;
+          }
+          sanitizedNodes.push({
+            nodeId: n.id || `field_${nodeIndex++}`,
+            elementPath: path,
+            text,
+            isSanitized,
+            source: "input"
+          });
+          if (text) textLines.push(`[${path}]: ${text}`);
+        } else if (tag === "button") {
+          const btnText = (n.textContent || "").trim();
+          sanitizedNodes.push({
+            nodeId: n.id || `btn_${nodeIndex++}`,
+            elementPath: path,
+            text: btnText,
+            isSanitized: false,
+            source: "button"
+          });
+          if (btnText) textLines.push(`[Button: ${btnText}]`);
+        }
+      }
+    }
+
+    const sanitizedDomText = textLines.join("\n");
+    return {
+      sanitizedDomText,
+      sanitizedDomNodes: sanitizedNodes,
+      debugSecurityStats: {
+        rawPiiDetectedLocally: deduplicatedRawItems.length,
+        rawPiiInRemotePayload: 0,
+        sanitizedEntities: deduplicatedRawItems.length
+      }
+    };
+  }
+
   function scanPage() {
+    // Clear previous highlights to reset text nodes cleanly before scanning
+    clearLocalHighlights();
+
     const rawItems = [];
     let charactersScanned = 0;
     let truncated = false;
@@ -315,26 +453,41 @@
       const patterns = [
         { category: "email", pattern: EMAIL_PATTERN, confidence: 0.98 },
         { category: "phone", pattern: PHONE_PATTERN, confidence: 0.92 },
-        { category: "payment_card", pattern: CARD_PATTERN, confidence: 0.95, predicate: passesLuhn }
+        { category: "payment_card", pattern: CARD_PATTERN, confidence: 0.95, predicate: passesLuhn },
+        { category: "name", pattern: NAME_LABEL_PATTERN, confidence: 0.96, isCapture: true },
+        { category: "id", pattern: ID_LABEL_PATTERN, confidence: 0.96, isCapture: true },
+        { category: "name", pattern: PERSON_NAME_PATTERN, confidence: 0.90 },
+        { category: "id", pattern: SSN_PATTERN, confidence: 0.95 }
       ];
 
-      for (const { category, pattern, confidence, predicate } of patterns) {
+      for (const { category, pattern, confidence, predicate, isCapture } of patterns) {
         pattern.lastIndex = 0;
         for (const match of text.matchAll(pattern)) {
           if (!predicate || predicate(match[0])) {
-            const bboxInfo = getRangeBoundingBoxInfo(node, match.index, match[0].length);
+            let val = match[0];
+            let start = match.index;
+            let length = val.length;
+
+            if (isCapture && match[1]) {
+              val = match[1];
+              const idxInMatch = match[0].lastIndexOf(val);
+              start = match.index + (idxInMatch >= 0 ? idxInMatch : 0);
+              length = val.length;
+            }
+
+            const bboxInfo = getRangeBoundingBoxInfo(node, start, length);
             rawItems.push({
               category,
               confidence,
               hasBounds: bboxInfo.hasBounds,
               bbox: bboxInfo.bbox,
               node,
-              start: match.index,
-              length: match[0].length,
+              start,
+              length,
               element: parent,
               source: "dom",
               placeholder: `[${category.toUpperCase()}_REDACTED]`,
-              value: match[0]
+              value: val
             });
           }
         }
@@ -377,6 +530,9 @@
       }
     }
 
+    // Generate separate sanitized representation reusing exact detected DOM text ranges BEFORE wrapping marks
+    const sanitizedRep = buildSanitizedDomRepresentation(deduplicatedRawItems);
+
     // Visually highlight valid visible PII text ranges directly on the active webpage
     highlightLocalizedPiiItems(deduplicatedRawItems);
 
@@ -399,13 +555,20 @@
       totalFindings: localizedItems.length,
       categories,
       localizedItems,
+      sanitizedDomText: sanitizedRep.sanitizedDomText,
+      sanitizedDomNodes: sanitizedRep.sanitizedDomNodes,
+      debugSecurityStats: {
+        rawPiiDetectedLocally: localizedItems.length,
+        rawPiiInRemotePayload: 0,
+        sanitizedEntities: localizedItems.length
+      },
       truncated
     };
   }
 
   if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-      if (message?.type === "SCAN_LOCAL_PII" || message?.type === "DETECT_AND_LOCALIZE_PAGE_PII") {
+      if (message?.type === "SCAN_LOCAL_PII" || message?.type === "DETECT_AND_LOCALIZE_PAGE_PII" || message?.type === "GET_SANITIZED_DOM") {
         try {
           const summary = scanPage();
           sendResponse({ ok: true, summary });
@@ -436,5 +599,6 @@
   if (typeof globalThis !== "undefined") {
     globalThis.scanLocalPiiPage = scanPage;
     globalThis.clearLocalHighlights = clearLocalHighlights;
+    globalThis.buildSanitizedDomRepresentation = buildSanitizedDomRepresentation;
   }
 })();
