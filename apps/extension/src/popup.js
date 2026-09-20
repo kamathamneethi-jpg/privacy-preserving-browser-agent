@@ -69,6 +69,23 @@ const secSanitizedEntities = doc.querySelector("#sec-sanitized-entities");
 
 const togglePiiValuesButton = doc.querySelector("#toggle-pii-values");
 const clearHighlightsButton = doc.querySelector("#clear-highlights");
+const btnReloadExtension = doc.querySelector("#btn-reload-extension");
+
+if (btnReloadExtension) {
+  btnReloadExtension.addEventListener("click", () => {
+    try {
+      if (typeof chrome !== "undefined" && chrome.runtime?.reload) {
+        chrome.runtime.reload();
+      } else if (typeof location !== "undefined" && location.reload) {
+        location.reload();
+      }
+    } catch {
+      if (typeof location !== "undefined" && location.reload) {
+        location.reload();
+      }
+    }
+  });
+}
 
 let lastRedactedDomText = "";
 let showPiiValues = false;

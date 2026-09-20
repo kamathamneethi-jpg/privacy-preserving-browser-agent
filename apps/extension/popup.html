@@ -8,17 +8,22 @@
   </head>
   <body>
     <main>
-      <h1>Privacy Browser Agent</h1>
-      <p class="hint">On-Device Privacy &amp; Local Execution Authority</p>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+        <h1 style="margin:0;">Privacy Browser Agent</h1>
+        <button id="btn-reload-extension" type="button" class="secondary" title="Reload extension" style="font-size:10px; padding:3px 7px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; color:#334155; display:inline-flex; align-items:center; gap:3px;">
+          <span>🔄 Reload</span>
+        </button>
+      </div>
+      <p class="hint" style="margin-top:2px;">On-Device Privacy &amp; Local Execution Authority</p>
 
       <section class="task-runner">
         <label for="task-input" style="font-size:12px; font-weight:bold; color:#4b5563; display:block; margin-bottom:4px;">Task Instruction:</label>
         <input id="task-input" type="text" placeholder="e.g. Search for lightweight laptops" style="width:100%; box-sizing:border-box; padding:8px; border:1px solid #d1d5db; border-radius:6px; margin-bottom:8px; font-size:13px;" />
         <button id="run-task" type="button" style="background:#059669; width:100%; font-weight:bold;">Run Agent Task</button>
         <div style="margin-top:8px; display:flex; justify-content:space-between; align-items:center;">
-          <a id="btn-open-dashboard" href="http://127.0.0.1:8765" target="_blank" style="display:inline-flex; align-items:center; gap:5px; font-size:11px; color:#2563eb; font-weight:600; text-decoration:none; background:#eff6ff; padding:5px 8px; border-radius:5px; border:1px solid #bfdbfe;">
+          <button id="btn-open-dashboard" type="button" style="display:inline-flex; align-items:center; gap:5px; font-size:11px; color:#2563eb; font-weight:600; text-decoration:none; background:#eff6ff; padding:5px 8px; border-radius:5px; border:1px solid #bfdbfe; cursor:pointer;">
             <span>📊 Open Live Reasoning Dashboard</span>
-          </a>
+          </button>
           <span style="font-size:10px; color:#64748b; font-family:monospace;">http://127.0.0.1:8765</span>
         </div>
       </section>
