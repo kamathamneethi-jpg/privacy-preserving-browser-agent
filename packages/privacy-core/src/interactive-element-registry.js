@@ -150,6 +150,101 @@ export function extractElementDescription(element, elementId) {
     bbox = { ...element.bbox };
   }
 
+  // Detect Ads and Sponsored elements
+  let isSponsored = Boolean(element.isSponsored || element.isAd);
+  if (!isSponsored && typeof element.closest === "function") {
+    try {
+      const adContainer = element.closest(
+        '[data-component-type="sp-sponsored-result"], ' +
+        '[data-component-type="sbv-video-single-product"], ' +
+        '[data-ad-preview], [data-ad-id], [data-ad-slot], [data-ad-details], ' +
+        '.s-sponsored-label-info-icon, .puis-sponsored-label-text, .s-sponsored-info-icon, ' +
+        '[class*="sponsored" i], [id*="sponsored" i], [class*="ad-container" i], ' +
+        'div[data-cel-widget*="sponsored" i], div[data-cel-widget*="sp_" i]'
+      );
+      if (adContainer) isSponsored = true;
+    } catch {}
+  }
+
+  const fullText = `${text || ""} ${ariaLabel || ""} ${getAttr("title") || ""}`;
+  if (!isSponsored && /\b(sponsored|advertisement|ad feedback|promoted|ad by)\b/i.test(fullText)) {
+    isSponsored = true;
+  }
+
+  // Detect Filter / Refinement
+  let isFilter = Boolean(element.isFilter);
+  let filterCategory = element.filterCategory || null;
+  if (!isFilter && typeof element.closest === "function") {
+    try {
+      const filterContainer = element.closest(
+        '#s-refinements, #filters, #refinements, .s-navigation-left, aside, nav#filters, ' +
+        '[data-component-type="s-refinements-left-nav"], [aria-label*="refine" i], [aria-label*="filter" i], ' +
+        '[id*="refinement"], [class*="refinement"], [class*="filter-container"], [class*="filter-group"], ' +
+        'li[id^="p_"], .s-navigation-item'
+      );
+      if (filterContainer) {
+        isFilter = true;
+        const section = element.closest('div[id^="p_"], div.a-section, li[id^="p_"]');
+        const sectionText = section ? (section.querySelector('span.a-text-bold, h4, h3, span[class*="heading"]')?.textContent || "") : "";
+        const lowerSec = sectionText.toLowerCase();
+        if (/price|₹|\$|eur|gbp/i.test(lowerSec) || (section && /p_36/i.test(section.id || ""))) {
+          filterCategory = "price";
+        } else if (/brand/i.test(lowerSec) || (section && /p_89/i.test(section.id || ""))) {
+          filterCategory = "brand";
+        } else if (/colou?r/i.test(lowerSec)) {
+          filterCategory = "color";
+        } else if (/size/i.test(lowerSec)) {
+          filterCategory = "size";
+        }
+      }
+    } catch {}
+  }
+  if (lowerType === "checkbox" || role === "checkbox") {
+    isFilter = true;
+  }
+
+  // Detect Price Specific Controls
+  let isMaxPriceInput = Boolean(element.isMaxPriceInput);
+  let isMinPriceInput = Boolean(element.isMinPriceInput);
+  let isPriceGoButton = Boolean(element.isPriceGoButton);
+
+  const lowerName = (name || "").toLowerCase();
+  const lowerId = (getAttr("id") || "").toLowerCase();
+  const lowerPlaceholder = (placeholder || "").toLowerCase();
+  const lowerAria = (ariaLabel || "").toLowerCase();
+
+  if (tag === "input" && (lowerType === "text" || lowerType === "number")) {
+    if (lowerId === "high-price" || lowerName === "high-price" || lowerPlaceholder === "max" || /max-?price/i.test(lowerName) || /max.*price/i.test(lowerAria)) {
+      isMaxPriceInput = true;
+      isFilter = true;
+      filterCategory = "price";
+    } else if (lowerId === "low-price" || lowerName === "low-price" || lowerPlaceholder === "min" || /min-?price/i.test(lowerName) || /min.*price/i.test(lowerAria)) {
+      isMinPriceInput = true;
+      isFilter = true;
+      filterCategory = "price";
+    }
+  }
+
+  if ((tag === "input" && lowerType === "submit") || tag === "button") {
+    const isGo = /^(?:go|apply|submit)$/i.test(text || String(value || ""));
+    if (isGo && (isFilter || filterCategory === "price")) {
+      isPriceGoButton = true;
+      isFilter = true;
+      filterCategory = "price";
+    }
+  }
+
+  // Detect Organic Product Result
+  let isProductResult = Boolean(element.isProductResult);
+  if (!isProductResult && !isSponsored && typeof element.closest === "function") {
+    try {
+      const prodCard = element.closest('[data-component-type="s-search-result"], .s-result-item[data-asin]');
+      if (prodCard && prodCard.getAttribute("data-asin")) {
+        isProductResult = true;
+      }
+    } catch {}
+  }
+
   return {
     elementId,
     tag,
@@ -162,7 +257,14 @@ export function extractElementDescription(element, elementId) {
     value: value || null,
     checked: checked !== null ? checked : undefined,
     disabled,
-    ...(bbox ? { bbox } : {})
+    ...(bbox ? { bbox } : {}),
+    ...(isSponsored ? { isSponsored: true, isAd: true } : {}),
+    ...(isFilter ? { isFilter: true } : {}),
+    ...(filterCategory ? { filterCategory } : {}),
+    ...(isMaxPriceInput ? { isMaxPriceInput: true } : {}),
+    ...(isMinPriceInput ? { isMinPriceInput: true } : {}),
+    ...(isPriceGoButton ? { isPriceGoButton: true } : {}),
+    ...(isProductResult ? { isProductResult: true } : {})
   };
 }
 

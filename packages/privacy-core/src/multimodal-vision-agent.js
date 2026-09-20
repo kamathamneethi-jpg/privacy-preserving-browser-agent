@@ -67,7 +67,9 @@ export class MultimodalVisionAgent {
       "CRITICAL RULES:",
       "1. Target elements ONLY by their elementId (e.g. 'el_1'). Never output arbitrary code or CSS selectors.",
       "2. Never relax or ignore explicit user constraints (e.g. price limits, brand, color).",
-      "3. Use the visual screenshot to confirm whether items match color, visually verify modal dialogs, and locate elements."
+      "3. Use the visual screenshot to confirm whether items match color, visually verify modal dialogs, and locate elements.",
+      "4. NEVER click on sponsored ads, promotional carousels, or third-party advertisements (labeled 'Sponsored', 'Ad', 'Featured'). Target authentic product items and genuine sidebar filters.",
+      "5. When the current task is 'filter', prioritize applying price range filters (typing into max price input or selecting price bracket) and facet checkboxes. NEVER click a product card when the task is to filter."
     ].join("\n");
   }
 
@@ -109,7 +111,11 @@ export class MultimodalVisionAgent {
         value: sVal || undefined,
         placeholder: sPlaceholder || undefined,
         ariaLabel: sAria || undefined,
-        bbox: el.bbox ? { x: el.bbox.x, y: el.bbox.y, width: el.bbox.width, height: el.bbox.height } : undefined
+        bbox: el.bbox ? { x: el.bbox.x, y: el.bbox.y, width: el.bbox.width, height: el.bbox.height } : undefined,
+        isSponsored: el.isSponsored ? true : undefined,
+        isFilter: el.isFilter ? true : undefined,
+        filterCategory: el.filterCategory || undefined,
+        isProductResult: el.isProductResult ? true : undefined
       };
     });
 

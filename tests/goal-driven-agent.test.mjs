@@ -14,6 +14,8 @@ import {
   MultimodalVisionAgent,
   DEFAULT_MULTIMODAL_MODEL
 } from "../packages/privacy-core/src/index.js";
+import { extractElementDescription } from "../packages/privacy-core/src/interactive-element-registry.js";
+import { deriveGeneralizedFallbackAction } from "../apps/extension/src/popup.js";
 
 // =====================================================================
 // 1. GOAL PARSER TESTS
@@ -557,4 +559,96 @@ test("25. GoalCompletionChecker rejects premature completion when search has not
   assert.strictEqual(checkRes.isSatisfied, false);
   assert.strictEqual(checkRes.completed, false);
   assert.ok(checkRes.missingRequirements.some(r => r.includes("Search") || r.includes("Pending required task")));
+});
+
+test("26. InteractiveElementRegistry tags sponsored ads and filter facets properly", () => {
+  // Sponsored ad card
+  const adEl = {
+    tagName: "A",
+    text: "SHOEGR Cleaner Kit with Spray for White Shoes",
+    closest: (selector) => selector.includes("sponsored") ? {} : null,
+    getAttribute: (name) => name === "href" ? "https://amazon.in/dp/B001?pd_rd_w=123" : null
+  };
+  const adDesc = extractElementDescription(adEl, "el_ad_1");
+  assert.strictEqual(adDesc.isSponsored, true);
+  assert.strictEqual(adDesc.isAd, true);
+
+  // Price input in filter sidebar
+  const priceInputEl = {
+    tagName: "INPUT",
+    getAttribute: (name) => {
+      if (name === "type") return "text";
+      if (name === "name") return "high-price";
+      if (name === "id") return "high-price";
+      if (name === "placeholder") return "Max";
+      return null;
+    },
+    closest: (selector) => selector.includes("s-refinements") ? {} : null
+  };
+  const priceDesc = extractElementDescription(priceInputEl, "el_price_1");
+  assert.strictEqual(priceDesc.isFilter, true);
+  assert.strictEqual(priceDesc.isMaxPriceInput, true);
+  assert.strictEqual(priceDesc.filterCategory, "price");
+});
+
+test("27. deriveGeneralizedFallbackAction prioritizes price input and strictly ignores sponsored ads", () => {
+  const goal = GoalParser.parse("search for white nike shoes under 8000");
+  const planner = new TaskPlanner(goal);
+  const stateManager = new ExecutionStateManager({ goal });
+
+  // Simulate currently in filter task
+  const currentTask = {
+    id: "task_3",
+    type: "filter",
+    description: "Locate and apply filters matching constraints"
+  };
+
+  const interactiveElements = [
+    // Element 1: An ad titled "White Shoes Cleaner" (like el_391 in real trace)
+    {
+      elementId: "el_ad_391",
+      tag: "a",
+      text: "SHOEGR Sneaker Cleaner Kit for White Shoes",
+      isSponsored: true,
+      isAd: true
+    },
+    // Element 2: The high-price input field
+    {
+      elementId: "el_price_max",
+      tag: "input",
+      type: "text",
+      name: "high-price",
+      placeholder: "Max",
+      isFilter: true,
+      isMaxPriceInput: true,
+      filterCategory: "price"
+    },
+    // Element 3: Color filter checkbox
+    {
+      elementId: "el_color_white",
+      tag: "input",
+      type: "checkbox",
+      text: "White",
+      isFilter: true,
+      filterCategory: "color"
+    }
+  ];
+
+  const action = deriveGeneralizedFallbackAction({
+    currentTask,
+    goal,
+    interactiveElements,
+    stateManager,
+    stepNum: 2
+  });
+
+  // Must NOT target the ad
+  assert.notStrictEqual(action.target, "el_ad_391");
+  // Must prioritize the price input over generic color matching
+  assert.strictEqual(action.target, "el_price_max");
+  assert.strictEqual(action.actionType, "TYPE");
+  assert.strictEqual(action.parameters.text, "8000");
+  assert.strictEqual(action.thenPressEnter, true);
+  assert.strictEqual(action.isFilter, true);
+  assert.strictEqual(action.filterName, "price");
 });

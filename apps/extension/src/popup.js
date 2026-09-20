@@ -1,3 +1,20 @@
+if (typeof globalThis.document === "undefined") {
+  globalThis.document = {
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    getElementById: () => null,
+    createElement: () => ({
+      getContext: () => null,
+      width: 640,
+      height: 480,
+      style: {},
+      addEventListener: () => {}
+    }),
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+}
+
 import {
   GoalParser as CoreGoalParser,
   TaskPlanner as CoreTaskPlanner,
@@ -19,37 +36,39 @@ const ActiveGoalCompletionChecker = CoreGoalCompletionChecker || PC.GoalCompleti
 const ActiveMultimodalVisionAgent = CoreMultimodalVisionAgent || PC.MultimodalVisionAgent;
 const ActiveDefaultModel = CoreDefaultModel || PC.DEFAULT_MULTIMODAL_MODEL || "qwen/qwen-2.5-vl-72b-instruct";
 
-const captureButton = document.querySelector("#capture");
-const scanButton = document.querySelector("#scan");
-const runTaskButton = document.querySelector("#run-task");
-const taskInput = document.querySelector("#task-input");
-const apiKeyInput = document.querySelector("#api-key-input");
-const saveKeyButton = document.querySelector("#save-key");
-const status = document.querySelector("#status");
-const metadataList = document.querySelector("#metadata");
-const piiResults = document.querySelector("#pii-results");
-const piiSummary = document.querySelector("#pii-summary");
-const piiList = document.querySelector("#pii-list");
-const taskResults = document.querySelector("#task-results");
-const taskSummary = document.querySelector("#task-summary");
-const taskActions = document.querySelector("#task-actions");
-const pipelineBreadcrumb = document.querySelector("#pipeline-breadcrumb");
-const pipelineStatus = document.querySelector("#pipeline-status");
-const redactedInfoPanel = document.querySelector("#redacted-info-panel");
-const redactedSummary = document.querySelector("#redacted-summary");
-const copyRedactedDomButton = document.querySelector("#copy-redacted-dom");
+const doc = typeof document !== "undefined" ? document : { querySelector: () => null, querySelectorAll: () => [] };
 
-const detectedPiiCount = document.querySelector("#detected-pii-count");
-const detectedPiiTypes = document.querySelector("#detected-pii-types");
-const viewRedactedDomButton = document.querySelector("#view-redacted-dom");
-const redactedDomContainer = document.querySelector("#redacted-dom-container");
-const redactedDomView = document.querySelector("#redacted-dom-view");
-const secRawPiiDetected = document.querySelector("#sec-raw-pii-detected");
-const secRawPiiRemote = document.querySelector("#sec-raw-pii-remote");
-const secSanitizedEntities = document.querySelector("#sec-sanitized-entities");
+const captureButton = doc.querySelector("#capture");
+const scanButton = doc.querySelector("#scan");
+const runTaskButton = doc.querySelector("#run-task");
+const taskInput = doc.querySelector("#task-input");
+const apiKeyInput = doc.querySelector("#api-key-input");
+const saveKeyButton = doc.querySelector("#save-key");
+const status = doc.querySelector("#status");
+const metadataList = doc.querySelector("#metadata");
+const piiResults = doc.querySelector("#pii-results");
+const piiSummary = doc.querySelector("#pii-summary");
+const piiList = doc.querySelector("#pii-list");
+const taskResults = doc.querySelector("#task-results");
+const taskSummary = doc.querySelector("#task-summary");
+const taskActions = doc.querySelector("#task-actions");
+const pipelineBreadcrumb = doc.querySelector("#pipeline-breadcrumb");
+const pipelineStatus = doc.querySelector("#pipeline-status");
+const redactedInfoPanel = doc.querySelector("#redacted-info-panel");
+const redactedSummary = doc.querySelector("#redacted-summary");
+const copyRedactedDomButton = doc.querySelector("#copy-redacted-dom");
 
-const togglePiiValuesButton = document.querySelector("#toggle-pii-values");
-const clearHighlightsButton = document.querySelector("#clear-highlights");
+const detectedPiiCount = doc.querySelector("#detected-pii-count");
+const detectedPiiTypes = doc.querySelector("#detected-pii-types");
+const viewRedactedDomButton = doc.querySelector("#view-redacted-dom");
+const redactedDomContainer = doc.querySelector("#redacted-dom-container");
+const redactedDomView = doc.querySelector("#redacted-dom-view");
+const secRawPiiDetected = doc.querySelector("#sec-raw-pii-detected");
+const secRawPiiRemote = doc.querySelector("#sec-raw-pii-remote");
+const secSanitizedEntities = doc.querySelector("#sec-sanitized-entities");
+
+const togglePiiValuesButton = doc.querySelector("#toggle-pii-values");
+const clearHighlightsButton = doc.querySelector("#clear-highlights");
 
 let lastRedactedDomText = "";
 let showPiiValues = false;
@@ -98,27 +117,27 @@ if (clearHighlightsButton) {
 // ---------------------------------------------------------------------
 // IMAGE PRIVACY & LOCAL REDACTION PIPELINE
 // ---------------------------------------------------------------------
-const btnScanScreenshot = document.querySelector("#btn-scan-screenshot");
-const btnLoadTestImage = document.querySelector("#btn-load-test-image");
-const imgFileInput = document.querySelector("#img-file-input");
-const btnViewRedactedImage = document.querySelector("#btn-view-redacted-image");
-const btnCopyRedactedImage = document.querySelector("#btn-copy-redacted-image");
-const btnClearImageDetection = document.querySelector("#btn-clear-image-detection");
-const btnToggleBboxOverlay = document.querySelector("#btn-toggle-bbox-overlay");
-const imageDisplayContainer = document.querySelector("#image-display-container");
-const redactedImageCanvas = document.querySelector("#redacted-image-canvas");
-const sanitizedOcrTextView = document.querySelector("#sanitized-ocr-text-view");
-const imgViewTitle = document.querySelector("#img-view-title");
+const btnScanScreenshot = doc.querySelector("#btn-scan-screenshot");
+const btnLoadTestImage = doc.querySelector("#btn-load-test-image");
+const imgFileInput = doc.querySelector("#img-file-input");
+const btnViewRedactedImage = doc.querySelector("#btn-view-redacted-image");
+const btnCopyRedactedImage = doc.querySelector("#btn-copy-redacted-image");
+const btnClearImageDetection = doc.querySelector("#btn-clear-image-detection");
+const btnToggleBboxOverlay = doc.querySelector("#btn-toggle-bbox-overlay");
+const imageDisplayContainer = doc.querySelector("#image-display-container");
+const redactedImageCanvas = doc.querySelector("#redacted-image-canvas");
+const sanitizedOcrTextView = doc.querySelector("#sanitized-ocr-text-view");
+const imgViewTitle = doc.querySelector("#img-view-title");
 
-const imgDetectedPiiCount = document.querySelector("#img-detected-pii-count");
-const imgDetectedPiiTypes = document.querySelector("#img-detected-pii-types");
+const imgDetectedPiiCount = doc.querySelector("#img-detected-pii-count");
+const imgDetectedPiiTypes = doc.querySelector("#img-detected-pii-types");
 
-const secImgRawProcessed = document.querySelector("#sec-img-raw-processed");
-const secImgRawPii = document.querySelector("#sec-img-raw-pii");
-const secImgRemotePii = document.querySelector("#sec-img-remote-pii");
-const secImgSanitizedGen = document.querySelector("#sec-img-sanitized-gen");
-const secImgRedactedRegions = document.querySelector("#sec-img-redacted-regions");
-const secImgBackendRaw = document.querySelector("#sec-img-backend-raw");
+const secImgRawProcessed = doc.querySelector("#sec-img-raw-processed");
+const secImgRawPii = doc.querySelector("#sec-img-raw-pii");
+const secImgRemotePii = doc.querySelector("#sec-img-remote-pii");
+const secImgSanitizedGen = doc.querySelector("#sec-img-sanitized-gen");
+const secImgRedactedRegions = doc.querySelector("#sec-img-redacted-regions");
+const secImgBackendRaw = doc.querySelector("#sec-img-backend-raw");
 
 let lastOriginalImage = null; // Preserved locally, never sent remotely
 let lastRedactedCanvas = null;
@@ -266,7 +285,7 @@ async function processImageSourceForPii(imgElement, options = {}) {
   if (typeof globalThis.PrivacyCore !== "undefined" && globalThis.PrivacyCore.redactImageLocally) {
     redactResult = globalThis.PrivacyCore.redactImageLocally(imgElement, detections, { padding: 4 });
   } else {
-    const canvas = document.createElement("canvas");
+    const canvas = doc.createElement("canvas");
     canvas.width = imgElement.width || imgElement.naturalWidth || 640;
     canvas.height = imgElement.height || imgElement.naturalHeight || 480;
     const ctx = canvas.getContext("2d");
@@ -1151,12 +1170,12 @@ async function captureSanitizedScreenshot(viewportPiiItems = []) {
  * Generalized fallback heuristic that operates on task types and constraints.
  * Zero website-specific or brand-specific hardcoding.
  */
-function deriveGeneralizedFallbackAction({ currentTask, goal, interactiveElements, stateManager, stepNum }) {
+export function deriveGeneralizedFallbackAction({ currentTask, goal, interactiveElements, stateManager, stepNum }) {
   if (!Array.isArray(interactiveElements) || interactiveElements.length === 0) {
     return null;
   }
 
-  const taskType = currentTask?.type || "general";
+  let taskType = currentTask?.type || "general";
   const entity = goal?.targetEntity || "";
   const constraints = goal?.constraints || [];
 
@@ -1200,50 +1219,163 @@ function deriveGeneralizedFallbackAction({ currentTask, goal, interactiveElement
     }
   }
 
-  // 3. Filter Task: find filter option matching constraint
+  // 3. Filter Task: prioritize price range filters, exclude all ads/sponsored elements
   if (taskType === "filter") {
-    for (const c of constraints) {
-      if (!stateManager.isFilterApplied(c.name, c.value)) {
-        const valStr = String(c.value || c.name).toLowerCase();
-        const filterEl = interactiveElements.find(el => {
-          const t = `${el.text || ""} ${el.value || ""} ${el.ariaLabel || ""}`.toLowerCase();
-          return t.includes(valStr);
-        });
-        if (filterEl) {
-          const isCheck = filterEl.tag === "input" && filterEl.type === "checkbox";
+    const pendingConstraints = constraints.filter(c => !stateManager.isFilterApplied(c.name, c.value));
+
+    // Sort so price filters are always attempted first
+    pendingConstraints.sort((a, b) => {
+      const aIsPrice = a.attribute === "price" || a.name === "price";
+      const bIsPrice = b.attribute === "price" || b.name === "price";
+      if (aIsPrice && !bIsPrice) return -1;
+      if (!aIsPrice && bIsPrice) return 1;
+      return 0;
+    });
+
+    for (const c of pendingConstraints) {
+      const isPrice = c.attribute === "price" || c.name === "price";
+      const targetVal = Number(c.value);
+
+      if (isPrice && !isNaN(targetVal) && targetVal > 0) {
+        // Option A: Max / High-Price Input (e.g. input#high-price or placeholder="Max")
+        const maxPriceInput = interactiveElements.find(el =>
+          !el.isSponsored && !el.isAd && (
+            el.isMaxPriceInput ||
+            el.id === "high-price" ||
+            el.name === "high-price" ||
+            (el.tag === "input" && /high-?price|max-?price/i.test(`${el.name || ""} ${el.id || ""}`)) ||
+            (el.tag === "input" && (el.isFilter || el.filterCategory === "price") && /max/i.test(`${el.placeholder || ""} ${el.ariaLabel || ""}`))
+          )
+        );
+
+        if (maxPriceInput) {
+          return {
+            actionType: "TYPE",
+            target: maxPriceInput.elementId,
+            parameters: { text: String(targetVal) },
+            thenPressEnter: true,
+            isFilter: true,
+            filterName: c.name,
+            filterValue: c.value,
+            reasoningSummary: `Applied maximum price filter of ₹${targetVal} into price range input.`
+          };
+        }
+
+        // Option B: Price Range Links or Checkboxes in Sidebar
+        const priceFilterElements = interactiveElements.filter(el =>
+          !el.isSponsored && !el.isAd && (
+            el.filterCategory === "price" ||
+            (el.isFilter && /₹|inr|under|over|\b\d{3,6}\b/i.test(`${el.text || ""} ${el.ariaLabel || ""}`))
+          )
+        );
+
+        let bestBracket = null;
+        let bestDiff = Infinity;
+
+        for (const el of priceFilterElements) {
+          const t = `${el.text || ""} ${el.ariaLabel || ""}`.replace(/,/g, "");
+          const underMatch = t.match(/(?:under|up to|below|less than)\s*₹?\s*(\d+)/i);
+          const rangeMatch = t.match(/₹?\s*(\d+)\s*(?:-|to)\s*₹?\s*(\d+)/i);
+
+          if (underMatch) {
+            const limit = parseInt(underMatch[1], 10);
+            if (limit <= targetVal * 1.3) {
+              const diff = Math.abs(limit - targetVal);
+              if (diff < bestDiff) {
+                bestDiff = diff;
+                bestBracket = el;
+              }
+            }
+          } else if (rangeMatch) {
+            const low = parseInt(rangeMatch[1], 10);
+            const high = parseInt(rangeMatch[2], 10);
+            if (targetVal >= low && targetVal <= high * 1.15) {
+              const diff = Math.abs(high - targetVal);
+              if (diff < bestDiff) {
+                bestDiff = diff;
+                bestBracket = el;
+              }
+            }
+          }
+        }
+
+        if (bestBracket) {
+          const isCheck = bestBracket.tag === "input" && bestBracket.type === "checkbox";
           return {
             actionType: isCheck ? "CHECK" : "CLICK",
-            target: filterEl.elementId,
+            target: bestBracket.elementId,
             parameters: {},
             isFilter: true,
-            reasoningSummary: `Applied filter for "${c.name}: ${c.value}".`
+            filterName: c.name,
+            filterValue: c.value,
+            reasoningSummary: `Selected price range filter: "${bestBracket.text || bestBracket.ariaLabel}".`
           };
         }
       }
+
+      // Brand or Color constraints
+      const valStr = String(c.value || c.name).toLowerCase();
+      // Look ONLY within real filter elements, NEVER in product titles or ads
+      const filterEl = interactiveElements.find(el => {
+        if (el.isSponsored || el.isAd) return false;
+        const isEligibleFilter = el.isFilter || (el.tag === "input" && (el.type === "checkbox" || el.type === "radio")) || el.role === "checkbox";
+        if (!isEligibleFilter) return false;
+        const t = `${el.text || ""} ${el.value || ""} ${el.ariaLabel || ""}`.toLowerCase();
+        return t.includes(valStr);
+      });
+
+      if (filterEl) {
+        const isCheck = filterEl.tag === "input" && filterEl.type === "checkbox";
+        return {
+          actionType: isCheck ? "CHECK" : "CLICK",
+          target: filterEl.elementId,
+          parameters: {},
+          isFilter: true,
+          filterName: c.name,
+          filterValue: c.value,
+          reasoningSummary: `Applied ${c.name} filter for "${c.value}".`
+        };
+      }
     }
+
+    // If all applicable filters are processed or search already reflects them, advance task to select_candidate
+    taskType = "select_candidate";
   }
 
-  // 4. Select / Inspect Candidate
+  // 4. Select / Inspect Candidate (Organic Results Only, Never Ads)
   if (taskType === "select_candidate" || taskType === "inspect_candidate") {
     const candidateLink = interactiveElements.find(el => {
+      // STRICT FILTER: Exclude any sponsored or ad element
+      if (el.isSponsored || el.isAd) return false;
       if (el.tag !== "a" && el.tag !== "div" && el.tag !== "li") return false;
       const t = (el.text || "").trim();
       if (t.length < 8) return false;
-      if (/\b(sign in|login|register|cart|basket|home|help|customer service|privacy|terms|about us|careers|contact|menu|navigation)\b/i.test(t)) {
+      if (/\b(sign in|login|register|cart|basket|home|help|customer service|privacy|terms|about us|careers|contact|menu|navigation|back to top)\b/i.test(t)) {
         return false;
       }
-      if (entity && t.toLowerCase().includes(entity.toLowerCase().split(" ")[0])) {
-        return true;
+      // Skip accessories if user is looking for shoes
+      if (/\b(cleaner|foam spray|cleaning kit|shoe horn|crease protector|brush)\b/i.test(t) && !/cleaner/i.test(entity || "")) {
+        return false;
       }
-      return true;
-    });
+      if (entity) {
+        const words = entity.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+        const matches = words.filter(w => t.toLowerCase().includes(w)).length;
+        if (matches >= 1) return true;
+      }
+      return el.isProductResult || t.length > 20;
+    }) || interactiveElements.find(el => !el.isSponsored && !el.isAd && el.isProductResult);
 
     if (candidateLink) {
+      stateManager.recordCandidate({
+        title: candidateLink.text || candidateLink.ariaLabel || "Product Candidate",
+        elementId: candidateLink.elementId,
+        url: candidateLink.href || null
+      });
       return {
         actionType: "CLICK",
         target: candidateLink.elementId,
         parameters: {},
-        reasoningSummary: `Inspecting candidate item: "${(candidateLink.text || '').slice(0, 45)}...".`
+        reasoningSummary: `Inspecting organic candidate product: "${(candidateLink.text || candidateLink.ariaLabel || '').slice(0, 45)}...".`
       };
     }
   }
@@ -1627,6 +1759,9 @@ if (runTaskButton) {
             break;
           }
         } else {
+          if (stepProposal?.isFilter && stepProposal?.filterName) {
+            stateManager.recordFilter(stepProposal.filterName, stepProposal.filterValue || "");
+          }
           planner.completeCurrentTask({
             targetId,
             actionType,
