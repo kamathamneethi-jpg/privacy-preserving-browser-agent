@@ -62,10 +62,13 @@ function loadEnvConfig() {
 const env = loadEnvConfig();
 const envDefines = {
   "process.env.NODE_ENV": '"production"',
+  "process.env.HUGGINGFACE_API_KEY": JSON.stringify(env.HUGGINGFACE_API_KEY || env.HF_TOKEN || process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN || ""),
+  "process.env.HF_TOKEN": JSON.stringify(env.HF_TOKEN || env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN || process.env.HUGGINGFACE_API_KEY || ""),
+  "process.env.HUGGINGFACE_MODEL": JSON.stringify(env.HUGGINGFACE_MODEL || process.env.HUGGINGFACE_MODEL || "Qwen/Qwen3-VL-4B-Instruct"),
   "process.env.GROQ_API_KEY": JSON.stringify(env.GROQ_API_KEY || process.env.GROQ_API_KEY || ""),
-  "process.env.GROQ_MODEL": JSON.stringify(env.GROQ_MODEL || process.env.GROQ_MODEL || "openai/gpt-oss-20b"),
+  "process.env.GROQ_MODEL": JSON.stringify(env.GROQ_MODEL || process.env.GROQ_MODEL || "llama-3.3-70b-versatile"),
   "process.env.OPENROUTER_API_KEY": JSON.stringify(env.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY || ""),
-  "process.env.OPENROUTER_MODEL": JSON.stringify(env.OPENROUTER_MODEL || process.env.OPENROUTER_MODEL || "google/gemma-4-26b-a4b-it:free"),
+  "process.env.OPENROUTER_MODEL": JSON.stringify(env.OPENROUTER_MODEL || process.env.OPENROUTER_MODEL || "qwen/qwen-2.5-vl-72b-instruct:free"),
   "process.env.SECURE_TRANSPORT_MODE": JSON.stringify(env.SECURE_TRANSPORT_MODE || process.env.SECURE_TRANSPORT_MODE || "GROQ_TRANSPORT")
 };
 

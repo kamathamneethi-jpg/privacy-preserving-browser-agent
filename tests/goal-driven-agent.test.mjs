@@ -485,3 +485,58 @@ test("23. MultimodalVisionAgent handles missing API key gracefully without throw
 
   assert.strictEqual(result, null);
 });
+
+test("24. MultimodalVisionAgent invokes Hugging Face router with Qwen3-VL-4B-Instruct", async () => {
+  let requestedUrl = "";
+  let requestedHeaders = {};
+  let requestedBody = null;
+
+  const mockFetch = async (url, opts) => {
+    requestedUrl = url;
+    requestedHeaders = opts.headers;
+    requestedBody = JSON.parse(opts.body);
+
+    return {
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                observation: "Found search field via Qwen3-VL vision",
+                goal_progress: { isSatisfied: false },
+                next_task: "Enter search query",
+                action: {
+                  actionType: "TYPE",
+                  target: "el_input_search",
+                  parameters: { text: "white sneakers" },
+                  thenPressEnter: true,
+                  reasoningSummary: "Qwen3-VL planned search"
+                }
+              })
+            }
+          }
+        ]
+      })
+    };
+  };
+
+  const result = await MultimodalVisionAgent.reason({
+    apiKey: "hf_sample_token_12345",
+    model: "Qwen/Qwen3-VL-4B-Instruct",
+    provider: "huggingface",
+    goal: GoalParser.parse("Search for white sneakers"),
+    currentTask: { type: "search", description: "Search for white sneakers" },
+    executionState: {},
+    interactiveElements: [{ elementId: "el_input_search", tag: "input", type: "search" }],
+    fetchClient: mockFetch
+  });
+
+  assert.strictEqual(requestedUrl, "https://router.huggingface.co/v1/chat/completions");
+  assert.strictEqual(requestedHeaders.Authorization, "Bearer hf_sample_token_12345");
+  assert.strictEqual(requestedBody.model, "Qwen/Qwen3-VL-4B-Instruct");
+  assert.strictEqual(result.action.actionType, "TYPE");
+  assert.strictEqual(result.action.target, "el_input_search");
+  assert.strictEqual(result.action.parameters.text, "white sneakers");
+  assert.strictEqual(result.action.thenPressEnter, true);
+});

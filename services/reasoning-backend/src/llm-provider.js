@@ -22,8 +22,8 @@ export const LLM_MODELS = Object.freeze({
   OPENAI_GPT4O_MINI: "gpt-4o-mini",
   OPENAI_GPT4O: "gpt-4o",
   GROQ_LLAMA3: "llama-3.3-70b-versatile",
-  OPENROUTER_DEFAULT: "meta-llama/llama-3.3-70b-instruct",
-  HUGGINGFACE_DEFAULT: "meta-llama/Llama-3.3-70B-Instruct"
+  OPENROUTER_DEFAULT: "qwen/qwen-2.5-vl-72b-instruct:free",
+  HUGGINGFACE_DEFAULT: "Qwen/Qwen3-VL-4B-Instruct"
 });
 
 export class LlmReasoningProvider {

@@ -34,7 +34,9 @@ The **Privacy-Preserving Browser Agent** is fully functional end-to-end:
 - [x] eCommerce intent disambiguation (search query keyword isolation vs. Add to Cart / Buy Now actions).
 
 ### Milestone 4: Remote Model Reasoning & Live Terminal Observability [COMPLETED]
-- [x] Groq Provider adapter (`openai/gpt-oss-20b`) and OpenRouter adapter.
+- [x] Hugging Face free serverless inference adapter with `Qwen/Qwen3-VL-4B-Instruct` (Free Visual Agent model).
+- [x] OpenRouter free-tier adapter (`qwen/qwen-2.5-vl-72b-instruct:free`, `google/gemma-2-9b-it:free`) and Groq adapter (`llama-3.3-70b-versatile`).
+- [x] Local On-Device Heuristic Planner fallback (zero API key, zero egress, 100% free).
 - [x] Live terminal log relay (`scripts/extension-log-server.mjs`) streaming pipeline events.
 - [x] Authoritative local action execution (`CLICK`, `TYPE`, `CHECK`, `SELECT`, `PRESS_KEY`, `SUBMIT`).
 

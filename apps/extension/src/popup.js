@@ -584,21 +584,36 @@ function relayToTerminalLog(stage, event, data) {
   } catch {}
 }
 
+const ENV_HUGGINGFACE_KEY = (typeof process !== "undefined" && (process.env?.HUGGINGFACE_API_KEY || process.env?.HF_TOKEN)) || "";
+const ENV_HUGGINGFACE_MODEL = (typeof process !== "undefined" && process.env?.HUGGINGFACE_MODEL) || "Qwen/Qwen3-VL-4B-Instruct";
 const ENV_GROQ_KEY = (typeof process !== "undefined" && process.env?.GROQ_API_KEY) || "";
-const ENV_GROQ_MODEL = (typeof process !== "undefined" && process.env?.GROQ_MODEL) || "openai/gpt-oss-20b";
+const ENV_GROQ_MODEL = (typeof process !== "undefined" && process.env?.GROQ_MODEL) || "llama-3.3-70b-versatile";
 const ENV_OPENROUTER_KEY = (typeof process !== "undefined" && process.env?.OPENROUTER_API_KEY) || "";
-const ENV_OPENROUTER_MODEL = (typeof process !== "undefined" && process.env?.OPENROUTER_MODEL) || "google/gemma-4-26b-a4b-it:free";
-const DEFAULT_PROVIDER = ENV_GROQ_KEY ? "groq" : "openrouter";
+const ENV_OPENROUTER_MODEL = (typeof process !== "undefined" && process.env?.OPENROUTER_MODEL) || "qwen/qwen-2.5-vl-72b-instruct:free";
+
+const DEFAULT_PROVIDER = ENV_HUGGINGFACE_KEY ? "huggingface" : (ENV_OPENROUTER_KEY ? "openrouter" : (ENV_GROQ_KEY ? "groq" : "huggingface"));
+
+function getDefaultModelForProvider(prov) {
+  if (prov === "huggingface" || prov === "hf") return ENV_HUGGINGFACE_MODEL;
+  if (prov === "groq") return ENV_GROQ_MODEL;
+  return ENV_OPENROUTER_MODEL;
+}
+
+function getDefaultKeyForProvider(prov) {
+  if (prov === "huggingface" || prov === "hf") return ENV_HUGGINGFACE_KEY;
+  if (prov === "groq") return ENV_GROQ_KEY;
+  return ENV_OPENROUTER_KEY;
+}
 
 // Auto-populate from environment configuration if available
 if (providerSelect) {
   providerSelect.value = DEFAULT_PROVIDER;
 }
 if (modelInput) {
-  modelInput.value = DEFAULT_PROVIDER === "groq" ? ENV_GROQ_MODEL : ENV_OPENROUTER_MODEL;
+  modelInput.value = getDefaultModelForProvider(DEFAULT_PROVIDER);
 }
 if (apiKeyInput && !apiKeyInput.value) {
-  const defaultKey = DEFAULT_PROVIDER === "groq" ? ENV_GROQ_KEY : ENV_OPENROUTER_KEY;
+  const defaultKey = getDefaultKeyForProvider(DEFAULT_PROVIDER);
   if (defaultKey) {
     apiKeyInput.value = defaultKey;
   }
@@ -621,18 +636,17 @@ if (typeof chrome !== "undefined" && chrome.storage?.local) {
 
 if (providerSelect && modelInput) {
   providerSelect.addEventListener("change", () => {
-    if (providerSelect.value === "groq") {
-      modelInput.value = ENV_GROQ_MODEL;
-      if (apiKeyInput && (!apiKeyInput.value || apiKeyInput.value === ENV_OPENROUTER_KEY)) {
-        apiKeyInput.value = ENV_GROQ_KEY;
+    const prov = providerSelect.value;
+    modelInput.value = getDefaultModelForProvider(prov);
+    if (apiKeyInput) {
+      apiKeyInput.value = getDefaultKeyForProvider(prov);
+      if (prov === "huggingface") {
+        apiKeyInput.placeholder = "hf_... (Hugging Face Free Token)";
+      } else if (prov === "groq") {
+        apiKeyInput.placeholder = "gsk_... (Groq API Key)";
+      } else {
+        apiKeyInput.placeholder = "sk-or-v1-... (OpenRouter Free/Paid Key)";
       }
-      apiKeyInput.placeholder = "gsk_... (configured via .env)";
-    } else {
-      modelInput.value = ENV_OPENROUTER_MODEL;
-      if (apiKeyInput && (!apiKeyInput.value || apiKeyInput.value === ENV_GROQ_KEY)) {
-        apiKeyInput.value = ENV_OPENROUTER_KEY;
-      }
-      apiKeyInput.placeholder = "sk-or-v1-... (configured via .env)";
     }
   });
 }
@@ -641,13 +655,14 @@ if (saveKeyButton && apiKeyInput) {
   saveKeyButton.addEventListener("click", () => {
     const key = apiKeyInput.value.trim();
     const provider = providerSelect?.value || DEFAULT_PROVIDER;
-    const model = modelInput?.value.trim() || (provider === "groq" ? ENV_GROQ_MODEL : ENV_OPENROUTER_MODEL);
+    const model = modelInput?.value.trim() || getDefaultModelForProvider(provider);
     
     if (typeof chrome !== "undefined" && chrome.storage?.local) {
       chrome.storage.local.set({
         llm_provider: provider,
         llm_api_key: key,
         llm_model: model,
+        huggingface_api_key: key,
         openrouter_api_key: key
       }, () => {
         status.textContent = `${provider.toUpperCase()} settings saved locally.`;
@@ -846,15 +861,15 @@ if (scanButton) {
 /**
  * Detects if user task specifies a domain/URL or if we need to navigate from an internal tab.
  */
-function extractNavigationUrl(task, currentUrl = "") {
+function extractNavigationUrl(task, currentUrl = "", parsedGoal = null) {
   if (!task) return null;
   const isInternal = !currentUrl || currentUrl.startsWith("chrome://") || currentUrl.startsWith("about:") || currentUrl.startsWith("chrome-extension://") || currentUrl.startsWith("devtools://");
 
-  // Check for explicit URL in task
+  // 1. Check for explicit URL in task
   const urlMatch = task.match(/https?:\/\/[^\s]+/i);
   if (urlMatch) return urlMatch[0];
 
-  // Check for known domain keywords in task
+  // 2. Check for known domain keywords in task
   const domainPatterns = [
     { regex: /\b(?:go to|open|search on|visit|navigate to|search in)\s+(?:www\.)?amazon\.in\b/i, url: "https://www.amazon.in" },
     { regex: /\b(?:go to|open|search on|visit|navigate to|search in)\s+(?:www\.)?amazon\.com\b/i, url: "https://www.amazon.com" },
@@ -872,11 +887,19 @@ function extractNavigationUrl(task, currentUrl = "") {
     }
   }
 
-  // If on an internal page (newtab), check if user mentions amazon/google/etc anywhere
+  const isEcommerceIntent = parsedGoal?.domain === "ecommerce" || /\b(shoes?|sneakers?|laptops?|phones?|jackets?|clothes?|buy|shop|under\s+\d+k?|under\s+rs|cart|order)\b/i.test(task);
+  const isAlreadyOnEcommerce = currentUrl.includes("amazon.") || currentUrl.includes("flipkart.") || currentUrl.includes("ebay.") || currentUrl.includes("walmart.");
+
+  // If shopping/ecommerce intent and not already on shopping site, or on internal tab
+  if (isEcommerceIntent && (!isAlreadyOnEcommerce || isInternal)) {
+    return "https://www.amazon.in";
+  }
+
+  // If on an internal page (newtab, extensions), check domain intent
   if (isInternal) {
-    if (/\bamazon\b/i.test(task)) return "https://www.amazon.in";
-    if (/\byoutube\b/i.test(task)) return "https://www.youtube.com";
-    if (/\bwikipedia\b/i.test(task)) return "https://www.wikipedia.org";
+    if (/\b(amazon|buy|shop|cart|order)\b/i.test(task)) return "https://www.amazon.in";
+    if (/\b(youtube|video|watch)\b/i.test(task)) return "https://www.youtube.com";
+    if (/\b(wikipedia|wiki|encyclopedia)\b/i.test(task)) return "https://www.wikipedia.org";
     return "https://www.google.com";
   }
 
@@ -887,25 +910,48 @@ function extractNavigationUrl(task, currentUrl = "") {
  * Navigates tab to target URL and waits for page load to finish.
  */
 async function navigateTabAndWait(tabId, targetUrl) {
-  if (typeof chrome === "undefined" || !chrome.tabs?.update) return false;
-  await chrome.tabs.update(tabId, { url: targetUrl });
+  if (typeof chrome === "undefined" || !chrome.tabs) return false;
+
+  let activeTargetTabId = tabId;
+
+  try {
+    if (tabId && chrome.tabs.update) {
+      await chrome.tabs.update(tabId, { url: targetUrl, active: true });
+    } else if (chrome.tabs.create) {
+      const newTab = await chrome.tabs.create({ url: targetUrl, active: true });
+      activeTargetTabId = newTab.id;
+    }
+  } catch {
+    if (chrome.tabs.create) {
+      try {
+        const newTab = await chrome.tabs.create({ url: targetUrl, active: true });
+        activeTargetTabId = newTab.id;
+      } catch {
+        return false;
+      }
+    } else {
+      return false;
+    }
+  }
 
   return new Promise((resolve) => {
     let isResolved = false;
     const listener = (updatedTabId, changeInfo) => {
-      if (updatedTabId === tabId && changeInfo.status === "complete") {
-        chrome.tabs.onUpdated.removeListener(listener);
+      if (updatedTabId === activeTargetTabId && changeInfo.status === "complete") {
+        chrome.tabs.onUpdated?.removeListener(listener);
         if (!isResolved) {
           isResolved = true;
-          setTimeout(resolve, 1500); // 1.5s DOM settle time
+          setTimeout(resolve, 1800); // 1.8s DOM settle time
         }
       }
     };
-    chrome.tabs.onUpdated.addListener(listener);
+    if (chrome.tabs.onUpdated?.addListener) {
+      chrome.tabs.onUpdated.addListener(listener);
+    }
     setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(listener);
+      chrome.tabs.onUpdated?.removeListener(listener);
       if (!isResolved) resolve();
-    }, 7000);
+    }, 8000);
   });
 }
 
@@ -1277,24 +1323,24 @@ if (runTaskButton) {
       // 3. Obtain API settings
       const userKey = (apiKeyInput?.value || "").trim();
       const provider = providerSelect?.value || DEFAULT_PROVIDER;
-      const apiKey = userKey || (provider === "groq" ? ENV_GROQ_KEY : ENV_OPENROUTER_KEY);
-      const selectedModel = (modelInput?.value || "").trim() || (provider === "groq" ? ENV_GROQ_MODEL : ENV_OPENROUTER_MODEL);
+      const apiKey = userKey || getDefaultKeyForProvider(provider);
+      const selectedModel = (modelInput?.value || "").trim() || getDefaultModelForProvider(provider);
 
       // 4. Auto-Navigation if needed
       let activeTab = null;
       if (typeof chrome !== "undefined" && chrome.tabs?.query) {
-        const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-        activeTab = tabs?.[0] || null;
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        activeTab = tabs?.[0] || (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))?.[0] || null;
       }
 
       const currentUrl = activeTab?.url || "";
-      const targetNavUrl = extractNavigationUrl(userTask, currentUrl);
+      const targetNavUrl = extractNavigationUrl(userTask, currentUrl, parsedGoal);
 
-      if (targetNavUrl && activeTab?.id) {
+      if (targetNavUrl) {
         setPipelineStage("AUTO-NAVIGATION");
         status.textContent = `Navigating to ${targetNavUrl}...`;
         relayToTerminalLog("Auto-Navigation", `Navigating tab to ${targetNavUrl}`, { targetNavUrl, fromUrl: currentUrl });
-        await navigateTabAndWait(activeTab.id, targetNavUrl);
+        await navigateTabAndWait(activeTab?.id, targetNavUrl);
         if (planner.getCurrentTask()?.type === "navigate") {
           planner.completeCurrentTask({ url: targetNavUrl });
         }
@@ -1330,10 +1376,17 @@ if (runTaskButton) {
         renderPiiSummary(piiFindings);
 
         // 5.3 Discover Interactive Elements on the CURRENT page state
-        let observeRes = await sendTabMessage({ type: "OBSERVE_INTERACTIVE_DOM" }).catch(() => null);
+        let observeErr = null;
+        let observeRes = await sendTabMessage({ type: "OBSERVE_INTERACTIVE_DOM" }).catch((err) => {
+          observeErr = err;
+          return null;
+        });
         if (!observeRes?.interactiveElements || observeRes.interactiveElements.length === 0) {
           await new Promise(r => setTimeout(r, 1200));
-          observeRes = await sendTabMessage({ type: "OBSERVE_INTERACTIVE_DOM" }).catch(() => null);
+          observeRes = await sendTabMessage({ type: "OBSERVE_INTERACTIVE_DOM" }).catch((err) => {
+            observeErr = err;
+            return null;
+          });
         }
 
         const interactiveElements = observeRes?.interactiveElements || [];
@@ -1362,7 +1415,9 @@ if (runTaskButton) {
         });
 
         if (interactiveElements.length === 0) {
-          relayToTerminalLog(`Step ${stepNum}: Stalled`, "No interactive elements discovered on page.", {});
+          const errMsg = observeErr?.message || "No interactive elements discovered on page.";
+          finalSummary = `Halted: ${errMsg} Please ensure an active, standard webpage (e.g. https://www.amazon.in) is open in Chrome.`;
+          relayToTerminalLog(`Step ${stepNum}: Stalled`, finalSummary, { error: errMsg, pageUrl, pageTitle });
           break;
         }
 
@@ -1613,7 +1668,7 @@ if (runTaskButton) {
         const modelLabel = apiKey ? `${selectedModel} (${provider.toUpperCase()})` : "Local Heuristic Planner";
         taskSummary.textContent = isOverallSuccess
           ? `Goal completed in ${totalMs}ms via ${modelLabel}. ${successfulCount}/${executedResults.length} step(s) executed successfully.`
-          : `Task stopped in ${totalMs}ms. ${successfulCount}/${executedResults.length} step(s) executed.`;
+          : `Task halted in ${totalMs}ms. ${successfulCount}/${executedResults.length} step(s) executed. ${finalSummary}`;
 
         const breadcrumbItem = document.createElement("li");
         breadcrumbItem.style.fontWeight = "bold";
@@ -1642,10 +1697,16 @@ if (runTaskButton) {
         taskResults.hidden = false;
       }
 
-      setPipelineStage("BROWSER ACTION (COMPLETED)");
-      status.textContent = isOverallSuccess
-        ? `Task completed successfully in ${totalMs}ms.`
-        : `Task execution stopped.`;
+      if (isOverallSuccess) {
+        setPipelineStage("BROWSER ACTION (COMPLETED)");
+        status.textContent = `Task completed successfully in ${totalMs}ms.`;
+      } else if (executedResults.length === 0) {
+        setPipelineStage("TASK HALTED / NO ELEMENTS");
+        status.textContent = `Task halted: No actions could be executed on this page. Please open an active website (e.g. https://www.amazon.in) and click Run Agent Task again.`;
+      } else {
+        setPipelineStage("TASK HALTED / INCOMPLETE");
+        status.textContent = `Task execution stopped after ${executedResults.length} step(s).`;
+      }
     } catch (err) {
       setPipelineStage("FAILED / DENIED");
       status.textContent = `Task execution error: ${err.message || "Cannot inspect tab."}`;

@@ -7,7 +7,7 @@
     "default_title": "Privacy-Preserving Browser Agent",
     "default_popup": "popup.html"
   },
-  "permissions": ["activeTab", "storage", "scripting"],
+  "permissions": ["activeTab", "tabs", "storage", "scripting"],
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*", "<all_urls>"],

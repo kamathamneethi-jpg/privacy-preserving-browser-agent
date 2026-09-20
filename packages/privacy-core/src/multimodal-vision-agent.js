@@ -9,12 +9,14 @@
  * 3. Structured Output: Enforces a strict JSON action decision schema with valid DOM element targets.
  */
 
-export const DEFAULT_MULTIMODAL_MODEL = "qwen/qwen-2.5-vl-72b-instruct";
+export const DEFAULT_MULTIMODAL_MODEL = "Qwen/Qwen3-VL-4B-Instruct";
+export const HUGGINGFACE_DEFAULT_MODEL = "Qwen/Qwen3-VL-4B-Instruct";
+export const OPENROUTER_DEFAULT_MODEL = "qwen/qwen-2.5-vl-72b-instruct:free";
 
 export class MultimodalVisionAgent {
   constructor(config = {}) {
-    this.provider = config.provider || "openrouter"; // "openrouter" | "groq"
-    this.model = config.model || DEFAULT_MULTIMODAL_MODEL;
+    this.provider = config.provider || "huggingface"; // "huggingface" | "openrouter" | "groq"
+    this.model = config.model || (this.provider === "huggingface" ? HUGGINGFACE_DEFAULT_MODEL : (this.provider === "openrouter" ? OPENROUTER_DEFAULT_MODEL : DEFAULT_MULTIMODAL_MODEL));
     this.apiKey = config.apiKey || "";
     this.temperature = typeof config.temperature === "number" ? config.temperature : 0.1;
     this.maxTokens = config.maxTokens || 1200;
@@ -225,9 +227,14 @@ export class MultimodalVisionAgent {
       rawPiiValues
     });
 
-    const endpointUrl = provider === "groq"
-      ? "https://api.groq.com/openai/v1/chat/completions"
-      : "https://openrouter.ai/api/v1/chat/completions";
+    let endpointUrl;
+    if (provider === "groq") {
+      endpointUrl = "https://api.groq.com/openai/v1/chat/completions";
+    } else if (provider === "huggingface" || provider === "hf") {
+      endpointUrl = "https://router.huggingface.co/v1/chat/completions";
+    } else {
+      endpointUrl = "https://openrouter.ai/api/v1/chat/completions";
+    }
 
     const headers = {
       "Content-Type": "application/json",

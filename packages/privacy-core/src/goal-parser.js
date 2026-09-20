@@ -101,7 +101,7 @@ export class GoalParser {
     if (/\b(?:form|sign up|register|survey|application|registration|fill out|employee form)\b/i.test(lower)) {
       return TASK_DOMAINS.FORM_FILLING;
     }
-    if (/\b(?:buy|shop|cart|product|price|shoe|jacket|clothes|laptop|amazon|flipkart|ebay|walmart|discount|cost|order|winter jacket)\b/i.test(lower)) {
+    if (/\b(?:buy|shop|cart|product|price|shoes?|sneakers?|jackets?|clothes?|laptops?|phones?|amazon|flipkart|ebay|walmart|discount|cost|order|winter jacket)\b/i.test(lower)) {
       return TASK_DOMAINS.ECOMMERCE;
     }
     if (/\b(?:read|article|paper|summary|extract|wikipedia|research|look up|info|information)\b/i.test(lower)) {
@@ -129,14 +129,19 @@ export class GoalParser {
       });
     };
 
-    // 1. Price constraint: under / below / less than / max <number>
-    const maxPriceMatch = text.match(/(?:under|below|less than|max|up to|<=?)\s*(?:[₹$€£]|rs\.?|inr|usd)?\s*([\d,]+(?:\.\d+)?)/i);
+    // 1. Price constraint: under / below / less than / max <number><k?>
+    const maxPriceMatch = text.match(/(?:under|below|less than|max|up to|<=?)\s*(?:[₹$€£]|rs\.?|inr|usd)?\s*([\d,]+(?:\.\d+)?)\s*(k\b|thousand\b)?/i);
     if (maxPriceMatch) {
       const numStr = maxPriceMatch[1].replace(/,/g, "");
-      const val = parseFloat(numStr);
+      let val = parseFloat(numStr);
+      if (maxPriceMatch[2] && /^k\b/i.test(maxPriceMatch[2])) {
+        val = val * 1000;
+      } else if (maxPriceMatch[2] && /^thousand\b/i.test(maxPriceMatch[2])) {
+        val = val * 1000;
+      }
       if (!isNaN(val)) {
         let currency = "USD";
-        if (text.includes("₹") || /inr|rs/i.test(text)) currency = "INR";
+        if (text.includes("₹") || /inr|rs/i.test(text) || (maxPriceMatch[2] && val >= 1000)) currency = "INR";
         else if (text.includes("€") || /eur/i.test(text)) currency = "EUR";
         else if (text.includes("£") || /gbp/i.test(text)) currency = "GBP";
 
@@ -144,11 +149,16 @@ export class GoalParser {
       }
     }
 
-    // 2. Minimum price constraint: above / at least / over <number>
-    const minPriceMatch = text.match(/(?:above|over|more than|at least|>=?)\s*(?:[₹$€£]|rs\.?|inr|usd)?\s*([\d,]+(?:\.\d+)?)/i);
+    // 2. Minimum price constraint: above / at least / over <number><k?>
+    const minPriceMatch = text.match(/(?:above|over|more than|at least|>=?)\s*(?:[₹$€£]|rs\.?|inr|usd)?\s*([\d,]+(?:\.\d+)?)\s*(k\b|thousand\b)?/i);
     if (minPriceMatch) {
       const numStr = minPriceMatch[1].replace(/,/g, "");
-      const val = parseFloat(numStr);
+      let val = parseFloat(numStr);
+      if (minPriceMatch[2] && /^k\b/i.test(minPriceMatch[2])) {
+        val = val * 1000;
+      } else if (minPriceMatch[2] && /^thousand\b/i.test(minPriceMatch[2])) {
+        val = val * 1000;
+      }
       if (!isNaN(val)) {
         addConstraint("price", CONSTRAINT_OPERATORS.GREATER_THAN_OR_EQUAL, val);
       }
