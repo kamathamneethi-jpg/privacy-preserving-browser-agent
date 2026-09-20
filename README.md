@@ -1,18 +1,75 @@
 # Privacy-Preserving Autonomous Browser Agent
 
+> 🚨 **MANDATORY INSTRUCTION FOR ALL INCOMING AI AGENTS & DEVELOPERS** 🚨:
+> In **EVERY** new conversation, session, or task, you **MUST** read and review the `.md` documentation files **FIRST** before analyzing, modifying, or executing any code in this repository.
+> Start with [`AGENTS.md`](AGENTS.md), then [`to-do.md`](to-do.md), [`progress.md`](progress.md), and [`DEMO_WALKTHROUGH.md`](DEMO_WALKTHROUGH.md).
+
 > **Smart India Hackathon (SIH 2026)**
-> A privacy-first browser agent that perceives webpages and executes autonomous multi-step tasks while keeping 100% of sensitive information and secrets strictly on the user's local device.
+> A privacy-first autonomous browser agent that perceives webpages, reasons over structural DOM and visual layout, and executes multi-step web tasks while keeping 100% of sensitive information and secrets strictly on the user's local device.
 
 ---
 
 ## 🔒 The Zero-Leakage Privacy Boundary
 
-Raw sensitive data **NEVER** leaves the client's browser. The extension detects sensitive content locally and enforces strict on-device privacy decisions before sharing sanitized context with remote LLMs:
+Raw sensitive data **NEVER** leaves the client's browser. The extension detects sensitive content locally and enforces strict on-device privacy decisions before sharing sanitized context with remote models:
 
 - **`REDACT`** — Replaces irrelevant sensitive data with opaque redaction markers.
 - **`TOKENIZE`** — Replaces task-relevant sensitive fields with local abstract references (e.g. `{{EMAIL_1}}`, `{{PHONE_1}}`).
 - **`LOCAL_ONLY`** — Retains high-security secrets (passwords, OTPs, credit cards) exclusively inside the local encrypted privacy vault. The remote AI receives only abstract actions.
-- **Zero Raw Screenshots / Pixels**: Visual perception and OCR happen on-device. Raw image buffers are blocked from transmission.
+- **Dual-Modality Redaction**: Visual perception and OCR happen on-device. When screenshots are sent to multimodal reasoning models, detected sensitive regions are blacked out on-device beforehand.
+- **CSP-Safe Execution Authority**: Action execution happens exclusively within the local browser runtime with `safeClick` disarming `javascript:` pseudo-protocols to prevent Content Security Policy violations.
+
+---
+
+## 🚀 Quickstart & Workflows
+
+### 1. Build Extension Bundle
+```bash
+node scripts/build-extension.mjs
+```
+Generates production files in `apps/extension/dist/`.
+
+### 2. Launch Observability Server & Live Telemetry Dashboard
+```bash
+node scripts/extension-log-server.mjs
+```
+- **Live Web Dashboard**: `http://127.0.0.1:8765`
+- **Real-Time SSE Stream**: `http://127.0.0.1:8765/api/events/stream`
+- **Telemetry Ingestion API**: `http://127.0.0.1:8765/api/events`
+- **JSON Audit Export**: `http://127.0.0.1:8765/api/export`
+
+### 3. Load Extension in Google Chrome
+1. Navigate to `chrome://extensions` in Google Chrome.
+2. Toggle **Developer mode** ON (top-right switch).
+3. Click **Load unpacked** and select the folder:
+   `apps/extension`
+4. The extension icon will appear in your Chrome toolbar.
+5. To reload after code changes, simply click the **`🔄 Reload`** button in the popup header.
+
+### 4. Run Automated Tests
+```bash
+# Run privacy, DOM action, and observability test suites
+node --test tests/generic-dom-actions.test.mjs tests/observability-backend.test.mjs tests/content-pii-scan.test.mjs tests/groq-model-provider.test.mjs
+```
+
+---
+
+## 🤖 Supported Reasoning Models
+
+The browser agent supports free-tier multimodal and reasoning models:
+
+1. **Hugging Face Serverless (Multimodal Vision Agent)**:
+   - Model: `Qwen/Qwen3-VL-4B-Instruct`
+   - Requirement: Free Hugging Face User Access Token (`hf_...`)
+   - Capabilities: Dual-modality ingestion (redacted screenshot + sanitized DOM tree)
+2. **OpenRouter (Free Tier)**:
+   - Models: `qwen/qwen-2.5-vl-72b-instruct:free`, `google/gemma-2-9b-it:free`, `meta-llama/llama-3.2-11b-vision-instruct:free`
+   - Requirement: Free OpenRouter API Key
+3. **Groq (Fast Cloud Inference)**:
+   - Model: `llama-3.3-70b-versatile`
+   - Requirement: Groq API Key
+4. **Local On-Device Heuristic Planner (100% Offline & Free)**:
+   - Requirement: None (zero API key, zero network egress, runs 100% locally on port 8765 or in-browser)
 
 ---
 
@@ -21,7 +78,7 @@ Raw sensitive data **NEVER** leaves the client's browser. The extension detects 
 This sub-project fine-tunes a pretrained **YOLO11n** (`yolo11n.pt`) detector for on-device detection of 16 categories of Personally Identifiable Information (PII) on rendered webpage screenshots.
 
 ### Key Experiment Details
-- **Architecture**: Ultralytics **YOLO11n** (Nano) starting from pretrained `yolo11n.pt` weights (**fine-tuning**, not training from scratch).
+- **Architecture**: Ultralytics **YOLO11n** (Nano) starting from pretrained `yolo11n.pt` weights.
 - **Dataset**: `datasets/webpii_yolo/`
   - **Train**: 40,384 images, 40,384 labels (469,135 annotations)
   - **Test**: 4,481 images, 4,481 labels (51,715 annotations)
@@ -36,101 +93,36 @@ This sub-project fine-tunes a pretrained **YOLO11n** (`yolo11n.pt`) detector for
 
 ---
 
-## 💻 Workflows & Commands
-
-### A. Mac Preparation Workflow (Validation Only — NO Training on Mac)
-
-The Mac environment is strictly used for code writing, syntax verification, and dry runs. **Model training is NOT executed on macOS.**
-
-```bash
-# 1. Navigate to workspace
-cd ~/Desktop/sih
-
-# 2. Check environment (verifies Python, PyTorch, Ultralytics, YAML)
-python3 scripts/check_environment.py
-
-# 3. Verify dataset integrity (counts, 1-to-1 image-label pairs, coords, 16 classes)
-python3 scripts/verify_dataset.py
-
-# 4. Perform a dry run (loads config, validates parameters, DOES NOT train)
-python3 scripts/train_yolo.py --dry-run
-```
-
----
-
-### B. NVIDIA RTX Laptop Workflow (GPU Training & Evaluation)
-
-Copy the project repository and `datasets/webpii_yolo` to your NVIDIA RTX laptop.
-
-#### 1. Setup Environment on RTX Laptop
-```bash
-cd /path/to/sih
-
-# Install PyTorch with CUDA support (match your CUDA version, e.g. CUDA 12.1):
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-
-# Install requirements
-pip install -r requirements.txt
-```
-
-#### 2. Run Diagnostics & Pre-Flight
-```bash
-# Check GPU and CUDA availability
-python scripts/check_environment.py
-
-# Verify dataset structure
-python scripts/verify_dataset.py
-
-# Run RTX GPU pre-flight check (verifies GPU memory and checks all configs without training)
-python scripts/train_yolo.py --preflight
-```
-
-#### 3. Execute Training
-If pre-flight passes, start training:
-
-```bash
-# Default training (batch size 16):
-python scripts/train_yolo.py --batch 16
-
-# If CUDA Out-Of-Memory occurs, reduce batch size:
-python scripts/train_yolo.py --batch 8
-
-# If still Out-Of-Memory:
-python scripts/train_yolo.py --batch 4
-```
-
-> Training outputs are saved under: `training/webpii_16class_yolo11n/`
-> The main trained model weights are saved at: `training/webpii_16class_yolo11n/weights/best.pt`
-
-#### 4. Evaluate Trained Model on Test Set
-```bash
-python scripts/evaluate_yolo.py
-```
-This loads `training/webpii_16class_yolo11n/weights/best.pt` and evaluates against the 4,481 test images in `images/test`, reporting overall and per-class Precision, Recall, mAP@50, and mAP@50-95, and saves results to `training/webpii_16class_yolo11n/evaluation/evaluation_summary.json`.
-
----
-
 ## 📁 Repository Layout
 
 ```text
-apps/extension/             Chrome Extension (Manifest V3 popup, DOM perception, action runtime)
-packages/privacy-core/      On-device PII detection, tokenization, vault, & DOM registry
-services/reasoning-backend/ Sanitized remote reasoning adapter & payload validation
-models/                     SIH 2026 On-device ML training pipeline
-datasets/webpii_yolo/       44,865 image WebPII dataset in YOLO format (train: 40,384, test: 4,481)
-scripts/                    Build tools, dataset verifier, training, and evaluation scripts
-├── verify_dataset.py       Non-destructive dataset integrity checker
-├── check_environment.py    Cross-platform hardware & CUDA diagnostic tool
-├── train_yolo.py           GPU training runner with --dry-run and --preflight safety modes
-└── evaluate_yolo.py        Full test-split metric evaluator (mAP50, mAP50-95, per-class)
-tests/                      309+ automated privacy, security, and DOM action test suites
+privacy-preserving-browser-agent/
+├── apps/
+│   └── extension/             Chrome Extension (Manifest V3 popup, DOM perception, action runtime)
+├── packages/
+│   ├── privacy-core/          On-device PII detection, tokenization, vault, DOM registry, & vision agent
+│   └── shared-types/          Shared schemas and privacy contracts
+├── services/
+│   └── reasoning-backend/     Sanitized remote reasoning adapter & payload validation
+├── models/                    SIH 2026 on-device ML training pipeline (YOLOv8 + ViT + ONNX)
+├── datasets/webpii_yolo/      44,865 image WebPII dataset in YOLO format
+├── scripts/                   Build tools, live log server, dataset verifiers, and demo scripts
+│   ├── build-extension.mjs    Extension bundler (ESBuild)
+│   ├── extension-log-server.mjs Observability backend & SSE dashboard on port 8765
+│   ├── run-sih-demo.mjs       Automated 3-scenario SIH demonstration runner
+│   ├── verify_dataset.py      Dataset integrity checker
+│   ├── check_environment.py   Hardware & CUDA diagnostic tool
+│   ├── train_yolo.py          GPU training runner
+│   └── evaluate_yolo.py       Full test-split metric evaluator
+└── tests/                     328+ automated privacy, security, and DOM action test suites
 ```
 
 ---
 
 ## 📖 Key Documentation
 
-- **[`AGENTS.md`](file:///Users/shahrukh/Desktop/sih/AGENTS.md)** — Master guide, architectural invariants, and reading order for AI models.
-- **[`to-do.md`](file:///Users/shahrukh/Desktop/sih/to-do.md)** — Active roadmap and task status.
-- **[`progress.md`](file:///Users/shahrukh/Desktop/sih/progress.md)** — Detailed historical changelog.
-- **[`DEMO_WALKTHROUGH.md`](file:///Users/shahrukh/Desktop/sih/DEMO_WALKTHROUGH.md)** — Step-by-step verification flows.
+- **[`AGENTS.md`](AGENTS.md)** — Master guide, architectural invariants, and mandatory reading order.
+- **[`to-do.md`](to-do.md)** — Active roadmap and completion status.
+- **[`progress.md`](progress.md)** — Detailed historical changelog.
+- **[`DEMO_WALKTHROUGH.md`](DEMO_WALKTHROUGH.md)** — Step-by-step verification flows and demonstration scripts.
+- **[`DEPLOYMENT.md`](DEPLOYMENT.md)** — Setup and deployment manual.
