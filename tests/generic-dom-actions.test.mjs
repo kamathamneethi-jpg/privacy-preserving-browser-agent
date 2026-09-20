@@ -43,6 +43,22 @@ class MockDomNode {
     return this.attributes[name] || null;
   }
 
+  removeAttribute(name) {
+    delete this.attributes[name];
+  }
+
+  setAttribute(name, val) {
+    this.attributes[name] = val;
+  }
+
+  addEventListener(type, handler) {
+    // Mock listener
+  }
+
+  removeEventListener(type, handler) {
+    // Mock listener
+  }
+
   dispatchEvent(evt) {
     this.events.push(evt);
     return true;
@@ -304,4 +320,24 @@ test("BrowserAgentCoordinator reports COMPLETED only when all required actions s
   assert.equal(result.failedActionsCount, 0);
   assert.equal(result.executionResults[0].status, ACTION_RESULTS.COMPLETED);
   assert.equal(result.executionResults[1].status, ACTION_RESULTS.COMPLETED);
+});
+
+test("DomDriver and safeClick disarm javascript:void(0) href to prevent Chrome CSP navigation violation", () => {
+  const registry = createInteractiveElementRegistry();
+  const jsAnchor = new MockDomNode({
+    tagName: "A",
+    id: "filter-link",
+    attributes: { href: "javascript:void(0)" },
+    textContent: "Under ₹7,000"
+  });
+
+  registry.observeDocument({ children: [jsAnchor] });
+
+  const driver = new DomDriver({ registry });
+  const clickRes = driver.execute(BROWSER_ACTION_TYPES.CLICK, "el_1");
+
+  assert.equal(clickRes.ok, true);
+  assert.equal(jsAnchor.events.some(e => e.type === "click"), true);
+  // Original href was restored after the safe click disarming
+  assert.equal(jsAnchor.attributes.href, "javascript:void(0)");
 });

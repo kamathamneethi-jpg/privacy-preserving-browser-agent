@@ -359,11 +359,95 @@
     return { element: null, isStale: false, isConnected: false };
   }
 
+  /**
+   * Safely clicks a DOM element without triggering Chrome Manifest V3 CSP violations
+   * on anchor tags that employ "javascript:void(0)" or "javascript:;" pseudo-protocols.
+   */
+  function safeClick(element) {
+    if (!element) return false;
+
+    // Collect any anchor elements (the element itself or ancestors/children) that use javascript: URLs
+    const jsAnchors = [];
+    let curr = element;
+    while (curr && curr !== document && curr !== document.body) {
+      if (curr.tagName === "A") {
+        const href = (curr.getAttribute("href") || "").trim().toLowerCase();
+        if (href.startsWith("javascript:")) {
+          jsAnchors.push(curr);
+        }
+      }
+      curr = curr.parentElement;
+    }
+
+    if (typeof element.querySelectorAll === "function") {
+      try {
+        const childAnchors = element.querySelectorAll('a[href^="javascript:" i], a[href^="JAVASCRIPT:" i]');
+        for (const ca of childAnchors) {
+          if (!jsAnchors.includes(ca)) jsAnchors.push(ca);
+        }
+      } catch {}
+    }
+
+    const savedHrefs = new Map();
+    const preventNav = (e) => {
+      try {
+        if (typeof e.preventDefault === "function") e.preventDefault();
+      } catch {}
+    };
+
+    // Temporarily disarm javascript: hrefs and attach capturing preventDefault
+    for (const a of jsAnchors) {
+      savedHrefs.set(a, a.getAttribute("href"));
+      try {
+        a.removeAttribute("href");
+        if (typeof a.addEventListener === "function") {
+          a.addEventListener("click", preventNav, { capture: true, once: true });
+        }
+      } catch {}
+    }
+
+    try {
+      if (typeof element.focus === "function") {
+        try { element.focus(); } catch {}
+      }
+
+      // Dispatch mouse event sequence for realistic browser interaction
+      if (typeof MouseEvent !== "undefined") {
+        try { element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true })); } catch {}
+        try { element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true })); } catch {}
+        try { element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); } catch {}
+      } else if (typeof element.dispatchEvent === "function") {
+        try { element.dispatchEvent({ type: "click", bubbles: true, cancelable: true }); } catch {}
+      }
+
+      if (typeof element.click === "function") {
+        element.click();
+      }
+      return true;
+    } catch {
+      return false;
+    } finally {
+      // Cleanly restore original href attributes immediately
+      for (const [a, originalHref] of savedHrefs.entries()) {
+        try {
+          if (originalHref !== null && originalHref !== undefined) {
+            a.setAttribute("href", originalHref);
+          }
+          if (typeof a.removeEventListener === "function") {
+            a.removeEventListener("click", preventNav, { capture: true });
+          }
+        } catch {}
+      }
+    }
+  }
+
   function performClick(target) {
     const { element, isStale, isConnected } = resolveElement(target);
     if (!element || isStale || !isConnected) return false;
     try {
-      if (typeof element.focus === "function") element.focus();
+      if (typeof element.focus === "function") {
+        try { element.focus(); } catch {}
+      }
 
       const tag = String(element.tagName || "").toLowerCase();
       const type = String(element.type || element.getAttribute?.("type") || "").toLowerCase();
@@ -371,16 +455,20 @@
       // If it's a checkbox or radio input
       if (tag === "input" && (type === "checkbox" || type === "radio")) {
         element.checked = type === "radio" ? true : !element.checked;
-        element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
-        element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
-        element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-        element.dispatchEvent(new Event("change", { bubbles: true }));
-        element.dispatchEvent(new Event("input", { bubbles: true }));
+        if (typeof MouseEvent !== "undefined") {
+          try { element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true })); } catch {}
+          try { element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true })); } catch {}
+          try { element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); } catch {}
+        }
+        if (typeof Event !== "undefined") {
+          try { element.dispatchEvent(new Event("change", { bubbles: true })); } catch {}
+          try { element.dispatchEvent(new Event("input", { bubbles: true })); } catch {}
+        }
 
-        // Trigger parent label or link if styled externally (e.g. Amazon filter)
+        // Trigger parent label or link safely if styled externally (e.g. Amazon filter)
         const parentLink = element.closest("a, label, li");
         if (parentLink && parentLink !== element) {
-          parentLink.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+          safeClick(parentLink);
         }
         return true;
       }
@@ -390,18 +478,15 @@
         const input = element.querySelector("input") || (element.htmlFor ? document.getElementById(element.htmlFor) : null);
         if (input && (input.type === "checkbox" || input.type === "radio")) {
           input.checked = input.type === "radio" ? true : !input.checked;
-          input.dispatchEvent(new Event("change", { bubbles: true }));
-          input.dispatchEvent(new Event("input", { bubbles: true }));
+          if (typeof Event !== "undefined") {
+            try { input.dispatchEvent(new Event("change", { bubbles: true })); } catch {}
+            try { input.dispatchEvent(new Event("input", { bubbles: true })); } catch {}
+          }
         }
       }
 
-      // Standard click
-      if (typeof element.click === "function") {
-        element.click();
-      } else {
-        element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-      }
-      return true;
+      // Standard safe click (neutralizes any javascript:void(0) hrefs to prevent CSP violations)
+      return safeClick(element);
     } catch {
       return false;
     }
@@ -439,19 +524,23 @@
     const { element, isStale, isConnected } = resolveElement(target);
     if (!element || isStale || !isConnected) return false;
     try {
-      if (typeof element.focus === "function") element.focus();
+      if (typeof element.focus === "function") {
+        try { element.focus(); } catch {}
+      }
 
       const input = (element.tagName === "INPUT") ? element : (element.querySelector?.("input") || element);
       if (input && typeof input.checked !== "undefined") {
         input.checked = true;
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-        input.dispatchEvent(new Event("input", { bubbles: true }));
+        if (typeof Event !== "undefined") {
+          try { input.dispatchEvent(new Event("change", { bubbles: true })); } catch {}
+          try { input.dispatchEvent(new Event("input", { bubbles: true })); } catch {}
+        }
       }
 
-      element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      safeClick(element);
       const parentLink = element.closest?.("a, li");
       if (parentLink && parentLink !== element) {
-        parentLink.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+        safeClick(parentLink);
       }
       return true;
     } catch {
@@ -463,19 +552,23 @@
     const { element, isStale, isConnected } = resolveElement(target);
     if (!element || isStale || !isConnected) return false;
     try {
-      if (typeof element.focus === "function") element.focus();
+      if (typeof element.focus === "function") {
+        try { element.focus(); } catch {}
+      }
 
       const input = (element.tagName === "INPUT") ? element : (element.querySelector?.("input") || element);
       if (input && typeof input.checked !== "undefined") {
         input.checked = false;
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-        input.dispatchEvent(new Event("input", { bubbles: true }));
+        if (typeof Event !== "undefined") {
+          try { input.dispatchEvent(new Event("change", { bubbles: true })); } catch {}
+          try { input.dispatchEvent(new Event("input", { bubbles: true })); } catch {}
+        }
       }
 
-      element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      safeClick(element);
       const parentLink = element.closest?.("a, li");
       if (parentLink && parentLink !== element) {
-        parentLink.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+        safeClick(parentLink);
       }
       return true;
     } catch {
@@ -500,12 +593,12 @@
             form.requestSubmit();
           } catch {
             const submitBtn = form.querySelector('input[type="submit"], button[type="submit"], .a-button-input');
-            if (submitBtn) submitBtn.click();
+            if (submitBtn) safeClick(submitBtn);
             else if (typeof form.submit === "function") form.submit();
           }
         } else if (form) {
           const submitBtn = form.querySelector('input[type="submit"], button[type="submit"], .a-button-input');
-          if (submitBtn) submitBtn.click();
+          if (submitBtn) safeClick(submitBtn);
           else if (typeof form.submit === "function") form.submit();
         }
       }
@@ -560,10 +653,8 @@
         element.requestSubmit();
       } else if (typeof element.submit === "function") {
         element.submit();
-      } else if (typeof element.click === "function") {
-        element.click();
       } else {
-        element.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        safeClick(element);
       }
       return true;
     } catch {

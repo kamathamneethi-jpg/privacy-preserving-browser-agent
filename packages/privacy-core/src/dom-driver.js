@@ -249,6 +249,76 @@ export class DomDriver {
       } catch {}
     };
 
+    const safeClickElement = (element) => {
+      if (!element) return;
+      const jsAnchors = [];
+      let curr = element;
+      while (curr && curr.tagName) {
+        if (String(curr.tagName).toUpperCase() === "A") {
+          const href = (typeof curr.getAttribute === "function" ? curr.getAttribute("href") : curr.href || "").trim().toLowerCase();
+          if (href.startsWith("javascript:")) {
+            jsAnchors.push(curr);
+          }
+        }
+        curr = curr.parentElement;
+      }
+
+      if (typeof element.querySelectorAll === "function") {
+        try {
+          const childAnchors = element.querySelectorAll('a[href^="javascript:" i], a[href^="JAVASCRIPT:" i]');
+          for (const ca of childAnchors) {
+            if (!jsAnchors.includes(ca)) jsAnchors.push(ca);
+          }
+        } catch {}
+      }
+
+      const savedHrefs = new Map();
+      const preventNav = (e) => {
+        try {
+          if (typeof e.preventDefault === "function") e.preventDefault();
+        } catch {}
+      };
+
+      for (const a of jsAnchors) {
+        const orig = typeof a.getAttribute === "function" ? a.getAttribute("href") : a.href;
+        savedHrefs.set(a, orig);
+        try {
+          if (typeof a.removeAttribute === "function") {
+            a.removeAttribute("href");
+          } else {
+            a.href = "";
+          }
+          if (typeof a.addEventListener === "function") {
+            a.addEventListener("click", preventNav, { capture: true, once: true });
+          }
+        } catch {}
+      }
+
+      try {
+        safeDispatch(element, "mousedown");
+        safeDispatch(element, "mouseup");
+        safeDispatch(element, "click");
+        if (typeof element.click === "function") {
+          element.click();
+        }
+      } finally {
+        for (const [a, originalHref] of savedHrefs.entries()) {
+          try {
+            if (originalHref !== null && originalHref !== undefined) {
+              if (typeof a.setAttribute === "function") {
+                a.setAttribute("href", originalHref);
+              } else {
+                a.href = originalHref;
+              }
+            }
+            if (typeof a.removeEventListener === "function") {
+              a.removeEventListener("click", preventNav, { capture: true });
+            }
+          } catch {}
+        }
+      }
+    };
+
     try {
       const getElement = (id) => resolveDomElement(id, undefined, undefined, this.registry);
 
@@ -259,11 +329,7 @@ export class DomDriver {
             return { ok: false, actionType, targetId, error: `Target element '${targetId}' not found in DOM.` };
           }
           if (typeof element.focus === "function") element.focus();
-          if (typeof element.click === "function") {
-            element.click();
-          } else {
-            safeDispatch(element, "click");
-          }
+          safeClickElement(element);
           return { ok: true, actionType, targetId };
         }
 
@@ -375,10 +441,8 @@ export class DomDriver {
             element.requestSubmit();
           } else if (typeof element.submit === "function") {
             element.submit();
-          } else if (typeof element.click === "function") {
-            element.click();
           } else {
-            safeDispatch(element, "submit");
+            safeClickElement(element);
           }
           return { ok: true, actionType, targetId };
         }
