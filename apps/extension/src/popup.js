@@ -898,50 +898,102 @@ if (scanButton) {
 
 /**
  * Detects if user task specifies a domain/URL or if we need to navigate from an internal tab.
+ * Never redirects away if the user is already on a live, external webpage unless explicitly requested.
  */
-function extractNavigationUrl(task, currentUrl = "", parsedGoal = null) {
+export function extractNavigationUrl(task, currentUrl = "", parsedGoal = null) {
   if (!task) return null;
   const isInternal = !currentUrl || currentUrl.startsWith("chrome://") || currentUrl.startsWith("about:") || currentUrl.startsWith("chrome-extension://") || currentUrl.startsWith("devtools://");
 
-  // 1. Check for explicit URL in task
+  // 1. Explicit full URL in user instruction (e.g., https://... or http://...)
   const urlMatch = task.match(/https?:\/\/[^\s]+/i);
   if (urlMatch) return urlMatch[0];
 
-  // 2. Check for known domain keywords in task
+  // 2. Comprehensive dictionary of popular platforms & knowledge bases
+  const KNOWN_SITES = {
+    google: "https://www.google.com",
+    wikipedia: "https://www.wikipedia.org",
+    youtube: "https://www.youtube.com",
+    github: "https://github.com",
+    reddit: "https://www.reddit.com",
+    flipkart: "https://www.flipkart.com",
+    ebay: "https://www.ebay.com",
+    walmart: "https://www.walmart.com",
+    amazon: "https://www.amazon.in",
+    myntra: "https://www.myntra.com",
+    twitter: "https://www.twitter.com",
+    x: "https://www.x.com",
+    linkedin: "https://www.linkedin.com",
+    stackoverflow: "https://www.stackoverflow.com",
+    bing: "https://www.bing.com",
+    duckduckgo: "https://duckduckgo.com"
+  };
+
+  // 3. Check if target website was extracted in parsed goal or present in task
+  const targetSiteKey = parsedGoal?.targetWebsite || (ActiveGoalParser && ActiveGoalParser.extractTargetWebsite ? ActiveGoalParser.extractTargetWebsite(task) : null);
+  if (targetSiteKey && KNOWN_SITES[targetSiteKey]) {
+    const targetUrl = KNOWN_SITES[targetSiteKey];
+    try {
+      const targetHost = new URL(targetUrl).hostname.replace(/^www\./i, "");
+      if (!currentUrl.toLowerCase().includes(targetHost)) {
+        return targetUrl;
+      }
+    } catch {
+      return targetUrl;
+    }
+  }
+
+  // 4. Check for explicit domain navigation phrases (e.g. "go to cnn.com", "open example.org")
   const domainPatterns = [
-    { regex: /\b(?:go to|open|search on|visit|navigate to|search in)\s+(?:www\.)?amazon\.in\b/i, url: "https://www.amazon.in" },
+    { regex: /\b(?:go to|open|search on|visit|navigate to|search in|on)\s+(?:www\.)?amazon\.in\b/i, url: "https://www.amazon.in" },
     { regex: /\b(?:go to|open|search on|visit|navigate to|search in)\s+(?:www\.)?amazon\.com\b/i, url: "https://www.amazon.com" },
-    { regex: /\b(?:go to|open|search on|visit|navigate to|search in|on)\s+(?:www\.)?amazon\b/i, url: "https://www.amazon.in" },
     { regex: /\b(?:go to|open|search on|visit|navigate to)\s+(?:www\.)?google\.(?:com|in)\b/i, url: "https://www.google.com" },
     { regex: /\b(?:go to|open|search on|visit|navigate to)\s+(?:www\.)?youtube\.com\b/i, url: "https://www.youtube.com" },
     { regex: /\b(?:go to|open|search on|visit|navigate to)\s+(?:www\.)?wikipedia\.org\b/i, url: "https://www.wikipedia.org" },
-    { regex: /\b(?:go to|open|search on|visit|navigate to)\s+(?:www\.)?([a-zA-Z0-9-]+\.(?:com|in|org|net|io|co|gov|edu))\b/i, transform: (m) => `https://${m[1]}` }
+    { regex: /\b(?:go to|open|search on|visit|navigate to)\s+(?:www\.)?github\.com\b/i, url: "https://www.github.com" },
+    { regex: /\b(?:go to|open|search on|visit|navigate to)\s+(?:www\.)?flipkart\.com\b/i, url: "https://www.flipkart.com" },
+    { regex: /\b(?:go to|open|search on|visit|navigate to)\s+(?:www\.)?([a-zA-Z0-9-]+\.(?:com|in|org|net|io|co|gov|edu|ai|app|dev))\b/i, transform: (m) => `https://${m[1]}` }
   ];
 
   for (const p of domainPatterns) {
     const match = task.match(p.regex);
     if (match) {
-      return p.transform ? p.transform(match) : p.url;
+      const destUrl = p.transform ? p.transform(match) : p.url;
+      try {
+        const destHost = new URL(destUrl).hostname.replace(/^www\./i, "");
+        if (!currentUrl.toLowerCase().includes(destHost)) {
+          return destUrl;
+        }
+      } catch {
+        return destUrl;
+      }
     }
   }
 
-  const isEcommerceIntent = parsedGoal?.domain === "ecommerce" || /\b(shoes?|sneakers?|laptops?|phones?|jackets?|clothes?|buy|shop|under\s+\d+k?|under\s+rs|cart|order)\b/i.test(task);
-  const isAlreadyOnEcommerce = currentUrl.includes("amazon.") || currentUrl.includes("flipkart.") || currentUrl.includes("ebay.") || currentUrl.includes("walmart.");
-
-  // If shopping/ecommerce intent and not already on shopping site, or on internal tab
-  if (isEcommerceIntent && (!isAlreadyOnEcommerce || isInternal)) {
-    return "https://www.amazon.in";
+  // 5. If user is ALREADY on an external active website (!isInternal),
+  // NEVER redirect them away unless they explicitly instructed a website navigation!
+  if (!isInternal) {
+    return null;
   }
 
-  // If on an internal page (newtab, extensions), check domain intent
-  if (isInternal) {
-    if (/\b(amazon|buy|shop|cart|order)\b/i.test(task)) return "https://www.amazon.in";
-    if (/\b(youtube|video|watch)\b/i.test(task)) return "https://www.youtube.com";
-    if (/\b(wikipedia|wiki|encyclopedia)\b/i.test(task)) return "https://www.wikipedia.org";
+  // 6. If user is on an INTERNAL browser tab (chrome://newtab, about:blank, etc.),
+  // resolve initial destination based on task domain:
+  const domain = parsedGoal?.domain || (ActiveGoalParser && ActiveGoalParser.detectDomain ? ActiveGoalParser.detectDomain(task) : "general");
+
+  if (targetSiteKey && KNOWN_SITES[targetSiteKey]) {
+    return KNOWN_SITES[targetSiteKey];
+  }
+  if (/\b(?:amazon)\b/i.test(task)) return "https://www.amazon.in";
+  if (/\b(?:flipkart)\b/i.test(task)) return "https://www.flipkart.com";
+  if (/\b(?:youtube|video|watch)\b/i.test(task)) return "https://www.youtube.com";
+  if (/\b(?:wikipedia|wiki|encyclopedia)\b/i.test(task)) return "https://www.wikipedia.org";
+  if (/\b(?:github|repo|commit|pull request|issue)\b/i.test(task)) return "https://www.github.com";
+
+  if (domain === "ecommerce") {
+    // If user starts from a blank tab without specifying store, Google search is the universal entry point
     return "https://www.google.com";
   }
 
-  return null;
+  return "https://www.google.com";
 }
 
 /**
@@ -1179,7 +1231,7 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
   const entity = goal?.targetEntity || "";
   const constraints = goal?.constraints || [];
 
-  // 1. Close Modal
+  // 1. Close Modal / Overlay / Cookie Consent
   if (taskType === "close_modal") {
     const closeBtn = interactiveElements.find(el => {
       const t = `${el.text || ""} ${el.ariaLabel || ""}`.toLowerCase();
@@ -1197,24 +1249,33 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
     }
   }
 
-  // 2. Search Task: find search input field
-  if (taskType === "search" || (stepNum === 1 && !stateManager.hasPerformedAction("search"))) {
+  // 2. Search Task: find search input field (supports Google <textarea name="q">, search inputs, etc.)
+  if (taskType === "search" || (stepNum === 1 && !stateManager.hasPerformedAction("search") && goal?.domain !== "form_filling")) {
     const searchInput = interactiveElements.find(el => {
+      if (el.isSponsored || el.isAd) return false;
       if (el.tag !== "input" && el.tag !== "textarea") return false;
       const type = (el.type || "").toLowerCase();
-      if (type === "hidden" || type === "password" || type === "checkbox" || type === "radio") return false;
-      const t = `${el.name || ""} ${el.placeholder || ""} ${el.ariaLabel || ""} ${el.elementId || ""}`.toLowerCase();
-      return type === "search" || /search|query|find|keyword|term/i.test(t);
-    }) || interactiveElements.find(el => el.tag === "input" && (el.type === "text" || !el.type));
+      if (type === "hidden" || type === "password" || type === "checkbox" || type === "radio" || type === "submit") return false;
+      const t = `${el.name || ""} ${el.placeholder || ""} ${el.ariaLabel || ""} ${el.elementId || ""} ${el.id || ""}`.toLowerCase();
+      return type === "search" || el.semanticType === "search" || el.role === "searchbox" || el.name === "q" || /search|query|find|keyword|term/i.test(t);
+    }) || interactiveElements.find(el => {
+      if (el.isSponsored || el.isAd) return false;
+      return (el.tag === "input" || el.tag === "textarea") && (el.type === "text" || !el.type || el.name === "q");
+    });
 
     if (searchInput) {
-      const query = entity || (currentTask?.description ? currentTask.description.replace(/^Search for\s*/i, "") : goal.summary);
+      let query = entity || (currentTask?.description ? currentTask.description.replace(/^Search for\s*/i, "") : goal.summary);
+      query = query
+        .replace(/^(?:search\s+(?:for\s+)?|find\s+|look\s+up\s+|browse\s+)/i, "")
+        .replace(/\s+(?:on|in|at)\s+(?:google|wikipedia|youtube|amazon|github|flipkart|reddit|ebay|walmart)\b/i, "")
+        .replace(/\b(?:on|in|at)\s+(?:google|wikipedia|youtube|amazon|github|flipkart|reddit|ebay|walmart)\s+(?:for\s+)?/i, "")
+        .trim();
       return {
         actionType: "TYPE",
         target: searchInput.elementId,
-        parameters: { text: query },
+        parameters: { text: query || goal.summary },
         thenPressEnter: true,
-        reasoningSummary: `Entered search query "${query}" into search field.`
+        reasoningSummary: `Entered search query "${query || goal.summary}" into search field.`
       };
     }
   }
@@ -1315,7 +1376,6 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
 
       // Brand or Color constraints
       const valStr = String(c.value || c.name).toLowerCase();
-      // Look ONLY within real filter elements, NEVER in product titles or ads
       const filterEl = interactiveElements.find(el => {
         if (el.isSponsored || el.isAd) return false;
         const isEligibleFilter = el.isFilter || (el.tag === "input" && (el.type === "checkbox" || el.type === "radio")) || el.role === "checkbox";
@@ -1338,22 +1398,19 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
       }
     }
 
-    // If all applicable filters are processed or search already reflects them, advance task to select_candidate
     taskType = "select_candidate";
   }
 
-  // 4. Select / Inspect Candidate (Organic Results Only, Never Ads)
-  if (taskType === "select_candidate" || taskType === "inspect_candidate") {
+  // 4. Select / Inspect Candidate (Organic Results Only, Never Ads - works on Google, Wikipedia, stores, blogs)
+  if (taskType === "select_candidate" || taskType === "inspect_candidate" || taskType === "inspect" || taskType === "select_result") {
     const candidateLink = interactiveElements.find(el => {
-      // STRICT FILTER: Exclude any sponsored or ad element
       if (el.isSponsored || el.isAd) return false;
-      if (el.tag !== "a" && el.tag !== "div" && el.tag !== "li") return false;
-      const t = (el.text || "").trim();
-      if (t.length < 8) return false;
-      if (/\b(sign in|login|register|cart|basket|home|help|customer service|privacy|terms|about us|careers|contact|menu|navigation|back to top)\b/i.test(t)) {
+      if (el.tag !== "a" && el.tag !== "div" && el.tag !== "li" && el.tag !== "h3" && el.tag !== "h2") return false;
+      const t = (el.text || el.ariaLabel || "").trim();
+      if (t.length < 5) return false;
+      if (/\b(sign in|login|register|cart|basket|home|help|customer service|privacy|terms|about us|careers|contact|menu|navigation|back to top|next|previous)\b/i.test(t)) {
         return false;
       }
-      // Skip accessories if user is looking for shoes
       if (/\b(cleaner|foam spray|cleaning kit|shoe horn|crease protector|brush)\b/i.test(t) && !/cleaner/i.test(entity || "")) {
         return false;
       }
@@ -1362,12 +1419,12 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
         const matches = words.filter(w => t.toLowerCase().includes(w)).length;
         if (matches >= 1) return true;
       }
-      return el.isProductResult || t.length > 20;
-    }) || interactiveElements.find(el => !el.isSponsored && !el.isAd && el.isProductResult);
+      return el.isProductResult || el.role === "heading" || t.length > 20;
+    }) || interactiveElements.find(el => !el.isSponsored && !el.isAd && (el.isProductResult || (el.tag === "a" && (el.text || "").length > 15)));
 
     if (candidateLink) {
       stateManager.recordCandidate({
-        title: candidateLink.text || candidateLink.ariaLabel || "Product Candidate",
+        title: candidateLink.text || candidateLink.ariaLabel || "Candidate Result",
         elementId: candidateLink.elementId,
         url: candidateLink.href || null
       });
@@ -1375,57 +1432,141 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
         actionType: "CLICK",
         target: candidateLink.elementId,
         parameters: {},
-        reasoningSummary: `Inspecting organic candidate product: "${(candidateLink.text || candidateLink.ariaLabel || '').slice(0, 45)}...".`
+        reasoningSummary: `Inspecting organic candidate: "${(candidateLink.text || candidateLink.ariaLabel || '').slice(0, 45)}...".`
       };
     }
   }
 
-  // 5. Perform Action / Submit
-  if (taskType === "perform_action" || taskType === "submit_action") {
-    const actionKeywords = /\b(add to cart|add to bag|buy now|submit|register|book now|continue|proceed|checkout|save|confirm|next|place order)\b/i;
+  // 5. Form Filling (Populates registration, contact, application, and survey inputs)
+  if (taskType === "fill_form") {
+    const emptyField = interactiveElements.find(el => {
+      if (el.isSponsored || el.isAd) return false;
+      if (el.tag !== "input" && el.tag !== "textarea") return false;
+      const type = (el.type || "").toLowerCase();
+      if (type === "hidden" || type === "submit" || type === "button" || type === "reset" || type === "image") return false;
+      if (el.value && String(el.value).trim().length > 0) return false;
+      return true;
+    });
+
+    if (emptyField) {
+      const type = (emptyField.type || "").toLowerCase();
+      const semType = emptyField.semanticType || "";
+      const fieldIdentifier = `${emptyField.name || ""} ${emptyField.placeholder || ""} ${emptyField.ariaLabel || ""} ${emptyField.id || ""}`.toLowerCase();
+
+      // Agreement Checkbox
+      if (type === "checkbox") {
+        return {
+          actionType: "CHECK",
+          target: emptyField.elementId,
+          parameters: {},
+          reasoningSummary: `Checked terms or agreement checkbox "${emptyField.name || emptyField.ariaLabel || 'Agree'}".`
+        };
+      }
+
+      // Check extracted user constraints for custom form data
+      let fillVal = null;
+      if (Array.isArray(constraints) && constraints.length > 0) {
+        const matchingConstraint = constraints.find(c => {
+          const cName = (c.name || c.attribute || "").toLowerCase();
+          return cName && (
+            cName === semType ||
+            fieldIdentifier.includes(cName) ||
+            (cName === "email" && (semType === "email" || type === "email")) ||
+            (cName === "phone" && (semType === "phone" || type === "tel")) ||
+            (cName === "name" && (semType === "name" || semType === "first_name" || semType === "last_name")) ||
+            (cName === "message" && (semType === "message" || emptyField.tag === "textarea"))
+          );
+        });
+        if (matchingConstraint) {
+          fillVal = matchingConstraint.value;
+        }
+      }
+
+      // Realistic domain defaults when no explicit value specified in prompt
+      if (!fillVal) {
+        if (semType === "email" || type === "email" || /email/i.test(fieldIdentifier)) {
+          fillVal = "user@example.com";
+        } else if (semType === "phone" || type === "tel" || /phone|mobile|tel/i.test(fieldIdentifier)) {
+          fillVal = "9876543210";
+        } else if (semType === "first_name" || /first.*name/i.test(fieldIdentifier)) {
+          fillVal = "John";
+        } else if (semType === "last_name" || /last.*name/i.test(fieldIdentifier)) {
+          fillVal = "Doe";
+        } else if (semType === "name" || /name/i.test(fieldIdentifier)) {
+          fillVal = "John Doe";
+        } else if (semType === "message" || emptyField.tag === "textarea" || /message|comment|inquiry/i.test(fieldIdentifier)) {
+          fillVal = "Hello, I am interested in your service. Please reach out with details.";
+        } else {
+          fillVal = "Test Value";
+        }
+      }
+
+      return {
+        actionType: "TYPE",
+        target: emptyField.elementId,
+        parameters: { text: String(fillVal) },
+        reasoningSummary: `Populating form field "${emptyField.name || emptyField.placeholder || emptyField.ariaLabel || emptyField.elementId}" with "${fillVal}".`
+      };
+    }
+
+    // Check for unchecked consent checkboxes
+    const uncheckedBox = interactiveElements.find(el => {
+      if (el.tag === "input" && el.type === "checkbox" && !el.checked) {
+        const text = `${el.text || ""} ${el.ariaLabel || ""} ${el.name || ""}`.toLowerCase();
+        return /agree|terms|condition|privacy|policy|accept/i.test(text) || el.required;
+      }
+      return false;
+    });
+
+    if (uncheckedBox) {
+      return {
+        actionType: "CHECK",
+        target: uncheckedBox.elementId,
+        parameters: {},
+        reasoningSummary: `Checked consent checkbox "${uncheckedBox.name || uncheckedBox.ariaLabel || 'Terms & Conditions'}".`
+      };
+    }
+
+    // If inputs and checkboxes are fulfilled, advance to submit
+    taskType = "submit_form";
+  }
+
+  // 6. Submit Form / Primary Action Execution
+  if (taskType === "submit_form" || taskType === "perform_action" || taskType === "submit_action") {
+    const actionKeywords = /\b(submit|send|send message|sign up|register|book now|continue|proceed|checkout|save|confirm|next|place order|add to cart|add to bag|buy now)\b/i;
     const actionBtn = interactiveElements.find(el => {
+      if (el.isSponsored || el.isAd) return false;
       const t = `${el.text || ""} ${el.value || ""} ${el.ariaLabel || ""}`.toLowerCase();
       return actionKeywords.test(t);
-    }) || interactiveElements.find(el => el.tag === "button" || (el.tag === "input" && el.type === "submit"));
+    }) || interactiveElements.find(el => !el.isSponsored && !el.isAd && (
+      (el.tag === "button" && el.type === "submit") ||
+      (el.tag === "input" && el.type === "submit") ||
+      (el.tag === "button" && /submit|send|save|next/i.test(el.text || ""))
+    ));
 
     if (actionBtn) {
       return {
         actionType: "CLICK",
         target: actionBtn.elementId,
         parameters: {},
-        reasoningSummary: `Executed primary action: "${actionBtn.text || actionBtn.ariaLabel || 'Submit'}".`
+        reasoningSummary: `Submitting action via "${actionBtn.text || actionBtn.ariaLabel || actionBtn.value || 'Submit'}".`
       };
     }
   }
 
-  // 6. Form Filling
-  if (taskType === "fill_form") {
-    const emptyInput = interactiveElements.find(el => {
-      return (el.tag === "input" || el.tag === "textarea") &&
-        el.type !== "hidden" &&
-        el.type !== "submit" &&
-        el.type !== "checkbox" &&
-        el.type !== "radio" &&
-        !el.value;
-    });
-    if (emptyInput) {
-      return {
-        actionType: "TYPE",
-        target: emptyInput.elementId,
-        parameters: { text: "Value" },
-        reasoningSummary: `Populating form field "${emptyInput.name || emptyInput.placeholder || emptyInput.elementId}".`
-      };
-    }
-  }
-
-  // 7. General clickable element
-  const generalAction = interactiveElements.find(el => (el.tag === "button" || el.tag === "a") && (el.text || "").length > 2);
+  // 7. General Clickable Element Fallback (Organic, non-ad)
+  const generalAction = interactiveElements.find(el =>
+    !el.isSponsored && !el.isAd &&
+    (el.tag === "button" || el.tag === "a") &&
+    (el.text || el.ariaLabel || "").trim().length > 2 &&
+    !/\b(sign in|login|privacy|terms)\b/i.test(el.text || el.ariaLabel || "")
+  );
   if (generalAction) {
     return {
       actionType: "CLICK",
       target: generalAction.elementId,
       parameters: {},
-      reasoningSummary: `Interacting with element "${(generalAction.text || '').slice(0, 30)}".`
+      reasoningSummary: `Interacting with element "${(generalAction.text || generalAction.ariaLabel || '').slice(0, 30)}".`
     };
   }
 
@@ -1570,7 +1711,7 @@ if (runTaskButton) {
 
         if (interactiveElements.length === 0) {
           const errMsg = observeErr?.message || "No interactive elements discovered on page.";
-          finalSummary = `Halted: ${errMsg} Please ensure an active, standard webpage (e.g. https://www.amazon.in) is open in Chrome.`;
+          finalSummary = `Halted: ${errMsg} Please ensure an active, standard webpage (e.g. https://www.google.com) is open in Chrome.`;
           relayToTerminalLog(`Step ${stepNum}: Stalled`, finalSummary, {
             error: errMsg,
             pageUrl,
@@ -1864,7 +2005,7 @@ if (runTaskButton) {
         status.textContent = `Task completed successfully in ${totalMs}ms.`;
       } else if (executedResults.length === 0) {
         setPipelineStage("TASK HALTED / NO ELEMENTS");
-        status.textContent = `Task halted: No actions could be executed on this page. Please open an active website (e.g. https://www.amazon.in) and click Run Agent Task again.`;
+        status.textContent = `Task halted: No actions could be executed on this page. Please open an active website (e.g. https://www.google.com) and click Run Agent Task again.`;
       } else {
         setPipelineStage("TASK HALTED / INCOMPLETE");
         status.textContent = `Task execution stopped after ${executedResults.length} step(s).`;

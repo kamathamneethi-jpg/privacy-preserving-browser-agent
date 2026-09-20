@@ -49,7 +49,7 @@ export class TaskPlanner {
     const targetEntity = goalSpec.targetEntity || "item";
 
     // 1. Navigation / Search Destination Task
-    if (ops.has(BROWSER_OPERATIONS.NAVIGATE) || !goalSpec.currentUrl) {
+    if (ops.has(BROWSER_OPERATIONS.NAVIGATE) || goalSpec.targetWebsite || (!goalSpec.currentUrl && domain !== TASK_DOMAINS.FORM_FILLING)) {
       tasks.push({
         id: `task_${counter++}`,
         type: "navigate",
@@ -58,8 +58,8 @@ export class TaskPlanner {
       });
     }
 
-    // 2. Query / Search Input Task
-    if (ops.has(BROWSER_OPERATIONS.SEARCH) || domain === TASK_DOMAINS.ECOMMERCE) {
+    // 2. Query / Search Input Task (Ecommerce, Research, or explicitly requested search)
+    if (ops.has(BROWSER_OPERATIONS.SEARCH) || domain === TASK_DOMAINS.ECOMMERCE || domain === TASK_DOMAINS.RESEARCH) {
       tasks.push({
         id: `task_${counter++}`,
         type: "search",
@@ -68,8 +68,9 @@ export class TaskPlanner {
       });
     }
 
-    // 3. Filter Application Task (if constraints exist)
-    if (ops.has(BROWSER_OPERATIONS.FILTER) && constraints.length > 0) {
+    // 3. Filter Application Task (if filterable constraints exist, mainly ecommerce or faceted search)
+    const hasFilterableConstraints = constraints.some(c => c.name !== "url" && c.name !== "candidate_count" && c.attribute !== "url");
+    if (ops.has(BROWSER_OPERATIONS.FILTER) && hasFilterableConstraints && domain !== TASK_DOMAINS.FORM_FILLING && domain !== TASK_DOMAINS.NAVIGATION) {
       const constraintDesc = constraints.map(c => `${c.attribute || c.name} ${c.operator} ${c.value}`).join(", ");
       tasks.push({
         id: `task_${counter++}`,
@@ -79,27 +80,7 @@ export class TaskPlanner {
       });
     }
 
-    // 4. Inspect Candidate Results Task
-    if (ops.has(BROWSER_OPERATIONS.INSPECT) || domain === TASK_DOMAINS.ECOMMERCE) {
-      tasks.push({
-        id: `task_${counter++}`,
-        type: "select_candidate",
-        description: `Inspect visible candidate results and verify attributes`,
-        status: TASK_STATUS.PENDING
-      });
-    }
-
-    // 5. Comparison Task (if user requested comparison)
-    if (ops.has(BROWSER_OPERATIONS.COMPARE) || ops.has(BROWSER_OPERATIONS.COMPARE_CANDIDATES)) {
-      tasks.push({
-        id: `task_${counter++}`,
-        type: "compare",
-        description: `Compare inspected candidates against user constraints and select best matching options`,
-        status: TASK_STATUS.PENDING
-      });
-    }
-
-    // 6. Form Filling & Submission Task (if form domain)
+    // 4. Form Filling Task (if form domain)
     if (domain === TASK_DOMAINS.FORM_FILLING || ops.has(BROWSER_OPERATIONS.FILL) || ops.has(BROWSER_OPERATIONS.FILL_FORM)) {
       tasks.push({
         id: `task_${counter++}`,
@@ -109,12 +90,41 @@ export class TaskPlanner {
       });
     }
 
-    // 7. Final Action Task (e.g. submit, add to cart, book)
-    if (ops.has(BROWSER_OPERATIONS.SUBMIT) || ops.has(BROWSER_OPERATIONS.ADD_TO_CART) || ops.has(BROWSER_OPERATIONS.SUBMIT_FORM) || /add to cart|buy|submit|book/i.test(goalSpec.rawRequest || goalSpec.originalGoal || "")) {
+    // 5. Inspect / Select Candidate Results Task
+    if (domain === TASK_DOMAINS.NAVIGATION) {
       tasks.push({
         id: `task_${counter++}`,
-        type: "perform_action",
-        description: `Execute requested final action (add to cart, submit, or book)`,
+        type: "inspect",
+        description: `Inspect target page elements and verify content`,
+        status: TASK_STATUS.PENDING
+      });
+    } else if (ops.has(BROWSER_OPERATIONS.INSPECT) || domain === TASK_DOMAINS.ECOMMERCE || domain === TASK_DOMAINS.RESEARCH) {
+      tasks.push({
+        id: `task_${counter++}`,
+        type: "select_candidate",
+        description: domain === TASK_DOMAINS.RESEARCH ? `Inspect primary article or search result for "${targetEntity}"` : `Inspect visible candidate results and verify attributes`,
+        status: TASK_STATUS.PENDING
+      });
+    }
+
+    // 6. Comparison Task (if user requested comparison)
+    if (ops.has(BROWSER_OPERATIONS.COMPARE) || ops.has(BROWSER_OPERATIONS.COMPARE_CANDIDATES)) {
+      tasks.push({
+        id: `task_${counter++}`,
+        type: "compare",
+        description: `Compare inspected candidates against user constraints and select best matching options`,
+        status: TASK_STATUS.PENDING
+      });
+    }
+
+    // 7. Final Action Task (submit form, add to cart, book)
+    if (domain === TASK_DOMAINS.FORM_FILLING || ops.has(BROWSER_OPERATIONS.SUBMIT) || ops.has(BROWSER_OPERATIONS.ADD_TO_CART) || ops.has(BROWSER_OPERATIONS.SUBMIT_FORM) || /add to cart|buy|submit|book/i.test(goalSpec.rawRequest || goalSpec.originalGoal || "")) {
+      const isCart = ops.has(BROWSER_OPERATIONS.ADD_TO_CART) || /add to cart|buy/i.test(goalSpec.rawRequest || goalSpec.originalGoal || "");
+      const isForm = domain === TASK_DOMAINS.FORM_FILLING || ops.has(BROWSER_OPERATIONS.SUBMIT_FORM);
+      tasks.push({
+        id: `task_${counter++}`,
+        type: isForm ? "submit_form" : (isCart ? "perform_action" : "submit"),
+        description: isForm ? "Submit completed form" : (isCart ? "Add selected item to cart" : "Execute requested final action"),
         status: TASK_STATUS.PENDING
       });
     }

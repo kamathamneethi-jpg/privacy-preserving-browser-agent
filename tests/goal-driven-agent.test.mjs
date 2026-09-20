@@ -15,7 +15,7 @@ import {
   DEFAULT_MULTIMODAL_MODEL
 } from "../packages/privacy-core/src/index.js";
 import { extractElementDescription } from "../packages/privacy-core/src/interactive-element-registry.js";
-import { deriveGeneralizedFallbackAction } from "../apps/extension/src/popup.js";
+import { deriveGeneralizedFallbackAction, extractNavigationUrl } from "../apps/extension/src/popup.js";
 
 // =====================================================================
 // 1. GOAL PARSER TESTS
@@ -652,3 +652,197 @@ test("27. deriveGeneralizedFallbackAction prioritizes price input and strictly i
   assert.strictEqual(action.isFilter, true);
   assert.strictEqual(action.filterName, "price");
 });
+
+// =====================================================================
+// 8. UNIVERSAL MULTI-WEBSITE & MULTI-DOMAIN TESTS
+// =====================================================================
+
+test("28. extractNavigationUrl strictly stays on current active tab and never forces Amazon redirect", () => {
+  const goal = GoalParser.parse("buy white sneakers under 5000");
+
+  // User is already on Myntra
+  const urlOnMyntra = extractNavigationUrl("buy white sneakers under 5000", "https://www.myntra.com/shoes", goal);
+  assert.strictEqual(urlOnMyntra, null, "Must stay on Myntra without redirecting to Amazon");
+
+  // User is on a local form page
+  const urlOnLocalhost = extractNavigationUrl("fill out the registration form", "http://localhost:3000/register.html", GoalParser.parse("fill out the registration form"));
+  assert.strictEqual(urlOnLocalhost, null, "Must stay on local form without redirecting");
+
+  // User is on Nike's website
+  const urlOnNike = extractNavigationUrl("find running shoes under 7000", "https://www.nike.com/in/", goal);
+  assert.strictEqual(urlOnNike, null, "Must stay on Nike without redirecting to Amazon");
+});
+
+test("29. extractNavigationUrl navigates accurately to requested platforms and URLs", () => {
+  // Explicit website requests from internal newtab
+  const wikiNav = extractNavigationUrl("search on wikipedia for quantum computing", "chrome://newtab", GoalParser.parse("search on wikipedia for quantum computing"));
+  assert.strictEqual(wikiNav, "https://www.wikipedia.org");
+
+  const flipkartNav = extractNavigationUrl("open flipkart and search for noise cancelling headphones", "chrome://newtab", GoalParser.parse("open flipkart and search for noise cancelling headphones"));
+  assert.strictEqual(flipkartNav, "https://www.flipkart.com");
+
+  const githubNav = extractNavigationUrl("navigate to github.com and find tensorflow", "chrome://newtab", GoalParser.parse("navigate to github.com and find tensorflow"));
+  assert.strictEqual(githubNav, "https://github.com");
+
+  const googleNav = extractNavigationUrl("search on google for machine learning news", "chrome://newtab", GoalParser.parse("search on google for machine learning news"));
+  assert.strictEqual(googleNav, "https://www.google.com");
+
+  // Explicit full URL
+  const directNav = extractNavigationUrl("open https://news.ycombinator.com and read top story", "chrome://newtab", GoalParser.parse("open https://news.ycombinator.com and read top story"));
+  assert.strictEqual(directNav, "https://news.ycombinator.com");
+});
+
+test("30. deriveGeneralizedFallbackAction handles Google search with textarea[name='q'] and cleans query", () => {
+  const goal = GoalParser.parse("search on google for autonomous browser agents");
+  const stateManager = new ExecutionStateManager({ goal });
+
+  const currentTask = {
+    id: "task_1",
+    type: "search",
+    description: "Search for autonomous browser agents"
+  };
+
+  const interactiveElements = [
+    {
+      elementId: "el_google_q",
+      tag: "textarea",
+      name: "q",
+      id: "APjFqb",
+      placeholder: "Search Google or type a URL",
+      semanticType: "search"
+    }
+  ];
+
+  const action = deriveGeneralizedFallbackAction({
+    currentTask,
+    goal,
+    interactiveElements,
+    stateManager,
+    stepNum: 1
+  });
+
+  assert.strictEqual(action.actionType, "TYPE");
+  assert.strictEqual(action.target, "el_google_q");
+  assert.strictEqual(action.parameters.text, "autonomous browser agents");
+  assert.strictEqual(action.thenPressEnter, true);
+});
+
+test("31. deriveGeneralizedFallbackAction populates form fields using extracted constraints and semantic types", () => {
+  const goal = GoalParser.parse("Fill out contact form with email test@example.com, name Alice Smith, and phone 9876543210");
+  const stateManager = new ExecutionStateManager({ goal });
+
+  const currentTask = {
+    id: "task_1",
+    type: "fill_form",
+    description: "Fill form fields"
+  };
+
+  // Step 1: Populates name
+  const elementsStep1 = [
+    { elementId: "el_name", tag: "input", type: "text", name: "full_name", placeholder: "Your Name", semanticType: "name", value: "" },
+    { elementId: "el_email", tag: "input", type: "email", name: "user_email", placeholder: "Email", semanticType: "email", value: "" }
+  ];
+
+  const action1 = deriveGeneralizedFallbackAction({
+    currentTask,
+    goal,
+    interactiveElements: elementsStep1,
+    stateManager,
+    stepNum: 1
+  });
+
+  assert.strictEqual(action1.actionType, "TYPE");
+  assert.strictEqual(action1.target, "el_name");
+  assert.strictEqual(action1.parameters.text, "Alice Smith");
+
+  // Step 2: Once name is filled, populates email
+  const elementsStep2 = [
+    { elementId: "el_name", tag: "input", type: "text", name: "full_name", semanticType: "name", value: "Alice Smith" },
+    { elementId: "el_email", tag: "input", type: "email", name: "user_email", placeholder: "Email", semanticType: "email", value: "" }
+  ];
+
+  const action2 = deriveGeneralizedFallbackAction({
+    currentTask,
+    goal,
+    interactiveElements: elementsStep2,
+    stateManager,
+    stepNum: 2
+  });
+
+  assert.strictEqual(action2.actionType, "TYPE");
+  assert.strictEqual(action2.target, "el_email");
+  assert.strictEqual(action2.parameters.text, "test@example.com");
+});
+
+test("32. deriveGeneralizedFallbackAction checks agreement checkboxes and clicks submit on forms", () => {
+  const goal = GoalParser.parse("complete registration form and submit");
+  const stateManager = new ExecutionStateManager({ goal });
+
+  const currentTask = {
+    id: "task_2",
+    type: "fill_form",
+    description: "Complete form and submit"
+  };
+
+  // When text inputs are filled, checks the terms checkbox
+  const elementsWithCheckbox = [
+    { elementId: "el_name", tag: "input", type: "text", value: "Alice" },
+    { elementId: "el_agree", tag: "input", type: "checkbox", name: "agree_terms", checked: false, ariaLabel: "I agree to Terms & Conditions" }
+  ];
+
+  const actionCheckbox = deriveGeneralizedFallbackAction({
+    currentTask,
+    goal,
+    interactiveElements: elementsWithCheckbox,
+    stateManager,
+    stepNum: 2
+  });
+
+  assert.strictEqual(actionCheckbox.actionType, "CHECK");
+  assert.strictEqual(actionCheckbox.target, "el_agree");
+
+  // When all inputs are checked, advances to submit
+  const elementsReadyToSubmit = [
+    { elementId: "el_name", tag: "input", type: "text", value: "Alice" },
+    { elementId: "el_agree", tag: "input", type: "checkbox", name: "agree_terms", checked: true },
+    { elementId: "el_submit_btn", tag: "button", type: "submit", text: "Submit Registration" }
+  ];
+
+  const actionSubmit = deriveGeneralizedFallbackAction({
+    currentTask: { type: "submit_form", description: "Submit form" },
+    goal,
+    interactiveElements: elementsReadyToSubmit,
+    stateManager,
+    stepNum: 3
+  });
+
+  assert.strictEqual(actionSubmit.actionType, "CLICK");
+  assert.strictEqual(actionSubmit.target, "el_submit_btn");
+});
+
+test("33. TaskPlanner produces domain-tailored execution plans for diverse tasks", () => {
+  // 1. Form Filling Plan
+  const formGoal = GoalParser.parse("Fill out job application form and submit");
+  const formPlanner = new TaskPlanner(formGoal);
+  const formTypes = formPlanner.tasks.map(t => t.type);
+  assert.deepStrictEqual(formTypes, ["fill_form", "submit_form", "verify_goal"]);
+
+  // 2. Research / Knowledge Retrieval Plan
+  const researchGoal = GoalParser.parse("Search wikipedia for quantum computing and read summary");
+  const researchPlanner = new TaskPlanner(researchGoal);
+  const researchTypes = researchPlanner.tasks.map(t => t.type);
+  assert.deepStrictEqual(researchTypes, ["navigate", "search", "select_candidate", "verify_goal"]);
+
+  // 3. Navigation Plan
+  const navGoal = GoalParser.parse("Go to https://github.com and inspect page");
+  const navPlanner = new TaskPlanner(navGoal);
+  const navTypes = navPlanner.tasks.map(t => t.type);
+  assert.deepStrictEqual(navTypes, ["navigate", "inspect", "verify_goal"]);
+
+  // 4. E-commerce Shopping Plan (includes initial navigate if starting from blank tab)
+  const shopGoal = GoalParser.parse("Buy white running shoes under 5000 and add to cart");
+  const shopPlanner = new TaskPlanner(shopGoal);
+  const shopTypes = shopPlanner.tasks.map(t => t.type);
+  assert.deepStrictEqual(shopTypes, ["navigate", "search", "filter", "select_candidate", "perform_action", "verify_goal"]);
+});
+

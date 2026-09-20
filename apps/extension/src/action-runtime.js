@@ -51,6 +51,12 @@
       "[role='switch']",
       "[tabindex='0']",
       "[contenteditable='true']",
+      "[aria-expanded]",
+      "details",
+      "nav a",
+      "aside a",
+      ".btn",
+      ".button",
       "li[id^='p_'] a",
       ".a-checkbox-label",
       ".s-navigation-item"
@@ -144,16 +150,18 @@
         continue;
       }
 
-      // Detect Ads and Sponsored elements
+      // Detect Ads and Sponsored elements across any website
       let isSponsored = false;
       try {
         if (typeof el.closest === "function") {
           const adContainer = el.closest(
             '[data-component-type="sp-sponsored-result"], ' +
             '[data-component-type="sbv-video-single-product"], ' +
-            '[data-ad-preview], [data-ad-id], [data-ad-slot], [data-ad-details], ' +
+            '[data-ad-preview], [data-ad-id], [data-ad-slot], [data-ad-details], [data-dfp-id], [data-ad], ' +
             '.s-sponsored-label-info-icon, .puis-sponsored-label-text, .s-sponsored-info-icon, ' +
-            '[class*="sponsored" i], [id*="sponsored" i], [class*="ad-container" i], ' +
+            '[class*="sponsored" i], [id*="sponsored" i], [class*="ad-container" i], [class*="ad-unit" i], ' +
+            '[id*="google_ads" i], [class*="google-ads" i], [class*="advertisement" i], [class*="promoted" i], ' +
+            '[aria-label*="advertisement" i], [aria-label*="sponsored" i], ' +
             'div[data-cel-widget*="sponsored" i], div[data-cel-widget*="sp_" i]'
           );
           if (adContainer) isSponsored = true;
@@ -229,6 +237,27 @@
         }
       }
 
+      // Semantic Form Field Classification
+      let semanticType = null;
+      const combinedFieldHint = `${name || ""} ${el.id || ""} ${placeholder || ""} ${ariaLabel || ""} ${el.getAttribute("autocomplete") || ""}`.toLowerCase();
+      if (lowerType === "email" || /email|e-mail/i.test(combinedFieldHint)) {
+        semanticType = "email";
+      } else if (/phone|mobile|tel|contact/i.test(combinedFieldHint)) {
+        semanticType = "phone";
+      } else if (/first.*name|fname/i.test(combinedFieldHint)) {
+        semanticType = "first_name";
+      } else if (/last.*name|lname/i.test(combinedFieldHint)) {
+        semanticType = "last_name";
+      } else if (/full.*name|\bname\b/i.test(combinedFieldHint) && !/username|user/i.test(combinedFieldHint)) {
+        semanticType = "name";
+      } else if (lowerType === "password" || /password|passwd/i.test(combinedFieldHint)) {
+        semanticType = "password";
+      } else if (role === "searchbox" || lowerType === "search" || (tag === "textarea" && (lowerName === "q" || lowerId === "search")) || /search|query|\bq\b|keyword/i.test(combinedFieldHint)) {
+        semanticType = "search";
+      } else if (tag === "textarea" || /message|comment|feedback|body|notes/i.test(combinedFieldHint)) {
+        semanticType = "message";
+      }
+
       // Detect Organic Search Result Product Cards
       let isProductResult = false;
       try {
@@ -259,7 +288,8 @@
         ...(isMaxPriceInput ? { isMaxPriceInput: true } : {}),
         ...(isMinPriceInput ? { isMinPriceInput: true } : {}),
         ...(isPriceGoButton ? { isPriceGoButton: true } : {}),
-        ...(isProductResult ? { isProductResult: true } : {})
+        ...(isProductResult ? { isProductResult: true } : {}),
+        ...(semanticType ? { semanticType } : {})
       };
 
       snapshotRegistry.elements.set(elementId, el);

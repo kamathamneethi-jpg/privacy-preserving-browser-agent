@@ -244,6 +244,28 @@ export function extractElementDescription(element, elementId) {
       }
     } catch {}
   }
+  // Semantic Form Field Classification
+  let semanticType = element.semanticType || null;
+  if (!semanticType) {
+    const combinedFieldHint = `${name || ""} ${getAttr("id") || ""} ${placeholder || ""} ${ariaLabel || ""} ${getAttr("autocomplete") || ""}`.toLowerCase();
+    if (lowerType === "email" || /email|e-mail/i.test(combinedFieldHint)) {
+      semanticType = "email";
+    } else if (/phone|mobile|tel|contact/i.test(combinedFieldHint)) {
+      semanticType = "phone";
+    } else if (/first.*name|fname/i.test(combinedFieldHint)) {
+      semanticType = "first_name";
+    } else if (/last.*name|lname/i.test(combinedFieldHint)) {
+      semanticType = "last_name";
+    } else if (/full.*name|\bname\b/i.test(combinedFieldHint) && !/username|user/i.test(combinedFieldHint)) {
+      semanticType = "name";
+    } else if (lowerType === "password" || /password|passwd/i.test(combinedFieldHint)) {
+      semanticType = "password";
+    } else if (role === "searchbox" || lowerType === "search" || (tag === "textarea" && (lowerName === "q" || lowerId === "search")) || /search|query|\bq\b|keyword/i.test(combinedFieldHint)) {
+      semanticType = "search";
+    } else if (tag === "textarea" || /message|comment|feedback|body|notes/i.test(combinedFieldHint)) {
+      semanticType = "message";
+    }
+  }
 
   return {
     elementId,
@@ -264,7 +286,8 @@ export function extractElementDescription(element, elementId) {
     ...(isMaxPriceInput ? { isMaxPriceInput: true } : {}),
     ...(isMinPriceInput ? { isMinPriceInput: true } : {}),
     ...(isPriceGoButton ? { isPriceGoButton: true } : {}),
-    ...(isProductResult ? { isProductResult: true } : {})
+    ...(isProductResult ? { isProductResult: true } : {}),
+    ...(semanticType ? { semanticType } : {})
   };
 }
 

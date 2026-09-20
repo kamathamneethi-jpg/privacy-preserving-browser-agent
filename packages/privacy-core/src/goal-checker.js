@@ -84,25 +84,37 @@ export class GoalCompletionChecker {
     }
 
     // 4. Check if search was requested and performed
-    const requiresSearch = operations.has("search") || goal.domain === "ecommerce" || /\b(?:search|find|look for)\b/i.test(goalText);
+    const requiresSearch = operations.has("search") || goal.domain === "ecommerce" || (goal.domain === "research" && !goal.currentUrl) || /\b(?:search|find|look for)\b/i.test(goalText);
     if (requiresSearch) {
       const searchActionExecuted = actionHistory.some(a => {
         const text = typeof a === "string" ? a : `${a.actionType || ""} ${a.reason || ""} ${a.target || ""}`;
-        return /\b(?:search|entered search|typed into search|field-keywords|searchbox|type)\b/i.test(text);
+        return /\b(?:search|entered search|typed into search|searchbox|search_query|query|type)\b/i.test(text);
       });
       if (!searchActionExecuted) {
         missingRequirements.push("Search query has not been executed yet.");
       }
     }
 
-    // 5. Check if comparison was requested and whether enough qualifying candidates exist
+    // 5. Check if form filling was requested and performed
+    const requiresFormFill = (operations.has("fill_form") || operations.has("fill") || goal.domain === "form_filling") && !requiresCart;
+    if (requiresFormFill) {
+      const formFillExecuted = actionHistory.some(a => {
+        const text = typeof a === "string" ? a : `${a.actionType || ""} ${a.reason || ""} ${a.target || ""}`;
+        return /\b(?:fill|populated|typed?|entered|form field|input|select|check)\b/i.test(text);
+      }) || (stateManager?.executedActions && stateManager.executedActions.some(a => a.actionType === "TYPE" || a.actionType === "CHECK" || a.actionType === "SELECT"));
+      if (!formFillExecuted) {
+        missingRequirements.push("Form fields have not been populated yet.");
+      }
+    }
+
+    // 6. Check if comparison was requested and whether enough qualifying candidates exist
     const countConstraint = constraints.find(c => c.name === "candidate_count");
     const minCandidates = countConstraint ? countConstraint.value : (operations.has("compare") || /\bcompare\b/i.test(goalText) ? 2 : 1);
     if (minCandidates > 1 && candidates.length < minCandidates) {
       missingRequirements.push(`Comparison requires at least ${minCandidates} candidates (inspected ${candidates.length}).`);
     }
 
-    // 6. Verify Constraints against Candidates if candidates exist
+    // 7. Verify Constraints against Candidates if candidates exist
     if (constraints.length > 0 && candidates.length > 0) {
       let qualifyingCount = 0;
       for (const cand of candidates) {
@@ -115,7 +127,6 @@ export class GoalCompletionChecker {
             if (c.operator === CONSTRAINT_OPERATORS.GREATER_THAN_OR_EQUAL && Number(val) < Number(c.value)) matches = false;
             if (c.operator === CONSTRAINT_OPERATORS.EQUALS && String(val).toLowerCase() !== String(c.value).toLowerCase()) matches = false;
           } else if (cand.title && typeof cand.title === "string" && c.value) {
-            // Check if title mentions constraint value (e.g. brand "Nike" in title "Nike Air Max")
             if (String(cand.title).toLowerCase().includes(String(c.value).toLowerCase())) {
               // Matches via title text
             }
@@ -128,7 +139,7 @@ export class GoalCompletionChecker {
       }
     }
 
-    // 7. Check if planner has remaining uncompleted required tasks
+    // 8. Check if planner has remaining uncompleted required tasks
     if (planner && Array.isArray(planner.tasks)) {
       const pendingRequired = planner.tasks.filter(t => {
         const isDone = String(t.status).toLowerCase() === "completed" || t.status === TASK_STATUS.COMPLETED;
@@ -137,6 +148,7 @@ export class GoalCompletionChecker {
           t.type === "filter" ||
           t.type === "select_candidate" ||
           t.type === "fill_form" ||
+          t.type === "submit_form" ||
           t.type === "perform_action" ||
           t.type === "submit_action" ||
           t.type === "submit"

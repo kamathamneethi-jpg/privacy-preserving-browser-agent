@@ -68,6 +68,7 @@ export class GoalParser {
 
     const trimmed = userRequest.trim();
     const domain = this.detectDomain(trimmed);
+    const targetWebsite = this.extractTargetWebsite(trimmed);
     const constraints = this.extractConstraints(trimmed);
     const required_operations = this.extractOperations(trimmed, domain, constraints);
     const targetEntity = this.extractTargetEntity(trimmed, domain);
@@ -79,6 +80,7 @@ export class GoalParser {
       goal: summary,
       summary,
       domain,
+      targetWebsite,
       targetEntity,
       constraints,
       required_operations,
@@ -87,24 +89,50 @@ export class GoalParser {
   }
 
   /**
+   * Identifies any explicit target website mentioned in the user request.
+   */
+  static extractTargetWebsite(text) {
+    const lower = text.toLowerCase();
+    const match = lower.match(/\b(?:on|in|from|at|via|to)\s+(google|wikipedia|youtube|github|reddit|flipkart|ebay|walmart|amazon|twitter|x|linkedin|stackoverflow|myntra|bing|duckduckgo)\b/i);
+    if (match) return match[1].toLowerCase();
+    if (/\b(?:wikipedia\.org|google\.com|youtube\.com|github\.com|flipkart\.com|amazon\.in|amazon\.com)\b/i.test(lower)) {
+      const m2 = lower.match(/\b([a-z0-9-]+)\.(?:org|com|in|net|io)\b/i);
+      if (m2) return m2[1].toLowerCase();
+    }
+    return null;
+  }
+
+  /**
    * Identifies the primary task domain from natural language cues.
    */
   static detectDomain(text) {
     const lower = text.toLowerCase();
 
+    // 1. Form Filling has highest precedence when form filling verbs/nouns are present
+    if (/\b(?:fill out|fill in|complete form|registration form|signup form|contact form|survey|application form|enter name|enter email)\b/i.test(lower)) {
+      return TASK_DOMAINS.FORM_FILLING;
+    }
+    if (/\b(?:form|sign up|register|survey|application|registration|employee form)\b/i.test(lower) && !/\b(?:buy|shop|shoes?|sneakers?|laptops?)\b/i.test(lower)) {
+      return TASK_DOMAINS.FORM_FILLING;
+    }
+
+    // 2. Navigation
     if (/\b(?:http:\/\/|https:\/\/|navigate to|go to website|open url)\b/i.test(lower) && !/\b(?:buy|shop|cart|checkout)\b/i.test(lower)) {
       return TASK_DOMAINS.NAVIGATION;
     }
+
+    // 3. Booking & Travel
     if (/\b(?:flight|hotel|airbnb|booking|ticket|reservation|train|bus)\b/i.test(lower)) {
       return TASK_DOMAINS.BOOKING;
     }
-    if (/\b(?:form|sign up|register|survey|application|registration|fill out|employee form)\b/i.test(lower)) {
-      return TASK_DOMAINS.FORM_FILLING;
-    }
-    if (/\b(?:buy|shop|cart|product|price|shoes?|sneakers?|jackets?|clothes?|laptops?|phones?|amazon|flipkart|ebay|walmart|discount|cost|order|winter jacket)\b/i.test(lower)) {
+
+    // 4. E-Commerce
+    if (/\b(?:buy|shop|cart|product|price|shoes?|sneakers?|jackets?|clothes?|laptops?|phones?|amazon|flipkart|ebay|walmart|myntra|discount|cost|order|winter jacket)\b/i.test(lower)) {
       return TASK_DOMAINS.ECOMMERCE;
     }
-    if (/\b(?:read|article|paper|summary|extract|wikipedia|research|look up|info|information)\b/i.test(lower)) {
+
+    // 5. Research & Information Retrieval
+    if (/\b(?:read|article|paper|summary|extract|wikipedia|wiki|google|search for|look up|research|info|information|docs|documentation|learn about)\b/i.test(lower)) {
       return TASK_DOMAINS.RESEARCH;
     }
 
@@ -206,12 +234,34 @@ export class GoalParser {
       addConstraint("spec", CONSTRAINT_OPERATORS.CONTAINS, specMatch[1].toLowerCase().replace(/\s+/g, ""));
     }
 
-    // 9. URL constraint
-    const urlMatch = text.match(/https?:\/\/[^\s]+|[\w-]+\.(?:org|com|net|edu|gov|io)[^\s]*/i);
+    // 9. URL constraint (avoid matching email domains)
+    const urlMatch = text.match(/https?:\/\/[^\s]+|(?<!@)\b[a-zA-Z0-9-]+\.(?:org|com|net|edu|gov|io)\b[^\s,.]*/i);
     if (urlMatch) {
       let u = urlMatch[0];
       if (!u.startsWith("http")) u = `https://${u}`;
       addConstraint("url", CONSTRAINT_OPERATORS.EQUALS, u);
+    }
+
+    // 10. Form Field constraints (name, email, phone, message, etc.)
+    const emailMatch = text.match(/(?:email|e-mail)\s*(?:as|is|to|=|:)?\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i) ||
+      text.match(/\b([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b/i);
+    if (emailMatch) {
+      addConstraint("email", CONSTRAINT_OPERATORS.EQUALS, emailMatch[1].trim());
+    }
+
+    const nameMatch = text.match(/(?:name|full\s*name|first\s*name)\s*(?:as|is|to|=|:)?\s*([a-zA-Z\s]{2,35}?)(?=[,\.]|\band\b|\bemail\b|\bphone\b|\bwith\b|$)/i);
+    if (nameMatch) {
+      addConstraint("name", CONSTRAINT_OPERATORS.EQUALS, nameMatch[1].trim());
+    }
+
+    const phoneMatch = text.match(/(?:phone|mobile|tel|contact(?:\s*number)?)\s*(?:as|is|to|=|:)?\s*(\+?[\d\s-]{7,15})/i);
+    if (phoneMatch) {
+      addConstraint("phone", CONSTRAINT_OPERATORS.EQUALS, phoneMatch[1].replace(/[\s-]/g, "").trim());
+    }
+
+    const msgMatch = text.match(/(?:message|comment|feedback|query|notes?)\s*(?:as|is|to|=|:)\s*(["'][^"']+["']|[^,\.]+)/i);
+    if (msgMatch) {
+      addConstraint("message", CONSTRAINT_OPERATORS.EQUALS, msgMatch[1].replace(/^["']|["']$/g, "").trim());
     }
 
     return constraints;
@@ -268,10 +318,25 @@ export class GoalParser {
    * Extracts the main subject or target entity.
    */
   static extractTargetEntity(text, domain) {
-    let cleaned = text.replace(/^(?:find me a|find me|find a|find|search for|look for|open|go to|show me|compare|buy|get me)\s+/i, "");
-    cleaned = cleaned.replace(/(?:under|below|less than|above|over|priced|for|with|in)\s+.*$/i, "");
+    let cleaned = text.trim();
+
+    // 1. Explicit search targets with platform cues
+    const searchMatch = cleaned.match(/(?:search\s+(?:on|in)\s+[a-z0-9.-]+\s+for|search\s+[a-z0-9.-]+\s+for|search\s+for|look\s+up|find\s+information\s+(?:on|about)|read\s+about|learn\s+about)\s+(.+?)(?:\s+(?:and\s+.*|on\s+[a-z0-9.-]+|under\s+.*|below\s+.*|with\s+.*))?$/i);
+    if (searchMatch) {
+      return searchMatch[1].trim();
+    }
+
+    // 2. Strip standard action and navigation prefixes
+    cleaned = cleaned.replace(/^(?:find me a|find me|find a|find|search for|search on\s+[a-z0-9.-]+\s+for|search in\s+[a-z0-9.-]+\s+for|search|look for|look up|open|go to|show me|compare|buy|get me)\s+/i, "");
+
+    // 3. Strip website references
+    cleaned = cleaned.replace(/\s+(?:on|in|from|at)\s+(?:google|wikipedia|youtube|github|reddit|flipkart|ebay|walmart|amazon|myntra)\b/gi, "");
+
+    // 4. Strip trailing filter constraints (e.g. "under 7k", "below $100", "in black")
+    cleaned = cleaned.replace(/\s+(?:under|below|less than|above|over|priced|max)\s+.*$/i, "");
     cleaned = cleaned.trim();
-    return cleaned || (domain === TASK_DOMAINS.ECOMMERCE ? "product" : "information");
+
+    return cleaned || (domain === TASK_DOMAINS.ECOMMERCE ? "product" : (domain === TASK_DOMAINS.RESEARCH ? "topic" : "target"));
   }
 
   /**

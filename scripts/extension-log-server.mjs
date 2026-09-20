@@ -776,7 +776,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="metric-card">
           <div style="font-weight: 700; font-size: 14px; margin-bottom: 8px;">Quick Troubleshooting Guide</div>
           <ul style="padding-left: 20px; font-size: 13px; line-height: 1.8; color: var(--text-muted);">
-            <li><strong style="color: var(--text-main);">"Halted: No interactive elements discovered on page"</strong>: Chrome extensions cannot inject content scripts into <code style="color: var(--accent-blue);">chrome://</code> or <code style="color: var(--accent-blue);">about:blank</code> tabs. Open <code style="color: var(--accent-green);">https://www.amazon.in</code> in an active Chrome tab and try again.</li>
+            <li><strong style="color: var(--text-main);">"Halted: No interactive elements discovered on page"</strong>: Chrome extensions cannot inject content scripts into <code style="color: var(--accent-blue);">chrome://</code> or <code style="color: var(--accent-blue);">about:blank</code> tabs. Open <code style="color: var(--accent-green);">https://www.google.com</code> or any active website in Chrome and try again.</li>
             <li><strong style="color: var(--text-main);">HTTP 401 Unauthorized</strong>: Your Hugging Face token is missing or expired. Generate a free token at <a href="https://huggingface.co/settings/tokens" target="_blank" style="color: var(--accent-blue);">huggingface.co/settings/tokens</a> and paste it into the extension popup.</li>
             <li><strong style="color: var(--text-main);">Local Heuristic Fallback</strong>: If you leave the API key blank, the agent runs entirely locally using deterministic DOM tree parsing with zero cost and zero network calls.</li>
           </ul>
