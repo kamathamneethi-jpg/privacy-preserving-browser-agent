@@ -1363,6 +1363,9 @@ if (runTaskButton) {
         if (planner.getCurrentTask()?.type === "navigate") {
           planner.completeCurrentTask({ url: targetNavUrl });
         }
+      } else if (planner.getCurrentTask()?.type === "navigate") {
+        // Already on target website or domain; advance immediately to next task
+        planner.completeCurrentTask({ url: currentUrl });
       }
 
       // 5. Multi-Step Iterative Multimodal Agent Loop

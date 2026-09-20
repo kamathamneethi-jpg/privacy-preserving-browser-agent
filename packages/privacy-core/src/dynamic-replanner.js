@@ -46,21 +46,26 @@ export class DynamicReplanner {
     }
 
     // 1. Detect Modal Dialogs / Cookie Consent / Popups blocking the page
-    const modalCloseBtn = interactiveElements.find(el => {
-      const text = `${el.text || ""} ${el.ariaLabel || ""}`.toLowerCase();
-      const isCloseText = /\b(close|dismiss|agree|accept all|accept cookies|got it|not now|skip|continue without|decline)\b/i.test(text) ||
-        (el.tag === "button" && el.text === "×") ||
-        (el.attributes && /close/i.test(el.attributes["aria-label"] || ""));
-      return isCloseText && (el.tag === "button" || el.tag === "a" || el.role === "button" || !el.tag);
-    });
-
     const isModalDetected = isOverlayOrModal ||
       interactiveElements.some(el => {
         const t = (el.text || "").toLowerCase();
-        return /\b(cookie policy|we use cookies|privacy preferences|sign up for|subscribe to our newsletter)\b/i.test(t);
+        return /\b(cookie policy|we use cookies|privacy preferences|sign up for|subscribe to our newsletter|accept all cookies|cookie consent)\b/i.test(t);
       });
 
-    if (modalCloseBtn && (isModalDetected || isOverlayOrModal || currentTask?.type !== "close_modal")) {
+    let modalCloseBtn = null;
+    if (isModalDetected) {
+      modalCloseBtn = interactiveElements.find(el => {
+        // Exclude hidden or invisible zero-size elements
+        if (el.bbox && (el.bbox.width <= 0 || el.bbox.height <= 0)) return false;
+        const text = `${el.text || ""} ${el.ariaLabel || ""}`.toLowerCase();
+        const isCloseText = /\b(close|dismiss|agree|accept all|accept cookies|got it|not now|skip|continue without|decline)\b/i.test(text) ||
+          (el.tag === "button" && el.text === "×") ||
+          (el.attributes && /close/i.test(el.attributes["aria-label"] || ""));
+        return isCloseText && (el.tag === "button" || el.tag === "a" || el.role === "button" || !el.tag);
+      });
+    }
+
+    if (modalCloseBtn && currentTask?.type !== "close_modal") {
       return {
         type: "modal_overlay",
         description: `Dismiss modal/popup by clicking "${modalCloseBtn.text || modalCloseBtn.ariaLabel || 'Close'}"`,

@@ -139,6 +139,11 @@
         };
       } catch {}
 
+      // Skip elements that are completely non-rendered or zero-size (except inputs/checkboxes)
+      if (bbox && bbox.width <= 0 && bbox.height <= 0 && tag !== "input" && tag !== "select" && lowerType !== "checkbox" && lowerType !== "radio") {
+        continue;
+      }
+
       const desc = {
         elementId,
         tag,

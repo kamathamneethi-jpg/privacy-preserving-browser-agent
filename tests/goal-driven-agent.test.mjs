@@ -540,3 +540,21 @@ test("24. MultimodalVisionAgent invokes Hugging Face router with Qwen3-VL-4B-Ins
   assert.strictEqual(result.action.parameters.text, "white sneakers");
   assert.strictEqual(result.action.thenPressEnter, true);
 });
+
+test("25. GoalCompletionChecker rejects premature completion when search has not been executed", () => {
+  const goal = GoalParser.parse("search for white nike shoes under 8000");
+  const planner = new TaskPlanner(goal);
+  const stateManager = new ExecutionStateManager({ goal });
+
+  // Only an unrelated click occurred, no search was ever executed
+  const checkRes = GoalCompletionChecker.check({
+    goal,
+    stateManager,
+    planner,
+    actionHistory: ["Step 1: [CLICK] on el_128 (close_modal)"]
+  });
+
+  assert.strictEqual(checkRes.isSatisfied, false);
+  assert.strictEqual(checkRes.completed, false);
+  assert.ok(checkRes.missingRequirements.some(r => r.includes("Search") || r.includes("Pending required task")));
+});

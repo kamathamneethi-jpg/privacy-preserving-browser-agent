@@ -83,14 +83,26 @@ export class GoalCompletionChecker {
       }
     }
 
-    // 4. Check if comparison was requested and whether enough qualifying candidates exist
+    // 4. Check if search was requested and performed
+    const requiresSearch = operations.has("search") || goal.domain === "ecommerce" || /\b(?:search|find|look for)\b/i.test(goalText);
+    if (requiresSearch) {
+      const searchActionExecuted = actionHistory.some(a => {
+        const text = typeof a === "string" ? a : `${a.actionType || ""} ${a.reason || ""} ${a.target || ""}`;
+        return /\b(?:search|entered search|typed into search|field-keywords|searchbox|type)\b/i.test(text);
+      });
+      if (!searchActionExecuted) {
+        missingRequirements.push("Search query has not been executed yet.");
+      }
+    }
+
+    // 5. Check if comparison was requested and whether enough qualifying candidates exist
     const countConstraint = constraints.find(c => c.name === "candidate_count");
     const minCandidates = countConstraint ? countConstraint.value : (operations.has("compare") || /\bcompare\b/i.test(goalText) ? 2 : 1);
     if (minCandidates > 1 && candidates.length < minCandidates) {
       missingRequirements.push(`Comparison requires at least ${minCandidates} candidates (inspected ${candidates.length}).`);
     }
 
-    // 5. Verify Constraints against Candidates if candidates exist
+    // 6. Verify Constraints against Candidates if candidates exist
     if (constraints.length > 0 && candidates.length > 0) {
       let qualifyingCount = 0;
       for (const cand of candidates) {
@@ -116,14 +128,22 @@ export class GoalCompletionChecker {
       }
     }
 
-    // 6. Check if planner has remaining uncompleted critical tasks
+    // 7. Check if planner has remaining uncompleted required tasks
     if (planner && Array.isArray(planner.tasks)) {
-      const pendingCritical = planner.tasks.filter(t => {
+      const pendingRequired = planner.tasks.filter(t => {
         const isDone = String(t.status).toLowerCase() === "completed" || t.status === TASK_STATUS.COMPLETED;
-        return !isDone && (t.type === "perform_action" || t.type === "submit_action" || t.type === "submit");
+        return !isDone && (
+          t.type === "search" ||
+          t.type === "filter" ||
+          t.type === "select_candidate" ||
+          t.type === "fill_form" ||
+          t.type === "perform_action" ||
+          t.type === "submit_action" ||
+          t.type === "submit"
+        );
       });
-      if (pendingCritical.length > 0) {
-        missingRequirements.push(`Pending critical action task: ${pendingCritical[0].description}`);
+      if (pendingRequired.length > 0) {
+        missingRequirements.push(`Pending required task: ${pendingRequired[0].description || pendingRequired[0].type}`);
       }
     }
 
