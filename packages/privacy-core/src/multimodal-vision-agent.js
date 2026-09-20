@@ -210,7 +210,8 @@ export class MultimodalVisionAgent {
     actionHistory = [],
     sanitizedDomContext = "",
     rawPiiValues = [],
-    fetchClient = globalThis.fetch
+    fetchClient = globalThis.fetch,
+    onTelemetry = null
   }) {
     if (!apiKey) {
       return null;
@@ -245,6 +246,43 @@ export class MultimodalVisionAgent {
       headers["X-Title"] = "Privacy-Preserving Autonomous Browser Agent";
     }
 
+    const maskedAuth = apiKey.length > 8 ? `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}` : "masked";
+    const startTime = Date.now();
+
+    const telemetryRequest = {
+      endpoint: endpointUrl,
+      provider,
+      model,
+      headers: { ...headers, Authorization: `Bearer ${maskedAuth}` },
+      messageCount: messages.length,
+      hasScreenshot: Boolean(screenshotBase64),
+      elementCount: interactiveElements.length
+    };
+
+    // Helper to report telemetry without blocking
+    const reportTelemetry = (status, data, level = "info") => {
+      if (typeof onTelemetry === "function") {
+        try { onTelemetry({ status, ...data }); } catch {}
+      }
+      try {
+        if (typeof globalThis.fetch === "function") {
+          globalThis.fetch("http://127.0.0.1:8765/api/events", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              stage: "API REASONING",
+              event: `LLM_API_${status}`,
+              level,
+              data: {
+                ...telemetryRequest,
+                ...data
+              }
+            })
+          }).catch(() => {});
+        }
+      } catch {}
+    };
+
     try {
       const response = await fetchClient(endpointUrl, {
         method: "POST",
@@ -258,14 +296,42 @@ export class MultimodalVisionAgent {
         })
       });
 
+      const latencyMs = Date.now() - startTime;
+
       if (!response.ok) {
+        let errorDetails = "";
+        try {
+          errorDetails = await response.text();
+        } catch {}
+        reportTelemetry("ERROR", {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorDetails || `HTTP Error ${response.status}`,
+          latencyMs
+        }, "error");
         return null;
       }
 
       const data = await response.json();
       const content = data?.choices?.[0]?.message?.content;
-      return MultimodalVisionAgent.parseModelResponse(content);
-    } catch {
+      const parsed = MultimodalVisionAgent.parseModelResponse(content);
+
+      reportTelemetry("RESPONSE", {
+        status: 200,
+        latencyMs,
+        actionType: parsed?.action?.actionType || "UNKNOWN",
+        target: parsed?.action?.target || null,
+        observation: parsed?.observation || null,
+        rawPreview: content ? content.slice(0, 300) : null
+      });
+
+      return parsed;
+    } catch (err) {
+      const latencyMs = Date.now() - startTime;
+      reportTelemetry("EXCEPTION", {
+        error: err.message || String(err),
+        latencyMs
+      }, "error");
       return null;
     }
   }

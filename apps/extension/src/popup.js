@@ -572,16 +572,35 @@ const providerSelect = document.querySelector("#provider-select");
 const modelInput = document.querySelector("#model-input");
 
 /**
- * Sends real-time stage logs to local terminal logger server if active.
+ * Sends real-time stage logs and telemetry to local observability backend if active.
  */
-function relayToTerminalLog(stage, event, data) {
+function relayToTerminalLog(stage, event, data, level = "info") {
   try {
-    fetch("http://127.0.0.1:8765/log", {
+    fetch("http://127.0.0.1:8765/api/events", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stage, event, data })
-    }).catch(() => {});
+      body: JSON.stringify({ stage, event, data, level })
+    }).catch(() => {
+      // Backward compatibility fallback to /log
+      fetch("http://127.0.0.1:8765/log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stage, event, data })
+      }).catch(() => {});
+    });
   } catch {}
+}
+
+const btnOpenDashboard = document.querySelector("#btn-open-dashboard");
+if (btnOpenDashboard) {
+  btnOpenDashboard.addEventListener("click", (e) => {
+    e.preventDefault();
+    if (typeof chrome !== "undefined" && chrome.tabs?.create) {
+      chrome.tabs.create({ url: "http://127.0.0.1:8765" });
+    } else {
+      window.open("http://127.0.0.1:8765", "_blank");
+    }
+  });
 }
 
 const ENV_HUGGINGFACE_KEY = (typeof process !== "undefined" && (process.env?.HUGGINGFACE_API_KEY || process.env?.HF_TOKEN)) || "";
@@ -1417,7 +1436,12 @@ if (runTaskButton) {
         if (interactiveElements.length === 0) {
           const errMsg = observeErr?.message || "No interactive elements discovered on page.";
           finalSummary = `Halted: ${errMsg} Please ensure an active, standard webpage (e.g. https://www.amazon.in) is open in Chrome.`;
-          relayToTerminalLog(`Step ${stepNum}: Stalled`, finalSummary, { error: errMsg, pageUrl, pageTitle });
+          relayToTerminalLog(`Step ${stepNum}: Stalled`, finalSummary, {
+            error: errMsg,
+            pageUrl,
+            pageTitle,
+            diagnosticHelp: pageUrl.startsWith("chrome://") ? "Cannot inject content scripts into chrome:// internal pages. Please open a standard website." : "Page has no interactive elements."
+          }, "error");
           break;
         }
 
@@ -1594,9 +1618,9 @@ if (runTaskButton) {
 
         if (!execRes?.ok) {
           anyFailed = true;
-          relayToTerminalLog(`Step ${stepNum}: Action Failed`, execRes?.error || "Action execution error", stepOutcome);
+          relayToTerminalLog(`Step ${stepNum}: Action Failed`, execRes?.error || "Action execution error", stepOutcome, "error");
           if (stateManager.consecutiveFailures >= 3) {
-            relayToTerminalLog(`Step ${stepNum}: Stopped`, "Exceeded maximum consecutive failures.", {});
+            relayToTerminalLog(`Step ${stepNum}: Stopped`, "Exceeded maximum consecutive failures.", {}, "error");
             break;
           }
         } else {
@@ -1710,7 +1734,7 @@ if (runTaskButton) {
     } catch (err) {
       setPipelineStage("FAILED / DENIED");
       status.textContent = `Task execution error: ${err.message || "Cannot inspect tab."}`;
-      relayToTerminalLog("Pipeline Error", err.message, { error: err.message });
+      relayToTerminalLog("Pipeline Error", err.message, { error: err.message }, "error");
     }
   });
 }

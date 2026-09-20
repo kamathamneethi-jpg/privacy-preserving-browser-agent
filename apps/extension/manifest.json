@@ -8,6 +8,7 @@
     "default_popup": "popup.html"
   },
   "permissions": ["activeTab", "tabs", "storage", "scripting"],
+  "host_permissions": ["http://*/*", "https://*/*", "<all_urls>"],
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*", "<all_urls>"],
