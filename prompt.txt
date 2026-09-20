@@ -1,1692 +1,743 @@
-# Task: Integrate a Small Local GLiNER Model for DOM PII Detection and Redaction
+Modify the existing browser agent so that it operates as a **goal-driven, multi-step browser agent** instead of converting the user's entire request into a single search query.
 
-We are building a Chrome browser extension that acts as a local privacy middleware for AI browser agents.
+The system must work for arbitrary browser tasks, not just shopping.
 
-The immediate goal is to implement a **small, fast, fully local PII detector for DOM content** using GLiNER.
+## Core requirement
 
-Do NOT use an external API for PII detection.
-Do NOT send DOM content to OpenAI, Anthropic, Google, Hugging Face Inference API, or any cloud service.
-The model must run locally.
+A complex user request must be decomposed into smaller executable tasks.
 
-## 1. First inspect the existing project
+The agent must repeatedly:
 
-Before modifying anything:
+USER GOAL
+→ GOAL DECOMPOSITION
+→ TASK PLAN
+→ EXECUTE ONE TASK
+→ CAPTURE NEW DOM
+→ CAPTURE NEW SCREENSHOT
+→ SEND DOM + SCREENSHOT + TASK STATE TO AI AGENT
+→ AI DECIDES NEXT ACTION
+→ EXECUTE
+→ OBSERVE AGAIN
+→ REPLAN IF NECESSARY
+→ GOAL CHECK
+→ CONTINUE UNTIL GOAL IS SATISFIED
 
-1. Inspect the repository structure.
-2. Identify:
+Do NOT implement this as a fixed sequence.
 
-   * Chrome extension entry points
-   * content scripts
-   * background/service worker
-   * privacy-core package
-   * existing DOM analyzer
-   * existing PII detection code
-   * existing model-loading code
-   * build system
-   * package manager
-3. Read the existing architecture and determine the correct place for the DOM PII detector.
-4. Do not create a parallel architecture if an existing privacy-core/DOM pipeline already exists.
-5. Reuse existing interfaces wherever possible.
-
-Explain briefly which files will be modified and why before implementation.
+The agent must dynamically determine the next task based on the current browser state.
 
 ---
 
-# 2. Model selection
+# 1. Goal Understanding
 
-Use a **small GLiNER checkpoint suitable for local inference**.
+When the user provides a request, first convert it into a structured goal.
 
-Before downloading anything:
+Example:
 
-1. Check the official GLiNER/Hugging Face model repository.
-2. Identify the smallest practical checkpoint that supports custom entity labels and local inference.
-3. Prefer a model that can realistically be converted/exported to a browser-compatible runtime.
-4. Record:
+"Find me a white Nike shoe under ₹7,000 and compare a few options"
 
-   * exact model name
-   * model repository
-   * model size
-   * license
-   * expected inference framework
-   * whether ONNX/browser inference is supported
-5. Do NOT assume that a Python-only GLiNER implementation can simply run inside a Chrome extension.
+should become something conceptually similar to:
 
-If the selected checkpoint cannot realistically run inside the browser, determine the correct local deployment approach rather than pretending it can.
+{
+"goal": "Find and compare suitable Nike shoes",
+"constraints": [
+{
+"attribute": "brand",
+"operator": "equals",
+"value": "Nike"
+},
+{
+"attribute": "color",
+"operator": "equals",
+"value": "white"
+},
+{
+"attribute": "price",
+"operator": "less_than_or_equal",
+"value": 7000,
+"currency": "INR"
+}
+],
+"required_operations": [
+"search",
+"inspect",
+"filter",
+"compare"
+]
+}
+
+However, this is ONLY an example.
+
+The same architecture must work for requests such as:
+
+* Find a product and compare options.
+* Search for information across multiple websites.
+* Fill out a form.
+* Book something.
+* Navigate a website and retrieve information.
+* Find an item, inspect its details, and perform an action.
+* Read a dashboard and summarize specific information.
+* Complete a multi-page workflow.
+* Find information hidden behind menus, tabs, pagination, or dynamically loaded content.
+
+Do not hardcode domain-specific task types.
 
 ---
-After selecting the checkpoint, actually download the model files into the
-project's local model directory and integrate them into the extension.
 
-Do not stop at recommending a model.
+# 2. Task Decomposition
 
-The implementation is considered incomplete until:
-1. The model files exist locally.
-2. The extension can load them.
-3. A real DOM string can be passed to the model.
-4. The model returns PII detections.
-5. Those detections reach the existing policy engine.
-6. A test DOM is successfully sanitized.
-7. The complete flow works without an internet connection after the
-   model/dependencies have been installed.
+The planner must convert the high-level goal into smaller tasks.
 
-Show the exact model directory structure and explain every model file
-that is required.
+Example:
 
-# 3. Architecture requirement
+GOAL:
+Find a suitable product satisfying several constraints.
+
+TASKS:
+
+1. Identify where to search.
+2. Open/search the relevant website.
+3. Inspect the current page.
+4. Extract candidate information.
+5. Apply constraints.
+6. Inspect additional candidates if required.
+7. Compare valid candidates.
+8. Determine whether the goal has been satisfied.
+9. Perform any final requested action.
+10. Return the result.
+
+Another request may produce a completely different task sequence.
+
+Therefore:
+
+DO NOT hardcode:
+
+task1 → task2 → task3 → task4
+
+Instead implement:
+
+goal
+→ planner
+→ current task
+→ observation
+→ next task
+→ observation
+→ next task
+→ ...
+
+The planner must be able to add, remove, reorder, or repeat tasks based on what happens in the browser.
+
+---
+
+# 3. Browser Observation MUST Happen After Every Meaningful State Change
+
+This is critical.
+
+After every browser action that can change the page state, capture:
+
+1. Current DOM
+2. Current screenshot
+3. Current URL
+4. Current browser state
+5. Current task
+6. Previous action
+7. Relevant execution history
+
+Examples of state-changing actions:
+
+* navigation
+* clicking
+* typing
+* submitting
+* scrolling
+* opening a dropdown
+* opening a modal
+* switching tabs
+* changing filters
+* pagination
+* expanding an element
+* selecting an option
+* loading dynamic content
+
+After such an action:
+
+ACTION
+↓
+WAIT FOR PAGE STATE TO STABILIZE
+↓
+CAPTURE DOM
+↓
+CAPTURE SCREENSHOT
+↓
+SEND BOTH TO AI AGENT
+↓
+DECIDE NEXT ACTION
+
+Do not allow the agent to continue blindly after an action.
+
+---
+
+# 4. DOM + Screenshot Must Be Sent Together
+
+The AI agent must receive both representations of the browser state.
+
+Conceptually:
+
+{
+"task": "...",
+"url": "...",
+"previousAction": "...",
+"dom": "...",
+"screenshot": "<image>",
+"history": "...",
+"goal": "...",
+"constraints": "..."
+}
+
+The DOM provides:
+
+* semantic information
+* text
+* attributes
+* links
+* buttons
+* inputs
+* element relationships
+* accessibility information
+
+The screenshot provides:
+
+* visual layout
+* visual hierarchy
+* elements missing from useful DOM extraction
+* rendered text
+* images
+* icons
+* popups
+* overlays
+* visual state
+* whether an element is actually visible
+* spatial relationships
+* page structure
+
+The AI must use BOTH.
+
+Do not convert the screenshot into a textual description before sending it if the selected model supports native image input.
+
+Send the actual screenshot as an image input to the multimodal model.
+
+---
+
+# 5. Vision Model
+
+Use a multimodal vision-language model as the browser-state reasoning model.
+
+Use:
+
+Qwen3-VL
+
+or another currently available vision-language model with native image input.
+
+For the prototype, configure a vision-capable Qwen model as the agent's vision/reasoning model.
+
+The model must be capable of receiving:
+
+TEXT + IMAGE
+
+in the same inference request.
+
+Do NOT use a text-only model and pretend that it has seen the screenshot.
+
+If the primary reasoning model is text-only, implement a dedicated vision model path.
+
+The vision model should analyze the screenshot and return structured observations/action decisions.
+
+Qwen's tooling supports multimodal image input and explicitly exposes vision-capable model configuration, so the implementation should use the model's native image-input capability rather than OCR-only conversion.
+
+---
+
+# 6. AI Agent Output
+
+Do not allow the model to return arbitrary prose as the browser action.
+
+Require structured output.
+
+Example:
+
+{
+"observation": {
+"page_type": "search_results",
+"visible_elements": [
+"search box",
+"product cards",
+"pagination"
+]
+},
+
+"goal_progress": {
+"completed": false,
+"reason": "More candidates need to be inspected"
+},
+
+"next_task": {
+"type": "inspect_products",
+"description": "Inspect visible product cards"
+},
+
+"action": {
+"type": "click",
+"target": "product_card_3"
+}
+}
+
+The exact schema can be adapted to the existing browser-action system.
+
+---
+
+# 7. Action Selection
+
+The AI should choose from the browser agent's existing supported actions.
+
+Examples:
+
+* navigate
+* click
+* type
+* select
+* scroll
+* hover
+* press_key
+* go_back
+* open_tab
+* close_tab
+* wait
+* extract
+* finish
+
+The AI should NOT invent unsupported actions.
+
+Every action must reference a valid DOM element or a valid visual target.
+
+For DOM-based actions, prefer stable element identifiers generated by the DOM analyzer.
+
+For visually identified elements that cannot be reliably mapped through the DOM, use the screenshot coordinates or the existing visual-action mechanism.
+
+---
+
+# 8. Screenshot Should Be Used for Decision Making
+
+The current problem is:
+
+SCREENSHOT
+↓
+captured
+↓
+ignored by agent
+
+Fix this.
+
+The screenshot must be included in the model request whenever a new browser state is observed.
+
+The model should explicitly reason from the screenshot for:
+
+* visual-only elements
+* layout
+* visibility
+* overlays
+* modal dialogs
+* images
+* icons
+* visual product properties
+* buttons whose semantic DOM information is insufficient
+* page structure
+* state that is apparent visually but not represented cleanly in extracted DOM
+
+Do not rely exclusively on DOM text.
+
+---
+
+# 9. Dynamic Replanning
+
+The planner must not assume that the original plan remains valid.
+
+Example:
+
+PLAN:
+Search → inspect → filter → compare
+
+But after searching:
+
+OBSERVATION:
+The website requires selecting a category first.
+
+The agent should modify the plan:
+
+Search
+→ select category
+→ apply filters
+→ inspect results
+→ compare
+
+Another example:
+
+OBSERVATION:
+No results satisfy the constraints.
+
+The agent should determine the next valid strategy according to the user's goal rather than simply stopping.
+
+Possible next tasks could include:
+
+* inspect more pages
+* change search query
+* try another website
+* remove a non-required constraint
+* ask the user for clarification if necessary
+
+The agent must NEVER silently relax an explicit user constraint.
+
+---
+
+# 10. State Machine
+
+Maintain explicit execution state.
+
+Example:
+
+{
+"goal": {},
+"constraints": [],
+"plan": [],
+"currentTask": {},
+"completedTasks": [],
+"observations": [],
+"browserState": {},
+"domSnapshot": {},
+"screenshot": {},
+"candidateData": [],
+"actionHistory": [],
+"failedActions": [],
+"replanRequired": false,
+"goalCompleted": false
+}
+
+Every browser action updates this state.
+
+---
+
+# 11. Goal Completion
+
+Do not consider the task complete merely because:
+
+* a search was performed
+* a page was opened
+* results appeared
+* one action succeeded
+
+The agent must evaluate whether the ORIGINAL USER GOAL has actually been satisfied.
+
+Implement a goal checker:
+
+CURRENT STATE
++
+USER GOAL
++
+CONSTRAINTS
+↓
+GOAL SATISFIED?
+
+YES → finish
+
+NO → generate next task
+
+The goal checker should explicitly identify unmet requirements.
+
+Example:
+
+{
+"completed": false,
+"missingRequirements": [
+"Need to inspect additional candidates",
+"Need to verify price constraint"
+]
+}
+
+---
+
+# 12. Prevent Infinite Loops
+
+Implement safeguards.
+
+Track:
+
+* repeated actions
+* repeated URLs
+* repeated screenshots/page states
+* repeated failed actions
+* number of attempts per task
+* number of replans
+
+If the agent repeatedly performs the same unsuccessful action, force replanning.
+
+If the goal cannot be completed with available information, stop and explain what is missing instead of looping indefinitely.
+
+---
+
+# 13. Observation Pipeline
 
 Implement this pipeline:
 
-DOM
+USER REQUEST
 ↓
-DOM text extraction
+GOAL PARSER
 ↓
-Text normalization/chunking
+TASK PLANNER
 ↓
-Fast deterministic PII rules
+BROWSER EXECUTOR
 ↓
-GLiNER local inference
+PAGE STATE CHANGE
 ↓
-Unified PII detections
+DOM CAPTURE
++
+SCREENSHOT CAPTURE
 ↓
-Privacy policy engine
+MULTIMODAL AI AGENT
 ↓
-DOM redaction/sanitization
+STATE ANALYSIS
 ↓
-Sanitized DOM/context
+ACTION DECISION
 ↓
-AI agent
-
-The detector should NOT directly make the final privacy decision.
-
-Separate:
-
-### Detection
-
-"What PII exists?"
-
-from:
-
-### Policy
-
-"Is this PII allowed for this task?"
-
-from:
-
-### Redaction
-
-"How should the DOM be modified?"
-
----
-
-# 4. Hybrid detection
-
-Do not use GLiNER for obvious patterns if a deterministic rule is faster.
-
-Implement a hybrid detector.
-
-Use regex/rules for:
-
-* EMAIL
-* PHONE
-* CREDIT_CARD
-* IP_ADDRESS
-* URL where appropriate
-* obvious ID patterns where reliable
-
-Use GLiNER for semantic entities such as:
-
-* NAME
-* PERSON
-* ADDRESS
-* ORGANIZATION
-* LOCATION
-* PASSPORT_NUMBER where supported
-* NATIONAL_ID where supported
-* OTHER sensitive entities defined by our taxonomy
-
-The exact supported labels should be verified against the selected GLiNER model.
-
----
-
-# 5. Normalize our PII taxonomy
-
-Create a mapping between GLiNER labels and our project's normalized PII classes.
-
-Use the project's existing taxonomy if one already exists.
-
-Do not invent a second incompatible taxonomy.
-
-For example:
-
-```text
-PERSON → NAME
-EMAIL → EMAIL
-PHONE_NUMBER → PHONE
-ADDRESS → ADDRESS
-CREDIT_CARD → CREDIT_CARD
-PASSPORT → PASSPORT
-```
-
-Document every mapping.
-
----
-
-# 6. DOM extraction
-
-Implement a DOM extraction layer that identifies meaningful user-visible content.
-
-Handle at minimum:
-
-* text nodes
-* input values
-* textarea values
-* select values
-* contenteditable elements
-* relevant ARIA/accessibility text
-* labels associated with form fields
-
-Avoid blindly serializing the entire DOM.
-
-Do not send:
-
-* scripts
-* styles
-* irrelevant metadata
-* hidden implementation details
-
-unless they are genuinely required by the existing agent architecture.
-
-Preserve the relationship between detected text and its original DOM element.
-
-Example internal representation:
-
-```typescript
-interface DOMTextNode {
-  nodeId: string;
-  elementPath: string;
-  text: string;
-  source:
-    | "text"
-    | "input"
-    | "textarea"
-    | "select"
-    | "contenteditable"
-    | "aria";
-}
-```
-
----
-
-# 7. Detection output
-
-Create a normalized interface such as:
-
-```typescript
-interface PIIDetection {
-  type: string;
-  value: string;
-  start: number;
-  end: number;
-  confidence: number;
-  source: "regex" | "gliner";
-  nodeId?: string;
-}
-```
-
-Example:
-
-```json
-{
-  "type": "EMAIL",
-  "value": "john@example.com",
-  "confidence": 0.98,
-  "source": "regex",
-  "nodeId": "node-42"
-}
-```
-=======
-I am preparing a YOLO object-detection training project on my Mac.
-The actual training will NOT happen on this Mac.
-
-I will copy the finished project and dataset to a friend's NVIDIA RTX laptop.
-Your job is to create a robust, portable training project that can be executed on the RTX laptop with minimal/no manual fixes.
-
-IMPORTANT:
-DO NOT START MODEL TRAINING.
-DO NOT RUN A TRAINING EPOCH.
-DO NOT DOWNLOAD OR REGENERATE THE DATASET.
-DO NOT MODIFY THE DATASET.
-DO NOT CHANGE THE CLASS TAXONOMY.
-DO NOT MERGE TRAIN AND TEST.
-DO NOT ADD ViT.
-DO NOT ADD Visual Mamba.
-DO NOT ADD OCR.
-DO NOT add any other model.
-
-For now the ONLY model is pretrained YOLO11n.
-
-============================================================
-PROJECT ROOT
-============================================================
-
-The project root is:
-
-~/Desktop/sih
-
-The WebPII YOLO dataset is already present at:
-
-~/Desktop/sih/datasets/webpii_yolo
-
-Do NOT create another copy of the dataset.
-
-============================================================
-DATASET
-============================================================
-
-The dataset is already converted to YOLO object-detection format.
-
-Structure:
-
-datasets/
-└── webpii_yolo/
-    ├── images/
-    │   ├── train/
-    │   └── test/
-    │
-    ├── labels/
-    │   ├── train/
-    │   └── test/
-    │
-    └── data.yaml
-
-Dataset statistics:
-
-TRAIN:
-40,384 images
-40,384 label files
-469,135 annotations
-
-TEST:
-4,481 images
-4,481 label files
-51,715 annotations
-
-The dataset has already been verified for matching image/label counts.
-
-The test split MUST remain completely separate from training.
-
-For YOLO, data.yaml currently uses:
-
-train: images/train
-val: images/test
-
-This is intentional for the current baseline.
-
-DO NOT create a new random validation split.
-
-============================================================
-16 CLASSES
-============================================================
-
-The exact class IDs are:
-
-0  NAME
-1  EMAIL
-2  PHONE
-3  ADDRESS
-4  LOCATION
-5  POSTCODE
-6  DATE_OF_BIRTH
-7  PAYMENT_CARD
-8  SECURITY_CODE
-9  USERNAME
-10 PASSWORD
-11 PROMO_CODE
-12 GIFT_CODE
-13 COMPANY
-14 COUNTRY
-15 OTHER_PII
-
-Do NOT:
-
-- rename classes
-- reorder classes
-- remove classes
-- merge classes
-- create new classes
-- change class IDs
-
-The existing annotations were generated using these 16 classes.
-
-============================================================
-MODEL
-============================================================
-
-For this experiment use ONLY:
-
-YOLO11n
-
-Use the pretrained:
-
-yolo11n.pt
-
-This is NOT training from scratch.
-
-The experiment is:
-
-pretrained YOLO11n
-        ↓
-fine-tuning on WebPII
-        ↓
-16-class PII detector
-
-Do not use a larger YOLO model.
-
-Do not use YOLO11s/m/l/x.
-
-Do not use YOLOv8.
-
-Do not use YOLOv10.
-
-Do not use custom model architecture.
-
-The model should start from pretrained yolo11n.pt weights.
-
-============================================================
-GOAL
-============================================================
-
-Create a reliable training/evaluation project.
-
-The Mac is ONLY used to:
-
-1. Write the code.
-2. Validate dataset structure.
-3. Validate Python syntax.
-4. Validate configuration.
-5. Validate that the scripts can import required packages.
-6. Perform CPU-only dry runs that DO NOT train the model.
-7. Package the project for the RTX laptop.
-
-The RTX laptop will be used for:
-
-1. Actual GPU training.
-2. Validation.
-3. Final test evaluation.
-
-============================================================
-FILES TO CREATE
-============================================================
-
-Create:
-
-sih/
-├── datasets/
-│   └── webpii_yolo/
-│       ├── images/
-│       │   ├── train/
-│       │   └── test/
-│       ├── labels/
-│       │   ├── train/
-│       │   └── test/
-│       └── data.yaml
+GOAL CHECK
+↓
+┌───────────────┐
+│ Goal complete?│
+└───────┬───────┘
 │
-├── scripts/
-│   ├── verify_dataset.py
-│   ├── check_environment.py
-│   ├── train_yolo.py
-│   └── evaluate_yolo.py
-│
-├── requirements.txt
-│
-└── README.md
-
-Do not create unnecessary dataset copies.
-
-============================================================
-1. verify_dataset.py
-============================================================
-
-Create:
-
-scripts/verify_dataset.py
-
-This script MUST NOT train anything.
-
-It must verify:
-
-A. Dataset root exists.
-
-B. data.yaml exists.
-
-C. images/train exists.
-
-D. images/test exists.
-
-E. labels/train exists.
-
-F. labels/test exists.
-
-G. Count train images.
-
-Expected:
-
-40,384
-
-H. Count train labels.
-
-Expected:
-
-40,384
-
-I. Count test images.
-
-Expected:
-
-4,481
-
-J. Count test labels.
-
-Expected:
-
-4,481
-
-K. Verify every train image has a corresponding label.
-
-L. Verify every train label has a corresponding image.
-
-M. Verify every test image has a corresponding label.
-
-N. Verify every test label has a corresponding image.
-
-O. Read data.yaml.
-
-P. Verify exactly 16 classes.
-
-Q. Verify class IDs are 0 through 15.
-
-R. Verify names exactly match:
-
-NAME
-EMAIL
-PHONE
-ADDRESS
-LOCATION
-POSTCODE
-DATE_OF_BIRTH
-PAYMENT_CARD
-SECURITY_CODE
-USERNAME
-PASSWORD
-PROMO_CODE
-GIFT_CODE
-COMPANY
-COUNTRY
-OTHER_PII
-
-S. Inspect label files.
-
-Every non-empty label line must contain exactly:
-
-5 values
-
-in the form:
-
-class_id x_center y_center width height
-
-T. Verify class IDs are integers from 0 to 15.
-
-U. Verify normalized coordinates are within valid YOLO ranges.
-
-For x_center, y_center, width, height:
-
-0 <= value <= 1
-
-V. Detect malformed label files.
-
-W. Report the first few problematic files if errors exist.
-
-X. Do NOT modify any files.
-
-The final output should clearly say:
-
-DATASET VERIFICATION PASSED
-
-or:
-
-DATASET VERIFICATION FAILED
-
-If it fails, exit with a non-zero status.
-
-============================================================
-2. check_environment.py
-============================================================
-
-Create:
-
-scripts/check_environment.py
-
-This script must NOT train.
-
-It should report:
-
-Python version
-
-PyTorch version if installed
-
-Torchvision version if installed
-
-Ultralytics version if installed
-
-CUDA availability
-
-CUDA version if available
-
-GPU name if available
-
-GPU count if available
-
-GPU memory if available
-
-Operating system
-
-CPU architecture
-
-It must work on BOTH:
-
-- Mac
-- NVIDIA RTX laptop
-
-On the Mac it is acceptable to report:
-
-CUDA available: False
-
-because the Mac does not have NVIDIA CUDA.
-
-The script must NOT treat the absence of CUDA on the Mac as a failure.
-
-However, if this script is run on the RTX laptop and CUDA is unavailable, clearly report:
-
-WARNING: NVIDIA CUDA is not available.
-
-Do not automatically train on CPU.
-
-============================================================
-3. train_yolo.py
-============================================================
-
-Create:
-
-scripts/train_yolo.py
-
-This is the actual training script.
-
-BUT:
-
-It must NEVER automatically start training merely because the script is imported or inspected.
-
-Training must happen only when the user explicitly executes:
-
-python scripts/train_yolo.py
-
-The script must use:
-
-from ultralytics import YOLO
-
-model = YOLO("yolo11n.pt")
-
-Use the local dataset:
-
-datasets/webpii_yolo/data.yaml
-
-Do NOT use:
-
-/content/drive/MyDrive/...
-
-That was the old Google Colab path.
-
-Use relative paths based on the project root so the project remains portable.
-
-============================================================
-TRAINING CONFIGURATION
-============================================================
-
-Default training parameters:
-
-model:
-yolo11n.pt
-
-data:
-datasets/webpii_yolo/data.yaml
-
-epochs:
-50
-
-imgsz:
-640
-
-batch:
-16
-
-device:
-0
-
-workers:
-4
-
-pretrained:
-True
-
-cache:
-False
-
-patience:
-10
-
-project:
-training
-
-name:
-webpii_16class_yolo11n
-
-Use mixed precision / AMP if supported by Ultralytics.
-
-Do NOT use dataset caching because the dataset is large and the RTX laptop may have limited storage.
-
-============================================================
-COMMAND LINE ARGUMENTS
-============================================================
-
-train_yolo.py must support:
-
---batch
-
---epochs
-
---imgsz
-
---workers
-
---device
-
---name
-
-Examples:
-
-python scripts/train_yolo.py --batch 16
-
-python scripts/train_yolo.py --batch 8
-
-python scripts/train_yolo.py --batch 4
-
-python scripts/train_yolo.py --batch 16 --epochs 50
-
-Defaults should remain:
-
-batch = 16
-epochs = 50
-imgsz = 640
-workers = 4
-device = 0
-
-============================================================
-GPU SAFETY
-============================================================
-
-Before training starts, perform environment checks.
-
-If running on the RTX laptop:
-
-Verify:
-
-torch.cuda.is_available()
-
-If CUDA is unavailable:
-
-DO NOT silently fall back to CPU.
-
-Instead stop and print:
-
-CUDA/NVIDIA GPU was not detected.
-Training was NOT started.
-Install the correct NVIDIA/PyTorch environment and try again.
-
-If the selected device is GPU 0, verify that GPU 0 exists.
-
-Print:
-
-GPU:
-GPU name:
-GPU memory:
-
-BEFORE TRAINING STARTS.
-
-============================================================
-CRITICAL TRAINING SAFETY
-============================================================
-
-Do not start training during:
-
-- import
-- validation
-- dataset checking
-- README generation
-- syntax checking
-- environment checking
-
-Training only begins after the user explicitly runs:
-
-python scripts/train_yolo.py
-
-Do not put training code at module import level.
-
-Use:
-
-if __name__ == "__main__":
-
-properly.
-
-============================================================
-OUTPUT
-============================================================
-
-Training outputs should be stored under:
-
-training/
-
-Use:
-
-training/webpii_16class_yolo11n/
-
-Expected:
-
-training/
-└── webpii_16class_yolo11n/
-    ├── weights/
-    │   ├── best.pt
-    │   └── last.pt
-    ├── results.csv
-    ├── results.png
-    └── other Ultralytics outputs
-
-Do not overwrite an existing completed experiment.
-
-If the output directory already exists, either:
-
-1. automatically create a unique run name, OR
-2. stop and ask the user.
-
-Do not silently destroy an existing experiment.
-
-============================================================
-4. evaluate_yolo.py
-============================================================
-
-Create:
-
-scripts/evaluate_yolo.py
-
-This script must NOT train.
-
-It should load:
-
-training/webpii_16class_yolo11n/weights/best.pt
-
-and evaluate against:
-
-datasets/webpii_yolo/data.yaml
-
-The test/validation path comes from:
-
-val: images/test
-
-The script must clearly state that the test split is being used.
-
-Report:
-
-```json
-{
-  "type": "NAME",
-  "value": "John Smith",
-  "confidence": 0.91,
-  "source": "gliner",
-  "nodeId": "node-17"
-}
-```
+NO   │   YES
+↓         ↓
+REPLAN     FINISH
+↓
+NEXT TASK
+↓
+BROWSER EXECUTOR
 
 ---
 
-# 8. Model loading
+# 14. Important Performance Rule
 
-The model must be downloaded once and stored locally.
+Do not unnecessarily send enormous DOM snapshots and full-resolution screenshots on every request.
 
-Do NOT download model weights every time a page is analyzed.
+Create an observation pipeline that:
 
-Implement:
+- extracts relevant DOM information
+- removes irrelevant nodes
+- preserves element identifiers
+- captures the current viewport screenshot
+- optionally captures additional screenshots only when needed
+- maintains a compact execution history
+
+However, correctness is more important than premature optimization for the prototype.
+
+---
+
+# 15. Privacy Integration
+
+This browser agent already contains a privacy boundary.
+
+Do NOT bypass it.
+
+The DOM and screenshot must pass through the existing privacy pipeline before being sent to any external model.
+
+The flow should therefore be:
+
+BROWSER
+↓
+DOM + SCREENSHOT
+↓
+LOCAL PRIVACY / PII DETECTION
+↓
+REDACTION / POLICY ENGINE
+↓
+SANITIZED DOM + SANITIZED SCREENSHOT
+↓
+VISION LANGUAGE MODEL
+↓
+ACTION DECISION
+↓
+ACTION VALIDATOR
+↓
+BROWSER
+
+The model must never receive information that the existing privacy policy says should be blocked.
+
+---
+
+# 16. Implementation Constraints
+
+Reuse the existing:
+
+- DOM analyzer
+- screenshot capture
+- privacy policy engine
+- PII detector
+- redaction pipeline
+- browser action executor
+- action validator
+- local privacy vault
+- existing model/API infrastructure
+
+Do not create parallel implementations of these systems.
+
+The main change should be the introduction/improvement of:
+
+1. Goal Parser
+2. Task Planner
+3. Observation Manager
+4. Multimodal Vision Agent
+5. Dynamic Replanner
+6. Goal Completion Checker
+7. Execution State Manager
+
+---
+
+# 17. Acceptance Criteria
+
+The implementation is complete only when all of these are true:
+
+### Multi-step execution
+
+A complex user request results in multiple browser actions rather than one search query.
+
+### Task decomposition
+
+The high-level request is converted into smaller tasks dynamically.
+
+### DOM observation
+
+After meaningful browser state changes, the latest DOM is captured.
+
+### Screenshot observation
+
+After meaningful browser state changes, the latest screenshot is captured.
+
+### Vision usage
+
+The screenshot is actually passed to a multimodal model and influences the agent's decision.
+
+### Combined reasoning
+
+The model receives both DOM information and visual information.
+
+### Dynamic planning
+
+The next task depends on the current browser state.
+
+### Replanning
+
+Unexpected page states cause the agent to modify its plan.
+
+### Goal validation
+
+The agent does not stop simply because a browser action succeeded.
+
+### Privacy
+
+DOM and screenshot data pass through the existing privacy boundary before external model inference.
+
+### Generalization
+
+The implementation must work for arbitrary multi-step browser tasks and must NOT contain logic specifically hardcoded for Nike, shoes, ₹7,000, shopping, or any other single example.
+
+Use the Nike example only as a test case demonstrating the generalized architecture.
+
+### One important correction to your architecture
+
+Don't do:
 
 ```text
-Extension startup
+DOM changed
+    ↓
+send DOM + screenshot
+    ↓
+LLM
+```
+
+for **literally every tiny DOM mutation**.
+
+Modern sites can cause dozens/hundreds of DOM mutations from one action. That will destroy latency and API cost.
+
+Do:
+
+```text
+Browser action
       ↓
-Check local model availability
+wait for meaningful state stabilization
       ↓
-Load model
+capture DOM + viewport screenshot
       ↓
-Keep model available for inference
-```
-
-If browser storage is appropriate, use the existing extension architecture.
-
-If model files need to be bundled or served as extension assets, implement that correctly.
-
-Do not hard-code a remote inference endpoint.
-
----
-
-# 9. Browser compatibility
-
-Determine whether the selected GLiNER checkpoint can run using:
-
-* ONNX Runtime Web
-* Transformers.js
-* WebAssembly
-* WebGPU
-
-Prefer the lightest practical browser-compatible approach.
-
-Do not introduce a Python server merely because the original GLiNER package is Python-based.
-
-The target architecture is:
-
-```text
-Chrome Extension
+privacy pipeline
       ↓
-Local JavaScript/TypeScript
+VLM
       ↓
-Local model runtime
-      ↓
-Local model weights
-      ↓
-PII detections
+next action
 ```
 
-No network request containing user DOM data should be required.
+So your trigger should be **“meaningful browser state change after an agent action”**, not a raw `MutationObserver` event.
 
----
+For the vision model specifically, Qwen's current documentation supports multimodal image input and configurable vision models, including a dedicated `visionModel` path.
 
-# 10. Privacy guarantee
-
-Add a hard architectural guarantee:
+The architecture you actually want is therefore:
 
 ```text
-DOM data → local preprocessing → local PII model
+                  USER GOAL
+                      │
+                      ▼
+              ┌──────────────┐
+              │ Goal Parser  │
+              └──────┬───────┘
+                     ▼
+              ┌──────────────┐
+              │ Task Planner │
+              └──────┬───────┘
+                     ▼
+              ┌──────────────┐
+              │Task Executor │
+              └──────┬───────┘
+                     ▼
+                BROWSER ACTION
+                     │
+                     ▼
+             PAGE STATE CHANGES
+                     │
+             ┌───────┴────────┐
+             ▼                ▼
+          DOM CAPTURE    SCREENSHOT
+             │                │
+             └───────┬────────┘
+                     ▼
+             PRIVACY PIPELINE
+                     │
+                     ▼
+              ┌──────────────┐
+              │ Qwen3-VL /   │
+              │ Vision Agent │
+              └──────┬───────┘
+                     │
+          ┌──────────┴──────────┐
+          ▼                     ▼
+     OBSERVATION            NEXT ACTION
+          │                     │
+          └──────────┬──────────┘
+                     ▼
+                GOAL CHECK
+                     │
+              ┌──────┴──────┐
+              │             │
+             NO            YES
+              │             │
+              ▼             ▼
+           REPLAN         FINISH
+              │
+              └──────→ EXECUTE
 ```
 
-not:
-
-```text
-DOM data → cloud API → PII model
-```
-
-Add comments/documentation explaining this privacy boundary.
-
-If any dependency makes a network request during inference, identify it and eliminate or isolate it.
-
----
-
-# 11. Redaction
-
-Do not immediately destroy the original DOM.
-
-Implement a sanitization layer.
-
-For example:
-
-Original:
-
-```text
-Name: John Smith
-Email: john@example.com
-Phone: +91 9876543210
-```
-
-After policy evaluation:
-
-```text
-Name: John Smith
-Email: john@example.com
-Phone: [REDACTED]
-```
-
-The redaction layer must preserve:
-
-* DOM structure
-* element identity
-* non-sensitive text
-* form semantics
-* agent usability
-
-The agent should receive the sanitized representation, not the raw sensitive value.
-
----
-
-# 12. Policy engine
-
-Create or integrate with the existing policy engine.
-
-The model should NOT decide:
-
-```text
-PHONE = REDACT
-```
-
-based solely on its classification.
-
-Instead:
-
-```text
-PII Detection
-+
-User Policy
-+
-Agent Intent/Task Context
-+
-Data necessity
-=
-Final Policy Decision
-```
-
-For the initial prototype, support policies such as:
-
-```text
-ALLOW
-REDACT
-ALLOW_IF_REQUIRED
-ALWAYS_REDACT
-```
-
-Example:
-
-```text
-PHONE
-Policy = ALLOW_IF_REQUIRED
-Task = Book flight
-Required = true
-→ ALLOW
-```
-
-Example:
-
-```text
-PASSPORT
-Policy = ALWAYS_REDACT
-→ REDACT
-```
-
----
-
-# 13. Confidence thresholds
-
-Implement configurable confidence thresholds.
-
-For example:
-
-```typescript
-const GLINER_THRESHOLD = 0.5;
-```
-
-Do not hard-code the final value without benchmarking.
-
-Make it configurable so we can test:
-
-```text
-0.3
-0.4
-0.5
-0.6
-0.7
-```
-
-and determine the best precision/recall tradeoff.
-
----
-
-# 14. Avoid duplicate detections
-
-If regex and GLiNER detect the same entity:
-
-```text
-EMAIL john@example.com
-```
-
-merge them into one detection.
-
-Define deterministic precedence rules.
-
-For example:
-
-```text
-Regex EMAIL
-+
-GLiNER EMAIL
-→
-one EMAIL detection
-```
-
-Do not produce duplicate redactions.
-
----
-
-# 15. Performance requirement
-
-This is specifically intended for a browser privacy middleware, so performance matters.
-
-Measure:
-
-1. Model loading time
-2. First inference latency
-3. Warm inference latency
-4. DOM extraction time
-5. Regex detection time
-6. GLiNER inference time
-7. Total sanitization time
-8. Memory usage if measurable
-
-Test with:
-
-* small DOM
-* medium DOM
-* large DOM
-* form-heavy DOM
-
-Example benchmark:
-
-```text
-100 DOM text nodes
-500 DOM text nodes
-1000 DOM text nodes
-5000 DOM text nodes
-```
-
-Report:
-
-```text
-DOM size
-Extraction ms
-Regex ms
-GLiNER ms
-Total ms
-```
-
-Do not claim that the model is "fast" without measuring it.
-
----
-
-# 16. Accuracy evaluation
-
-Use the project's existing WebPII/PII dataset if available.
-
-Evaluate at minimum:
-
-```text
-Precision
-Recall
-F1
-False Positive Rate
-False Negative Rate
-```
-
-Evaluate each important entity type separately:
-
-```text
-NAME
-EMAIL
-PHONE
-ADDRESS
-PASSPORT
-CREDIT_CARD
-```
-
-Create a small test set specifically representing browser DOM content.
-
-Include examples such as:
-
-```html
-<label>Name</label>
-<input value="John Smith">
-
-<label>Email</label>
-<input value="john@example.com">
-
-<label>Phone</label>
-<input value="+91 9876543210">
-```
-
-Also test non-PII:
-
-```text
-Apple
-Google
-Delhi
-John Smith Restaurant
-Example Company
-```
-
-This is important because semantic NER models can generate false positives.
-
----
-
-# 17. Unit tests
-
-Add tests for:
-
-### Detection
-
-```text
-Email detected
-Phone detected
-Name detected
-Address detected
-Credit card detected
-```
-
-### False positives
-
-```text
-Company name should not automatically become PERSON
-Normal number should not automatically become PHONE
-Normal text should not become ADDRESS
-```
-
-### Redaction
-
-```text
-PII is replaced
-non-PII remains unchanged
-DOM structure remains valid
-multiple PII entities are handled
-overlapping detections are handled
-```
-
-### Policy
-
-```text
-ALLOW → retained
-REDACT → sanitized
-ALWAYS_REDACT → sanitized
-ALLOW_IF_REQUIRED + required → retained
-ALLOW_IF_REQUIRED + unnecessary → sanitized
-```
-
----
-
-# 18. Developer/debug mode
-
-Add a development-only debug output.
-
-Example:
-
-```text
-[PrivacyCore]
-DOM nodes: 142
-Regex detections: 4
-GLiNER detections: 3
-Merged detections: 6
-Redacted: 2
-Allowed: 4
-Inference: 38ms
-```
-
-Do NOT print actual sensitive values in production logs.
-
-For debug mode, mask values:
-
-```text
-PHONE: +91******3210
-EMAIL: jo***@example.com
-```
-
----
-
-# 19. Failure handling
-
-The extension must remain functional if:
-
-* model fails to load
-* model inference fails
-* browser does not support the required runtime
-* DOM is extremely large
-* malformed DOM content is encountered
-
-Define a safe fallback policy.
-
-Do NOT silently send raw sensitive data to the external AI agent just because the model failed.
-
-The fallback should follow the existing project's privacy policy and fail-safe design.
-
----
-
-# 20. Deliverables
-
-Implement all required code and provide:
-
-1. Exact model/checkpoint used.
-2. Exact source/download location.
-3. Model license.
-4. Model size.
-5. Browser inference runtime.
-6. Files added/modified.
-7. Installation/build instructions.
-8. How model weights are stored.
-9. How the extension loads the model.
-10. How DOM text reaches the model.
-11. Example detection output.
-12. Example redacted DOM.
-13. Unit tests.
-14. Benchmark results.
-15. Accuracy results.
-16. Known limitations.
-
-Also update the project documentation with a section:
-
-# Local DOM PII Detection
-
-Explain the complete flow:
-
-```text
-DOM
- ↓
-Extraction
- ↓
-Regex
- ↓
-GLiNER
- ↓
-Detection merging
- ↓
-Policy engine
- ↓
-Redaction
- ↓
-Sanitized agent context
-```
-
----
-
-# Important constraints
-
-* No cloud PII inference.
-* No external API for DOM analysis.
-* No sending raw DOM to a remote model.
-* Do not introduce a large LLM.
-* Do not use YOLO/ViT for normal DOM text.
-* Do not make GLiNER responsible for final allow/redact decisions.
-* Do not rewrite the existing architecture unnecessarily.
-* Do not claim browser compatibility until it is actually tested.
-* Do not claim performance until it is benchmarked.
-* Do not expose raw PII in logs.
-* Keep model loading and inference local.
-
-Start by inspecting the repository and determining the exact integration point. Then verify the current smallest practical GLiNER checkpoint and browser runtime before writing implementation code.
-=======
-overall precision
-
-overall recall
-
-mAP50
-
-mAP50-95
-
-per-class precision
-
-per-class recall
-
-per-class AP50
-
-per-class AP50-95
-
-Use the exact 16 class names.
-
-Save evaluation results under:
-
-training/webpii_16class_yolo11n/evaluation/
-
-Do not modify the test dataset.
-
-============================================================
-5. ERROR HANDLING
-============================================================
-
-All scripts should fail clearly rather than producing misleading results.
-
-Examples:
-
-If dataset is missing:
-
-ERROR: WebPII dataset not found.
-
-If data.yaml is missing:
-
-ERROR: data.yaml not found.
-
-If yolo11n.pt is missing:
-
-Clearly explain that Ultralytics needs to download the pretrained weights.
-
-If Ultralytics is missing:
-
-Clearly say:
-
-pip install -r requirements.txt
-
-If CUDA is unavailable during training:
-
-STOP.
-
-Do not train on CPU.
-
-If GPU memory is insufficient:
-
-Explain that the user should retry with:
-
---batch 8
-
-or:
-
---batch 4
-
-Do not silently change the batch size.
-
-If a label is malformed:
-
-report the file.
-
-If class IDs are invalid:
-
-report the file and class ID.
-
-If train/test paths are invalid:
-
-stop.
-
-============================================================
-6. REQUIREMENTS
-============================================================
-
-Create requirements.txt.
-
-It should include the minimum packages required for:
-
-- Ultralytics YOLO
-- PyTorch
-- torchvision
-- PyYAML
-
-Do not blindly pin a CUDA-specific PyTorch wheel in requirements.txt if that makes the project incompatible with the RTX laptop's installed CUDA environment.
-
-The README must explain that the NVIDIA-compatible PyTorch installation may need to be installed according to the RTX laptop's CUDA/PyTorch compatibility.
-
-Do not install CUDA packages on the Mac.
-
-============================================================
-7. MAC VALIDATION
-============================================================
-
-After creating the scripts, DO NOT TRAIN.
-
-Run only:
-
-python -m py_compile scripts/verify_dataset.py
-python -m py_compile scripts/check_environment.py
-python -m py_compile scripts/train_yolo.py
-python -m py_compile scripts/evaluate_yolo.py
-
-Fix ALL syntax errors.
-
-Then run:
-
-python scripts/check_environment.py
-
-Then run:
-
-python scripts/verify_dataset.py
-
-The dataset verification must pass.
-
-DO NOT run:
-
-python scripts/train_yolo.py
-
-on the Mac.
-
-============================================================
-8. DRY RUN REQUIREMENT
-============================================================
-
-Create a safe validation mode for train_yolo.py:
-
---dry-run
-
-Example:
-
-python scripts/train_yolo.py --dry-run
-
-When --dry-run is used:
-
-- load the configuration
-- verify the dataset
-- verify model configuration
-- verify required packages
-- verify GPU status
-- print the exact training configuration
-- DO NOT start training
-- DO NOT execute an epoch
-- DO NOT modify the dataset
-
-The script must clearly output:
-
-DRY RUN COMPLETE
-TRAINING WAS NOT STARTED
-
-The dry run should be safe to execute on the Mac.
-
-If CUDA is unavailable during dry run, do not fail merely because it is a Mac.
-
-Instead report:
-
-CUDA unavailable on this machine.
-GPU training validation must be performed on the RTX laptop.
-
-============================================================
-9. RTX PRE-FLIGHT MODE
-============================================================
-
-Also support:
-
-python scripts/train_yolo.py --preflight
-
-This mode is intended to run on the RTX laptop BEFORE training.
-
-It must:
-
-- check Python
-- check PyTorch
-- check CUDA
-- check GPU
-- check GPU memory
-- check Ultralytics
-- check dataset
-- check data.yaml
-- check yolo11n.pt availability/downloadability
-- check output directory
-- print training configuration
-
-Then STOP.
-
-It must NOT train.
-
-Output:
-
-PRE-FLIGHT PASSED
-TRAINING WAS NOT STARTED
-
-If anything is wrong:
-
-PRE-FLIGHT FAILED
-TRAINING WAS NOT STARTED
-
-============================================================
-10. README
-============================================================
-
-Create a detailed README.md.
-
-Explain:
-
-A. What the project does.
-
-B. This experiment uses:
-
-YOLO11n pretrained weights.
-
-C. It is fine-tuning, NOT training from scratch.
-
-D. Dataset:
-
-WebPII.
-
-E. 16 PII classes.
-
-F. Train/test counts.
-
-G. Mac preparation workflow.
-
-H. RTX laptop workflow.
-
-Include exact commands.
-
-MAC:
-
-cd ~/Desktop/sih
-
-python scripts/check_environment.py
-
-python scripts/verify_dataset.py
-
-python scripts/train_yolo.py --dry-run
-
-DO NOT TRAIN ON MAC.
-
-RTX:
-
-cd /path/to/sih
-
-python scripts/check_environment.py
-
-python scripts/verify_dataset.py
-
-python scripts/train_yolo.py --preflight
-
-If preflight passes:
-
-python scripts/train_yolo.py --batch 16
-
-If CUDA out-of-memory:
-
-python scripts/train_yolo.py --batch 8
-
-If still out-of-memory:
-
-python scripts/train_yolo.py --batch 4
-
-Evaluation:
-
-python scripts/evaluate_yolo.py
-
-Explain:
-
-best.pt
-
-is the main trained model.
-
-============================================================
-11. FINAL PROJECT CHECK
-============================================================
-
-After creating all files, perform these checks on the Mac:
-
-1. Python syntax check.
-
-2. Import check.
-
-3. Dataset verification.
-
-4. data.yaml verification.
-
-5. Dry run.
-
-6. Check that no script automatically starts training.
-
-7. Check that all paths are portable.
-
-8. Check that no path contains:
-
-/content/drive/
-
-9. Check that train and test remain separate.
-
-10. Check that exactly 16 classes are used.
-
-11. Check that class IDs remain unchanged.
-
-12. Check that no dataset files were modified.
-
-13. Check that no unnecessary dataset copy was created.
-
-14. Check that training requires explicit execution.
-
-============================================================
-12. IMPORTANT: DO NOT HIDE ERRORS
-============================================================
-
-If you encounter an error while developing the scripts:
-
-DO NOT simply remove the check.
-
-DO NOT suppress the exception.
-
-DO NOT use try/except to hide failures.
-
-DO NOT silently change the dataset.
-
-DO NOT silently change class IDs.
-
-DO NOT silently change batch size.
-
-DO NOT silently switch to CPU.
-
-Fix the actual problem.
-
-After fixing it, rerun the relevant validation.
-
-============================================================
-13. FINAL RESPONSE
-============================================================
-
-After implementing everything, report:
-
-1. Files created.
-2. Files modified.
-3. Dataset verification result.
-4. Python syntax result.
-5. Import result.
-6. Dry-run result.
-7. Whether any training was started.
-
-Training MUST say:
-
-NOT STARTED
-
-Then give me the exact commands I should give my friend for the RTX laptop.
-
-Do not tell me training succeeded because training has NOT been run yet.
->>>>>>> 9696b4d2652a9bcaf9c72fb1031135954769424f
+That is the generalized **agent loop** you're looking for, rather than a specialized “shopping planner.”

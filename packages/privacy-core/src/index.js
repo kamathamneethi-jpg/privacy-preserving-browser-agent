@@ -195,7 +195,31 @@ export {
   normalizeConfidence
 } from "./image-ocr.js";
 
+export {
+  GoalParser,
+  CONSTRAINT_OPERATORS,
+  BROWSER_OPERATIONS,
+  TASK_DOMAINS
+} from "./goal-parser.js";
 
+export {
+  TaskPlanner,
+  TASK_STATUS
+} from "./task-planner.js";
 
+export {
+  ExecutionStateManager
+} from "./execution-state-manager.js";
 
+export {
+  DynamicReplanner
+} from "./dynamic-replanner.js";
 
+export {
+  GoalCompletionChecker
+} from "./goal-checker.js";
+
+export {
+  MultimodalVisionAgent,
+  DEFAULT_MULTIMODAL_MODEL
+} from "./multimodal-vision-agent.js";

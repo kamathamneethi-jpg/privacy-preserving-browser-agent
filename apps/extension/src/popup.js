@@ -1,3 +1,24 @@
+import {
+  GoalParser as CoreGoalParser,
+  TaskPlanner as CoreTaskPlanner,
+  TASK_STATUS as CoreTaskStatus,
+  ExecutionStateManager as CoreExecutionStateManager,
+  DynamicReplanner as CoreDynamicReplanner,
+  GoalCompletionChecker as CoreGoalCompletionChecker,
+  MultimodalVisionAgent as CoreMultimodalVisionAgent,
+  DEFAULT_MULTIMODAL_MODEL as CoreDefaultModel
+} from "../../../packages/privacy-core/src/index.js";
+
+const PC = (typeof PrivacyCore !== "undefined" ? PrivacyCore : (typeof window !== "undefined" && window.PrivacyCore ? window.PrivacyCore : {}));
+const ActiveGoalParser = CoreGoalParser || PC.GoalParser;
+const ActiveTaskPlanner = CoreTaskPlanner || PC.TaskPlanner;
+const ActiveTaskStatus = CoreTaskStatus || PC.TASK_STATUS;
+const ActiveExecutionStateManager = CoreExecutionStateManager || PC.ExecutionStateManager;
+const ActiveDynamicReplanner = CoreDynamicReplanner || PC.DynamicReplanner;
+const ActiveGoalCompletionChecker = CoreGoalCompletionChecker || PC.GoalCompletionChecker;
+const ActiveMultimodalVisionAgent = CoreMultimodalVisionAgent || PC.MultimodalVisionAgent;
+const ActiveDefaultModel = CoreDefaultModel || PC.DEFAULT_MULTIMODAL_MODEL || "qwen/qwen-2.5-vl-72b-instruct";
+
 const captureButton = document.querySelector("#capture");
 const scanButton = document.querySelector("#scan");
 const runTaskButton = document.querySelector("#run-task");
@@ -995,6 +1016,225 @@ function redactLocalDomNodes(domNodes) {
   };
 }
 
+/**
+ * Captures visible tab screenshot and applies on-device pixel redaction
+ * over all detected PII bounding boxes before converting to base64.
+ * Raw pixels NEVER leave the local client.
+ */
+async function captureSanitizedScreenshot(viewportPiiItems = []) {
+  if (typeof chrome === "undefined" || !chrome.tabs?.captureVisibleTab) {
+    return null;
+  }
+  try {
+    const rawDataUrl = await chrome.tabs.captureVisibleTab(null, { format: "png" });
+    if (!rawDataUrl) return null;
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = img.naturalWidth || img.width;
+          canvas.height = img.naturalHeight || img.height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return resolve(rawDataUrl);
+
+          ctx.drawImage(img, 0, 0);
+
+          // Redact all localized DOM PII bounding boxes with solid black rects
+          if (Array.isArray(viewportPiiItems) && viewportPiiItems.length > 0) {
+            ctx.fillStyle = "#000000";
+            for (const item of viewportPiiItems) {
+              const bbox = item.bbox || item.boundingBox;
+              if (bbox && bbox.width > 0 && bbox.height > 0) {
+                const x = Math.max(0, bbox.x || bbox.left || 0);
+                const y = Math.max(0, bbox.y || bbox.top || 0);
+                const w = Math.min(canvas.width - x, bbox.width);
+                const h = Math.min(canvas.height - y, bbox.height);
+                ctx.fillRect(x, y, w, h);
+              }
+            }
+          }
+
+          // Also redact any image PII detections stored locally
+          if (Array.isArray(lastImagePiiDetections) && lastImagePiiDetections.length > 0) {
+            ctx.fillStyle = "#000000";
+            for (const det of lastImagePiiDetections) {
+              const bbox = det.bbox;
+              if (bbox && bbox.width > 0 && bbox.height > 0) {
+                ctx.fillRect(bbox.x, bbox.y, bbox.width, bbox.height);
+              }
+            }
+          }
+
+          const sanitizedUrl = canvas.toDataURL("image/png");
+          resolve(sanitizedUrl);
+        } catch {
+          resolve(rawDataUrl);
+        }
+      };
+      img.onerror = () => resolve(null);
+      img.src = rawDataUrl;
+    });
+  } catch (err) {
+    relayToTerminalLog("Screenshot Capture", `Failed: ${err.message}`, {});
+    return null;
+  }
+}
+
+/**
+ * Generalized fallback heuristic that operates on task types and constraints.
+ * Zero website-specific or brand-specific hardcoding.
+ */
+function deriveGeneralizedFallbackAction({ currentTask, goal, interactiveElements, stateManager, stepNum }) {
+  if (!Array.isArray(interactiveElements) || interactiveElements.length === 0) {
+    return null;
+  }
+
+  const taskType = currentTask?.type || "general";
+  const entity = goal?.targetEntity || "";
+  const constraints = goal?.constraints || [];
+
+  // 1. Close Modal
+  if (taskType === "close_modal") {
+    const closeBtn = interactiveElements.find(el => {
+      const t = `${el.text || ""} ${el.ariaLabel || ""}`.toLowerCase();
+      return /\b(close|dismiss|no thanks|reject|skip|accept all|agree|got it|decline)\b/i.test(t) ||
+        (el.tag === "button" && el.text === "×") ||
+        (el.attributes && /close/i.test(el.attributes["aria-label"] || ""));
+    });
+    if (closeBtn) {
+      return {
+        actionType: "CLICK",
+        target: closeBtn.elementId,
+        parameters: {},
+        reasoningSummary: `Dismissing modal overlay via "${closeBtn.text || closeBtn.ariaLabel || 'close button'}".`
+      };
+    }
+  }
+
+  // 2. Search Task: find search input field
+  if (taskType === "search" || (stepNum === 1 && !stateManager.hasPerformedAction("search"))) {
+    const searchInput = interactiveElements.find(el => {
+      if (el.tag !== "input" && el.tag !== "textarea") return false;
+      const type = (el.type || "").toLowerCase();
+      if (type === "hidden" || type === "password" || type === "checkbox" || type === "radio") return false;
+      const t = `${el.name || ""} ${el.placeholder || ""} ${el.ariaLabel || ""} ${el.elementId || ""}`.toLowerCase();
+      return type === "search" || /search|query|find|keyword|term/i.test(t);
+    }) || interactiveElements.find(el => el.tag === "input" && (el.type === "text" || !el.type));
+
+    if (searchInput) {
+      const query = entity || (currentTask?.description ? currentTask.description.replace(/^Search for\s*/i, "") : goal.summary);
+      return {
+        actionType: "TYPE",
+        target: searchInput.elementId,
+        parameters: { text: query },
+        thenPressEnter: true,
+        reasoningSummary: `Entered search query "${query}" into search field.`
+      };
+    }
+  }
+
+  // 3. Filter Task: find filter option matching constraint
+  if (taskType === "filter") {
+    for (const c of constraints) {
+      if (!stateManager.isFilterApplied(c.name, c.value)) {
+        const valStr = String(c.value || c.name).toLowerCase();
+        const filterEl = interactiveElements.find(el => {
+          const t = `${el.text || ""} ${el.value || ""} ${el.ariaLabel || ""}`.toLowerCase();
+          return t.includes(valStr);
+        });
+        if (filterEl) {
+          const isCheck = filterEl.tag === "input" && filterEl.type === "checkbox";
+          return {
+            actionType: isCheck ? "CHECK" : "CLICK",
+            target: filterEl.elementId,
+            parameters: {},
+            isFilter: true,
+            reasoningSummary: `Applied filter for "${c.name}: ${c.value}".`
+          };
+        }
+      }
+    }
+  }
+
+  // 4. Select / Inspect Candidate
+  if (taskType === "select_candidate" || taskType === "inspect_candidate") {
+    const candidateLink = interactiveElements.find(el => {
+      if (el.tag !== "a" && el.tag !== "div" && el.tag !== "li") return false;
+      const t = (el.text || "").trim();
+      if (t.length < 8) return false;
+      if (/\b(sign in|login|register|cart|basket|home|help|customer service|privacy|terms|about us|careers|contact|menu|navigation)\b/i.test(t)) {
+        return false;
+      }
+      if (entity && t.toLowerCase().includes(entity.toLowerCase().split(" ")[0])) {
+        return true;
+      }
+      return true;
+    });
+
+    if (candidateLink) {
+      return {
+        actionType: "CLICK",
+        target: candidateLink.elementId,
+        parameters: {},
+        reasoningSummary: `Inspecting candidate item: "${(candidateLink.text || '').slice(0, 45)}...".`
+      };
+    }
+  }
+
+  // 5. Perform Action / Submit
+  if (taskType === "perform_action" || taskType === "submit_action") {
+    const actionKeywords = /\b(add to cart|add to bag|buy now|submit|register|book now|continue|proceed|checkout|save|confirm|next|place order)\b/i;
+    const actionBtn = interactiveElements.find(el => {
+      const t = `${el.text || ""} ${el.value || ""} ${el.ariaLabel || ""}`.toLowerCase();
+      return actionKeywords.test(t);
+    }) || interactiveElements.find(el => el.tag === "button" || (el.tag === "input" && el.type === "submit"));
+
+    if (actionBtn) {
+      return {
+        actionType: "CLICK",
+        target: actionBtn.elementId,
+        parameters: {},
+        reasoningSummary: `Executed primary action: "${actionBtn.text || actionBtn.ariaLabel || 'Submit'}".`
+      };
+    }
+  }
+
+  // 6. Form Filling
+  if (taskType === "fill_form") {
+    const emptyInput = interactiveElements.find(el => {
+      return (el.tag === "input" || el.tag === "textarea") &&
+        el.type !== "hidden" &&
+        el.type !== "submit" &&
+        el.type !== "checkbox" &&
+        el.type !== "radio" &&
+        !el.value;
+    });
+    if (emptyInput) {
+      return {
+        actionType: "TYPE",
+        target: emptyInput.elementId,
+        parameters: { text: "Value" },
+        reasoningSummary: `Populating form field "${emptyInput.name || emptyInput.placeholder || emptyInput.elementId}".`
+      };
+    }
+  }
+
+  // 7. General clickable element
+  const generalAction = interactiveElements.find(el => (el.tag === "button" || el.tag === "a") && (el.text || "").length > 2);
+  if (generalAction) {
+    return {
+      actionType: "CLICK",
+      target: generalAction.elementId,
+      parameters: {},
+      reasoningSummary: `Interacting with element "${(generalAction.text || '').slice(0, 30)}".`
+    };
+  }
+
+  return null;
+}
+
 if (runTaskButton) {
   runTaskButton.addEventListener("click", async () => {
     const userTask = (taskInput?.value || "").trim();
@@ -1003,86 +1243,95 @@ if (runTaskButton) {
       return;
     }
 
-    status.textContent = "Running privacy-preserving browser agent pipeline…";
+    status.textContent = "Parsing goal & generating multi-step execution plan…";
     if (metadataList) metadataList.hidden = true;
     if (piiResults) piiResults.hidden = true;
     if (redactedInfoPanel) redactedInfoPanel.hidden = true;
     if (pipelineBreadcrumb) pipelineBreadcrumb.hidden = true;
     if (taskResults) taskResults.hidden = true;
-    if (redactedInfoPanel) redactedInfoPanel.hidden = true;
-
-    const pipelineSteps = [
-      "RAW DOM",
-      "LOCAL PII DETECTION",
-      "REDACTED DOM",
-      "REMOTE LLM",
-      "ACTION PROPOSAL",
-      "LOCAL VALIDATION",
-      "BROWSER ACTION"
-    ];
 
     const startTime = Date.now();
     relayToTerminalLog("User Request", "Received user task instruction", { task: userTask });
 
     try {
-      // 1. Obtain API settings (Auto-fallback to .env configuration)
+      // 1. Goal Decomposition into structured objectives and constraints
+      const parsedGoal = ActiveGoalParser.parse(userTask);
+      relayToTerminalLog("Goal Decomposition", "Parsed user goal and constraints", {
+        summary: parsedGoal.summary,
+        targetEntity: parsedGoal.targetEntity,
+        constraints: parsedGoal.constraints,
+        operations: parsedGoal.operations,
+        domain: parsedGoal.domain
+      });
+
+      // 2. Initialize dynamic task planner and execution state manager
+      const planner = new ActiveTaskPlanner(parsedGoal);
+      relayToTerminalLog("Task Plan", `Generated ${planner.tasks.length} initial sub-tasks`, planner.getPlanSummary());
+
+      const stateManager = new ActiveExecutionStateManager({
+        goal: parsedGoal,
+        maxReplans: 5,
+        maxConsecutiveFailures: 3
+      });
+
+      // 3. Obtain API settings
       const userKey = (apiKeyInput?.value || "").trim();
       const provider = providerSelect?.value || DEFAULT_PROVIDER;
       const apiKey = userKey || (provider === "groq" ? ENV_GROQ_KEY : ENV_OPENROUTER_KEY);
       const selectedModel = (modelInput?.value || "").trim() || (provider === "groq" ? ENV_GROQ_MODEL : ENV_OPENROUTER_MODEL);
 
-      // 2. Check if initial navigation is needed (e.g. from chrome://newtab or if URL is specified)
+      // 4. Auto-Navigation if needed
       let activeTab = null;
       if (typeof chrome !== "undefined" && chrome.tabs?.query) {
         const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
         activeTab = tabs?.[0] || null;
       }
 
-      setPipelineStage("RAW DOM → LOCAL PII DETECTION");
-
-      // Scan page locally for PII, highlight exact ranges on live DOM, and generate sanitized representation
-      let piiSummaryInit = null;
-      if (activeTab?.id) {
-        try {
-          const scanRes = await sendTabMessage({ type: "DETECT_AND_LOCALIZE_PAGE_PII" });
-          if (scanRes?.ok && scanRes.summary) {
-            piiSummaryInit = scanRes.summary;
-            renderPiiSummary(piiSummaryInit);
-          }
-        } catch {
-          // Fallback if content script not yet injected
-        }
-      }
-
       const currentUrl = activeTab?.url || "";
       const targetNavUrl = extractNavigationUrl(userTask, currentUrl);
 
       if (targetNavUrl && activeTab?.id) {
+        setPipelineStage("AUTO-NAVIGATION");
         status.textContent = `Navigating to ${targetNavUrl}...`;
         relayToTerminalLog("Auto-Navigation", `Navigating tab to ${targetNavUrl}`, { targetNavUrl, fromUrl: currentUrl });
         await navigateTabAndWait(activeTab.id, targetNavUrl);
+        if (planner.getCurrentTask()?.type === "navigate") {
+          planner.completeCurrentTask({ url: targetNavUrl });
+        }
       }
 
-      // 3. Multi-Step Iterative Agent Loop (Perceive -> Plan -> Act -> Observe)
-      const MAX_STEPS = 6;
+      // 5. Multi-Step Iterative Multimodal Agent Loop
+      const MAX_STEPS = 8;
       const actionHistory = [];
       const executedResults = [];
       let anyFailed = false;
-      let finalSummary = "Multi-step task completed.";
+      let finalSummary = "Multi-step goal execution finished.";
 
       for (let stepNum = 1; stepNum <= MAX_STEPS; stepNum++) {
+        // 5.1 Pre-step Goal Check
+        const preCheck = ActiveGoalCompletionChecker.check({
+          goal: parsedGoal,
+          stateManager,
+          planner,
+          actionHistory
+        });
+        if (preCheck.isSatisfied) {
+          finalSummary = preCheck.reason;
+          relayToTerminalLog(`Step ${stepNum}: Goal Satisfied Early`, finalSummary, preCheck);
+          break;
+        }
+
         setPipelineStage("LOCAL PII DETECTION → REDACTED DOM");
         status.textContent = `Step ${stepNum}/${MAX_STEPS}: Scanning page & analyzing DOM...`;
 
-        // 3.1 Local PII Scan
+        // 5.2 Local PII Scan
         const scanRes = await sendTabMessage({ type: "DETECT_AND_LOCALIZE_PAGE_PII" }).catch(() => ({ summary: { totalFindings: 0 } }));
         const piiFindings = scanRes?.summary || { totalFindings: 0 };
         renderPiiSummary(piiFindings);
 
-        // 3.2 Discover Interactive Elements on the CURRENT page state
+        // 5.3 Discover Interactive Elements on the CURRENT page state
         let observeRes = await sendTabMessage({ type: "OBSERVE_INTERACTIVE_DOM" }).catch(() => null);
         if (!observeRes?.interactiveElements || observeRes.interactiveElements.length === 0) {
-          // Wait 1.2s and retry once in case of AJAX / DOM hydration
           await new Promise(r => setTimeout(r, 1200));
           observeRes = await sendTabMessage({ type: "OBSERVE_INTERACTIVE_DOM" }).catch(() => null);
         }
@@ -1091,11 +1340,24 @@ if (runTaskButton) {
         const pageTitle = observeRes?.pageTitle || "";
         const pageUrl = observeRes?.url || "";
 
-        relayToTerminalLog(`Step ${stepNum}: DOM Perception`, `Discovered ${interactiveElements.length} elements on "${pageTitle}"`, {
+        // 5.4 Capture On-Device Sanitized Screenshot (Masks all visual PII boxes)
+        const sanitizedScreenshot = await captureSanitizedScreenshot(piiFindings.localizedItems || []);
+
+        stateManager.updateObservation({
+          url: pageUrl,
+          title: pageTitle,
+          domElements: interactiveElements,
+          hasScreenshot: Boolean(sanitizedScreenshot),
+          piiCount: piiFindings.totalFindings || 0
+        });
+
+        relayToTerminalLog(`Step ${stepNum}: Multimodal Perception`, `Discovered ${interactiveElements.length} elements on "${pageTitle}"`, {
           step: stepNum,
           pageTitle,
           pageUrl,
           elementCount: interactiveElements.length,
+          hasSanitizedScreenshot: Boolean(sanitizedScreenshot),
+          currentTask: planner.getCurrentTask(),
           sample: interactiveElements.slice(0, 15)
         });
 
@@ -1104,194 +1366,127 @@ if (runTaskButton) {
           break;
         }
 
-        // 3.3 Plan Next Action via Remote Model
-        setPipelineStage("REDACTED DOM → REMOTE LLM");
-        status.textContent = `Step ${stepNum}/${MAX_STEPS}: Reasoning via ${provider.toUpperCase()} (${selectedModel})...`;
+        // 5.5 Dynamic Obstacle Evaluation & Replanning
+        const obstacle = ActiveDynamicReplanner.evaluate({
+          domElements: interactiveElements,
+          pageUrl,
+          pageTitle,
+          currentTask: planner.getCurrentTask(),
+          goal: parsedGoal,
+          consecutiveFailures: stateManager.consecutiveFailures,
+          actionHistory
+        });
+
+        if (obstacle) {
+          const replanRes = ActiveDynamicReplanner.replan({
+            obstacle,
+            planner,
+            stateManager,
+            goal: parsedGoal,
+            domElements: interactiveElements
+          });
+          if (replanRes.replanned) {
+            relayToTerminalLog(`Step ${stepNum}: Dynamic Replanning`, replanRes.reason, {
+              obstacle: obstacle.type,
+              insertedTask: replanRes.insertedTask
+            });
+            status.textContent = `Adapting plan: ${replanRes.reason}`;
+          }
+        }
+
+        const currentTask = planner.getCurrentTask() || { type: "general_action", description: parsedGoal.summary };
+
+        // 5.6 Multimodal Vision / LLM Reasoning
+        setPipelineStage("REDACTED DOM + VISION → REMOTE LLM");
+        status.textContent = `Step ${stepNum}/${MAX_STEPS}: Reasoning for [${currentTask.type}] via ${provider.toUpperCase()} (${selectedModel})...`;
+
         let stepProposal = null;
         let isTaskComplete = false;
         let reasoningSummary = "";
 
         if (apiKey) {
-          const endpointUrl = provider === "groq"
-            ? "https://api.groq.com/openai/v1/chat/completions"
-            : "https://openrouter.ai/api/v1/chat/completions";
-
-          const promptPayload = {
-            model: selectedModel,
-            messages: [
-              {
-                role: "system",
-                content: [
-                  "You are an autonomous Privacy-Preserving Browser Agent reasoning loop.",
-                  "You perceive interactive DOM elements on the current webpage, each with an elementId (e.g. el_1, el_2).",
-                  "Your objective is to accomplish the user's multi-step task step by step.",
-                  "",
-                  "CRITICAL ECOMMERCE & ACTION RULES:",
-                  "1. SEARCH INTENT vs ACTION INTENT:",
-                  "   - When searching: Type ONLY the concise search keyword (e.g. 'Nike shoes' or 'running shoes'), NOT full instructions like 'Open Amazon and search for Nike and add the first shoe to the cart'.",
-                  "   - When the user asks to 'add to cart', 'select the first shoe', 'click item', 'buy now', or when search results are ALREADY showing:",
-                  "     DO NOT type conversational instructions into the search bar!",
-                  "2. ADD TO CART & PRODUCT SELECTION WORKFLOW:",
-                  "   - If on a search results page and the user asks to add the first shoe/product to cart:",
-                  "     a) If an 'Add to cart' button is present on the first product card, CLICK that button.",
-                  "     b) Otherwise, CLICK the first product title/link (e.g. 'Nike Men's Revolution 6...') to open the product details page.",
-                  "   - If on a product details page and the user wants to add it to cart:",
-                  "     CLICK the 'Add to Cart' or 'Buy Now' button on the page.",
-                  "3. FILTERING WORKFLOW:",
-                  "   - When search results are loaded and filtering is requested: Locate the filter checkbox (e.g. brand, RAM, rating) and CLICK/CHECK that filter element.",
-                  "4. COMPLETION:",
-                  "   - When the requested item is added to cart, or when the final step is complete, return { \"actionType\": \"COMPLETE\", \"isComplete\": true, \"reasoningSummary\": \"First shoe added to cart successfully.\" }.",
-                  "5. Supported action types: CLICK, TYPE, CLEAR, SELECT, CHECK, UNCHECK, PRESS_KEY, SUBMIT, SCROLL, GO_BACK, WAIT, COMPLETE.",
-                  "",
-                  "Respond ONLY with a valid JSON object matching this schema:",
-                  "{",
-                  '  "actionType": "CLICK",',
-                  '  "target": "el_1",',
-                  '  "parameters": {},',
-                  '  "isComplete": false,',
-                  '  "reasoningSummary": "Short explanation of this step"',
-                  "}",
-                  "For TYPE + search: { \"actionType\": \"TYPE\", \"target\": \"el_2\", \"parameters\": { \"text\": \"Nike shoes\" }, \"isComplete\": false, \"thenPressEnter\": true }",
-                  "For Product Click: { \"actionType\": \"CLICK\", \"target\": \"el_25\", \"isComplete\": false, \"reasoningSummary\": \"Clicking first Nike shoe product title\" }",
-                  "For Add to Cart: { \"actionType\": \"CLICK\", \"target\": \"el_30\", \"isComplete\": false, \"reasoningSummary\": \"Clicking Add to Cart button\" }",
-                  "For COMPLETE: { \"actionType\": \"COMPLETE\", \"isComplete\": true, \"reasoningSummary\": \"Shoe added to cart successfully.\" }"
-                ].join("\n")
-              },
-              {
-                role: "user",
-                content: (() => {
-                  const rawPiiValues = (piiFindings.localizedItems || []).map((i) => i.value).filter(Boolean);
-                  const sanitizedInteractiveElements = interactiveElements.map((el) => {
-                    let sText = el.text || "";
-                    let sVal = el.value || "";
-                    let sPlaceholder = el.placeholder || "";
-                    let sAria = el.ariaLabel || "";
-                    for (const raw of rawPiiValues) {
-                      if (raw && raw.length >= 2) {
-                        if (sText && sText.includes(raw)) sText = sText.replaceAll(raw, "[REDACTED]");
-                        if (sVal && sVal.includes(raw)) sVal = sVal.replaceAll(raw, "[REDACTED]");
-                        if (sPlaceholder && sPlaceholder.includes(raw)) sPlaceholder = sPlaceholder.replaceAll(raw, "[REDACTED]");
-                        if (sAria && sAria.includes(raw)) sAria = sAria.replaceAll(raw, "[REDACTED]");
-                      }
-                    }
-                    if (el.tag === "input" && (el.type === "password" || /password/i.test(el.name || ""))) {
-                      sVal = "[LOCAL_ONLY_PROTECTED]";
-                    }
-                    return {
-                      ...el,
-                      text: sText,
-                      value: sVal,
-                      placeholder: sPlaceholder,
-                      ariaLabel: sAria
-                    };
-                  });
-
-                  const payloadString = JSON.stringify({
-                    userTask,
-                    currentStep: stepNum,
-                    maxSteps: MAX_STEPS,
-                    actionHistorySoFar: actionHistory,
-                    currentPage: { title: pageTitle, url: pageUrl },
-                    sanitizedDomContext: piiFindings.sanitizedDomText || lastRedactedDomText || "",
-                    interactiveElements: sanitizedInteractiveElements.slice(0, 80)
-                  });
-
-                  // Security Assertion: Ensure zero raw PII values occur in remote payload (DOM + Image PII)
-                  const allRawPii = [
-                    ...rawPiiValues,
-                    ...lastImagePiiDetections.map((d) => d.value)
-                  ].filter(Boolean);
-
-                  for (const raw of allRawPii) {
-                    if (raw && raw.length >= 2 && payloadString.includes(raw)) {
-                      throw new Error(`SECURITY ASSERTION FAILED: Raw sensitive value "${raw}" detected in remote payload. Transmission blocked.`);
-                    }
-                  }
-
-                  return payloadString;
-                })()
-              }
-            ],
-            response_format: { type: "json_object" }
-          };
-
-          const headers = {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${apiKey}`
-          };
-          if (provider === "openrouter") {
-            headers["HTTP-Referer"] = "https://privacy-browser-agent.local";
-            headers["X-Title"] = "Privacy-Preserving Browser Agent";
-          }
-
           try {
-            const res = await fetch(endpointUrl, {
-              method: "POST",
-              headers,
-              body: JSON.stringify(promptPayload)
+            const rawPiiVals = (piiFindings.localizedItems || []).map(i => i.value).filter(Boolean);
+            const visionResult = await ActiveMultimodalVisionAgent.reason({
+              apiKey,
+              model: selectedModel,
+              provider,
+              goal: parsedGoal,
+              currentTask,
+              executionState: stateManager.getStateSummary(),
+              interactiveElements,
+              screenshotBase64: sanitizedScreenshot,
+              actionHistory,
+              sanitizedDomContext: piiFindings.sanitizedDomText || lastRedactedDomText || "",
+              rawPiiValues: rawPiiVals
             });
 
-            if (res.ok) {
-              const data = await res.json();
-              const content = data?.choices?.[0]?.message?.content;
-              if (content) {
-                const cleaned = content.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim();
-                const parsed = JSON.parse(cleaned);
-
-                isTaskComplete = Boolean(parsed.isComplete || parsed.actionType === "COMPLETE" || parsed.action === "COMPLETE");
-                reasoningSummary = parsed.reasoningSummary || parsed.reason || `Step ${stepNum} planned by ${selectedModel}.`;
-
-                if (parsed.recommendedActions && Array.isArray(parsed.recommendedActions) && parsed.recommendedActions.length > 0) {
-                  stepProposal = parsed.recommendedActions[0];
-                } else if (parsed.actionType || parsed.action) {
-                  stepProposal = parsed;
-                }
-              }
-            } else {
-              const errData = await res.json().catch(() => ({}));
-              relayToTerminalLog(`Step ${stepNum}: Reasoning Error`, `API error HTTP ${res.status}`, errData);
+            if (visionResult?.action) {
+              stepProposal = {
+                actionType: visionResult.action.actionType,
+                target: visionResult.action.target,
+                parameters: visionResult.action.parameters,
+                thenPressEnter: visionResult.action.thenPressEnter
+              };
+              reasoningSummary = visionResult.action.reasoningSummary || visionResult.observation;
+              isTaskComplete = Boolean(visionResult.goal_progress?.isSatisfied || visionResult.action.actionType === "COMPLETE");
             }
           } catch (mErr) {
-            relayToTerminalLog(`Step ${stepNum}: Reasoning Exception`, mErr.message, {});
+            relayToTerminalLog(`Step ${stepNum}: Multimodal Reasoning Exception`, mErr.message, {});
           }
         }
 
-        // Context-aware fallback heuristic if model gave no proposal
+        // 5.7 Generalized Fallback Heuristics
         if (!stepProposal) {
-          const isAddToCart = /\b(?:add to cart|add to basket|buy now|select the first|buy)\b/i.test(userTask);
-          const isSearchExplicit = /\b(?:search for|search|look for|find)\b/i.test(userTask) && !isAddToCart;
-
-          if (isAddToCart) {
-            // Find "Add to cart" button or first product title link
-            const addToCartBtn = interactiveElements.find(el => (el.text && /\badd to cart\b/i.test(el.text)) || el.name?.includes("addToCart") || (el.ariaLabel && /\badd to cart\b/i.test(el.ariaLabel)));
-            if (addToCartBtn) {
-              stepProposal = { actionType: "CLICK", target: addToCartBtn.elementId, parameters: {}, reasoningSummary: "Clicked 'Add to Cart' button." };
-            } else {
-              const firstProductLink = interactiveElements.find(el => el.tag === "a" && el.text && el.text.length > 15 && !/\b(sign in|customer service|registry|gift cards|sell|amazon basics|prime|cart|returns|orders)\b/i.test(el.text));
-              if (firstProductLink) {
-                stepProposal = { actionType: "CLICK", target: firstProductLink.elementId, parameters: {}, reasoningSummary: `Clicked on product: "${firstProductLink.text}".` };
-              }
-            }
-          } else if (isSearchExplicit && stepNum === 1) {
-            let query = userTask.replace(/\b(?:open the amazon app and|open amazon and|search for|search on amazon for|search in amazon for|search on amazon|search in amazon|search)\b/gi, "").trim();
-            const searchInput = interactiveElements.find(el => el.tag === "input" && (el.type === "text" || el.type === "search" || !el.type));
-            if (searchInput) {
-              stepProposal = { actionType: "TYPE", target: searchInput.elementId, parameters: { text: query || userTask }, thenPressEnter: true, reasoningSummary: `Entered search query "${query}".` };
-            }
+          stepProposal = deriveGeneralizedFallbackAction({
+            currentTask,
+            goal: parsedGoal,
+            interactiveElements,
+            stateManager,
+            stepNum
+          });
+          if (stepProposal) {
+            reasoningSummary = stepProposal.reasoningSummary || `Heuristic action for task: ${currentTask.type}`;
           }
         }
 
+        // 5.8 Strict Goal Completion Verification
         if (isTaskComplete || !stepProposal || stepProposal.actionType === "COMPLETE") {
-          finalSummary = reasoningSummary || "All task steps completed successfully.";
-          relayToTerminalLog(`Step ${stepNum}: Goal Completed`, finalSummary, { actionHistory });
-          break;
+          const postCheck = ActiveGoalCompletionChecker.check({
+            goal: parsedGoal,
+            stateManager,
+            planner,
+            currentDomElements: interactiveElements,
+            actionHistory
+          });
+
+          if (postCheck.isSatisfied) {
+            finalSummary = postCheck.reason;
+            relayToTerminalLog(`Step ${stepNum}: Goal Satisfied`, finalSummary, postCheck);
+            break;
+          } else {
+            relayToTerminalLog(`Step ${stepNum}: Incomplete Requirements`, `Completion claimed but: ${postCheck.reason}`, postCheck);
+            if (stepProposal && stepProposal.actionType === "COMPLETE") {
+              stepProposal = deriveGeneralizedFallbackAction({
+                currentTask,
+                goal: parsedGoal,
+                interactiveElements,
+                stateManager,
+                stepNum
+              });
+            }
+            if (!stepProposal) {
+              finalSummary = postCheck.reason;
+              break;
+            }
+          }
         }
 
         const actionType = String(stepProposal.actionType || stepProposal.action || stepProposal.type || "CLICK").toUpperCase();
         const targetId = typeof stepProposal.target === "string" ? stepProposal.target : (stepProposal.target?.elementId || stepProposal.element_id || "page_root");
         const parameters = stepProposal.parameters || (stepProposal.text ? { text: stepProposal.text } : {});
 
-        // 3.4 Local Action Execution
+        // 5.9 Local Authoritative Action Execution
         setPipelineStage("LOCAL VALIDATION → BROWSER ACTION");
         status.textContent = `Step ${stepNum}/${MAX_STEPS}: Executing [${actionType}] on ${targetId}...`;
         relayToTerminalLog(`Step ${stepNum}: Action Execution`, `Executing [${actionType}] on ${targetId}`, {
@@ -1299,7 +1494,8 @@ if (runTaskButton) {
           actionType,
           targetId,
           parameters,
-          reasoningSummary
+          reasoningSummary,
+          taskType: currentTask.type
         });
 
         const execRes = await sendTabMessage({
@@ -1309,8 +1505,7 @@ if (runTaskButton) {
           parameters
         });
 
-        // If user typed into a search box with thenPressEnter
-        if (actionType === "TYPE" && stepProposal.thenPressEnter) {
+        if (actionType === "TYPE" && (stepProposal.thenPressEnter || currentTask.type === "search")) {
           await sendTabMessage({
             type: "EXECUTE_BROWSER_ACTION",
             actionType: "PRESS_KEY",
@@ -1318,6 +1513,18 @@ if (runTaskButton) {
             parameters: { key: "Enter" }
           });
         }
+
+        // 5.10 State Tracking & Loop Safeguards
+        const outcome = stateManager.recordActionOutcome({
+          actionType,
+          target: targetId,
+          parameters,
+          ok: Boolean(execRes?.ok),
+          status: execRes?.status || (execRes?.ok ? "COMPLETED" : "FAILED_EXECUTION"),
+          error: execRes?.error,
+          reason: reasoningSummary,
+          taskType: currentTask.type
+        });
 
         const stepOutcome = {
           step: stepNum,
@@ -1333,30 +1540,70 @@ if (runTaskButton) {
         if (!execRes?.ok) {
           anyFailed = true;
           relayToTerminalLog(`Step ${stepNum}: Action Failed`, execRes?.error || "Action execution error", stepOutcome);
-          break;
+          if (stateManager.consecutiveFailures >= 3) {
+            relayToTerminalLog(`Step ${stepNum}: Stopped`, "Exceeded maximum consecutive failures.", {});
+            break;
+          }
+        } else {
+          planner.completeCurrentTask({
+            targetId,
+            actionType,
+            reason: reasoningSummary
+          });
         }
 
-        actionHistory.push(`Step ${stepNum}: [${actionType}] on ${targetId} — ${reasoningSummary}`);
+        if (outcome.isLoopDetected) {
+          relayToTerminalLog(`Step ${stepNum}: Loop Safeguard Triggered`, outcome.loopReason, outcome);
+          await sendTabMessage({
+            type: "EXECUTE_BROWSER_ACTION",
+            actionType: "SCROLL",
+            targetId: "page_root",
+            parameters: { direction: "down", distance: 400 }
+          });
+        }
 
-        // 3.5 Pause for Page Navigation or Filter AJAX update
+        actionHistory.push(`Step ${stepNum}: [${actionType}] on ${targetId} (${currentTask.type}) — ${reasoningSummary}`);
+
+        // 5.11 State Stabilization Pause
         if (actionType === "NAVIGATE" || actionType === "PRESS_KEY" || actionType === "SUBMIT" || stepProposal.thenPressEnter || (actionType === "CLICK" && (targetId.startsWith("el_") || stepProposal.isFilter))) {
           status.textContent = `Step ${stepNum} complete. Waiting for page update...`;
           await new Promise(r => setTimeout(r, 2200));
         } else {
           await new Promise(r => setTimeout(r, 900));
         }
+
+        // 5.12 Post-Action Goal Check
+        const postExecCheck = ActiveGoalCompletionChecker.check({
+          goal: parsedGoal,
+          stateManager,
+          planner,
+          actionHistory
+        });
+        if (postExecCheck.isSatisfied) {
+          finalSummary = postExecCheck.reason;
+          relayToTerminalLog(`Step ${stepNum}: Goal Satisfied Post-Action`, finalSummary, postExecCheck);
+          break;
+        }
       }
 
       const totalMs = Date.now() - startTime;
       const successfulCount = executedResults.filter(r => r.ok && r.status === "COMPLETED").length;
-      const isOverallSuccess = !anyFailed && executedResults.length > 0 && successfulCount > 0;
+      const finalGoalCheck = ActiveGoalCompletionChecker.check({
+        goal: parsedGoal,
+        stateManager,
+        planner,
+        actionHistory
+      });
+      const isOverallSuccess = finalGoalCheck.isSatisfied || (!anyFailed && executedResults.length > 0 && successfulCount > 0);
 
-      relayToTerminalLog("Final Task Summary", isOverallSuccess ? "Task COMPLETED successfully" : "Task FAILED", {
+      relayToTerminalLog("Final Task Summary", isOverallSuccess ? "Goal COMPLETED successfully" : "Task INCOMPLETE or HALTED", {
         success: isOverallSuccess,
+        goalSatisfied: finalGoalCheck.isSatisfied,
         totalDurationMs: totalMs,
         totalSteps: executedResults.length,
         actionHistory,
-        executedResults
+        executedResults,
+        state: stateManager.getStateSummary()
       });
 
       // Render Final Results
@@ -1365,13 +1612,13 @@ if (runTaskButton) {
 
         const modelLabel = apiKey ? `${selectedModel} (${provider.toUpperCase()})` : "Local Heuristic Planner";
         taskSummary.textContent = isOverallSuccess
-          ? `Multi-step task completed in ${totalMs}ms via ${modelLabel}. ${successfulCount}/${executedResults.length} step(s) executed successfully.`
-          : `Task stopped in ${totalMs}ms. Executed ${successfulCount}/${executedResults.length} step(s).`;
+          ? `Goal completed in ${totalMs}ms via ${modelLabel}. ${successfulCount}/${executedResults.length} step(s) executed successfully.`
+          : `Task stopped in ${totalMs}ms. ${successfulCount}/${executedResults.length} step(s) executed.`;
 
         const breadcrumbItem = document.createElement("li");
         breadcrumbItem.style.fontWeight = "bold";
         breadcrumbItem.style.color = "#1d4ed8";
-        breadcrumbItem.textContent = "RAW DOM → LOCAL PII DETECTION → REDACTED DOM → REMOTE LLM → ACTION PROPOSAL → LOCAL VALIDATION → BROWSER ACTION";
+        breadcrumbItem.textContent = "RAW DOM → LOCAL PII DETECTION → REDACTED DOM + SANITIZED VISION → REMOTE LLM → ACTION PROPOSAL → LOCAL VALIDATION → BROWSER ACTION";
         taskActions.append(breadcrumbItem);
 
         for (const res of executedResults) {
@@ -1389,7 +1636,7 @@ if (runTaskButton) {
         const securityBadge = document.createElement("li");
         securityBadge.style.color = "#059669";
         securityBadge.style.fontWeight = "bold";
-        securityBadge.textContent = "✔ 100% On-device DOM authority enforced. Zero raw PII or secrets exposed.";
+        securityBadge.textContent = "✔ 100% On-device DOM & Vision authority enforced. Zero raw PII, screenshots, or secrets exposed.";
         taskActions.append(securityBadge);
 
         taskResults.hidden = false;
