@@ -509,6 +509,9 @@ if (btnClearImageDetection) {
     renderImageTelemetry({ detectedCount: 0, types: [], redactedCount: 0, sanitizedText: "" });
     if (secImgSanitizedGen) secImgSanitizedGen.textContent = "NO";
 
+    // Clean in-page overlays and highlights on the active tab as well
+    sendTabMessage({ type: "CLEAR_LOCAL_HIGHLIGHTS" }).catch(() => {});
+
     if (status) status.textContent = "Image PII detection and redacted view cleared.";
   });
 }

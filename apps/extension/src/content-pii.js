@@ -513,6 +513,12 @@
   function scanImagesForPii(rawItems) {
     if (typeof document === "undefined" || !document.querySelectorAll) return;
 
+    // Synthetic demo mock OCR is STRICTLY restricted to local test fixture pages (e.g., localhost demo-target-page).
+    // It must NEVER run on external live websites (such as amazon.in, gmail, etc.)
+    const isLocalTestFixturePage = typeof location !== "undefined" &&
+      (location.hostname === "localhost" || location.hostname === "127.0.0.1" || location.protocol === "file:") &&
+      (location.pathname.includes("demo-target-page") || location.pathname.includes("image-pipeline-visual-demo") || location.pathname.includes("image-demo"));
+
     const images = document.querySelectorAll("img, canvas, [role='img']");
     for (const img of images) {
       if (!isElementVisible(img)) continue;
@@ -520,8 +526,8 @@
       if (rect.width <= 0 || rect.height <= 0) continue;
 
       const src = (img.src || img.getAttribute("data-src") || "").toLowerCase();
-      const alt = (img.alt || img.title || img.getAttribute("aria-label") || "").toLowerCase();
-      const isDocumentImage = src.includes("pii-image-demo") || src.includes("document") || src.includes("id-card") || /identity|verification|card|id|customer/i.test(alt) || img.id === "pii-doc-image";
+      // Only recognize the explicit demo test image on the local test fixture page:
+      const isDocumentImage = isLocalTestFixturePage && (img.id === "pii-doc-image" || src.endsWith("pii-image-demo.png") || src.includes("pii-image-demo.png"));
 
       const ocrBlocks = isDocumentImage ? KNOWN_DOCUMENT_OCR : [];
       if (ocrBlocks.length > 0) {

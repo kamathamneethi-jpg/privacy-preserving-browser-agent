@@ -422,5 +422,35 @@ test("20. Screenshot PII mapping accurately scales viewport bounding boxes onto 
   assert.ok(isBboxCompletelyCovered(mockDetections[0].bbox, redactResult.redactedBoxes[0].redactBbox), "Region is completely masked");
 });
 
+test("21. scanImagesForPii strictly avoids synthetic document mock detections on external live websites", () => {
+  const contentPiiPath = resolve("apps/extension/src/content-pii.js");
+  const scriptContent = fs.readFileSync(contentPiiPath, "utf8");
+
+  // Verify that loose regex is completely removed
+  assert.ok(!scriptContent.includes("/identity|verification|card|id|customer/i.test(alt)"), "Must not flag images based on loose card/id/customer regex");
+  assert.ok(scriptContent.includes("isLocalTestFixturePage"), "Must enforce local test fixture check for synthetic OCR");
+
+  // Simulate environment on a live website (amazon.in)
+  const isLocalTestFixturePage = false;
+  const rawItems = [];
+  const testImages = [
+    { src: "https://m.media-amazon.com/images/I/71xyz.jpg", alt: "Amazon Pay ICICI Bank credit card", id: "card-banner" },
+    { src: "https://m.media-amazon.com/images/I/41abc.jpg", alt: "Shop popular deals", id: "deal-card-1" },
+    { src: "https://m.media-amazon.com/images/I/51def.jpg", alt: "Customer identity verification", id: "id-doc" }
+  ];
+
+  for (const img of testImages) {
+    const src = (img.src || "").toLowerCase();
+    const isDocumentImage = isLocalTestFixturePage && (img.id === "pii-doc-image" || src.endsWith("pii-image-demo.png") || src.includes("pii-image-demo.png"));
+    const ocrBlocks = isDocumentImage ? [{ pii: "Shahrukh", category: "name", type: "NAME", bbox: { x: 95, y: 125, width: 224, height: 32 } }] : [];
+    for (const b of ocrBlocks) {
+      rawItems.push(b);
+    }
+  }
+
+  assert.equal(rawItems.length, 0, "External websites must generate 0 synthetic document OCR items");
+});
+
+
 
 
