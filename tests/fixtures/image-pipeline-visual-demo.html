@@ -255,7 +255,13 @@
   </div>
 
   <script>
-    const DEMO_IMAGE_SRC = "fixtures/pii-image-demo.png";
+    // Resilient path resolver: try same-directory, root-relative, and fallback
+    const DEMO_IMAGE_SRCS = [
+      "pii-image-demo.png",
+      "/fixtures/pii-image-demo.png",
+      "/tests/fixtures/pii-image-demo.png",
+      "fixtures/pii-image-demo.png"
+    ];
 
     const OCR_ITEMS = [
       { text: "Customer Information", bbox: { x: 70, y: 55, width: 320, height: 32 } },
@@ -266,107 +272,152 @@
       { text: "Card: 4532 1234 5678 9012", pii: "4532 1234 5678 9012", type: "CREDIT_CARD", bbox: { x: 95, y: 325, width: 416, height: 32 } }
     ];
 
-    function runPipelineDemo() {
-      const img = new Image();
-      img.onload = () => {
-        const w = img.width || 640;
-        const h = img.height || 480;
+    function createSyntheticImageCanvas() {
+      const canvas = document.createElement("canvas");
+      canvas.width = 640;
+      canvas.height = 480;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.fillStyle = "#f1f5f9";
+        ctx.fillRect(0, 0, 640, 480);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(40, 30, 560, 420);
+        ctx.strokeStyle = "#cbd5e1";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(40, 30, 560, 420);
+        ctx.fillStyle = "#0f172a";
+        ctx.font = "bold 20px sans-serif";
+        ctx.fillText("Customer Information", 70, 75);
+        ctx.fillStyle = "#f8fafc";
+        ctx.fillRect(65, 95, 510, 270);
+        ctx.strokeStyle = "#e2e8f0";
+        ctx.strokeRect(65, 95, 510, 270);
+        ctx.fillStyle = "#1e293b";
+        ctx.font = "16px sans-serif";
+        ctx.fillText("Name: Shahrukh", 95, 145);
+        ctx.fillText("ID: hi_23", 95, 195);
+        ctx.fillText("Email: sde@sf.com", 95, 245);
+        ctx.fillText("Phone: 9876543210", 95, 295);
+        ctx.fillText("Card: 4532 1234 5678 9012", 95, 345);
+      }
+      return canvas;
+    }
 
-        // 1. Original Image Canvas
-        const cOrig = document.getElementById("canvas-original");
-        cOrig.width = w; cOrig.height = h;
-        const ctxOrig = cOrig.getContext("2d");
-        ctxOrig.drawImage(img, 0, 0);
+    function processImageSource(imgOrCanvas) {
+      const w = imgOrCanvas.width || 640;
+      const h = imgOrCanvas.height || 480;
 
-        // 2. Bounding Boxes Canvas
-        const cBbox = document.getElementById("canvas-bboxes");
-        cBbox.width = w; cBbox.height = h;
-        const ctxBbox = cBbox.getContext("2d");
-        ctxBbox.drawImage(img, 0, 0);
+      // 1. Original Image Canvas
+      const cOrig = document.getElementById("canvas-original");
+      cOrig.width = w; cOrig.height = h;
+      const ctxOrig = cOrig.getContext("2d");
+      ctxOrig.drawImage(imgOrCanvas, 0, 0);
 
-        for (const item of OCR_ITEMS) {
-          if (!item.pii) continue;
-          const b = item.bbox;
-          ctxBbox.strokeStyle = "#f59e0b";
-          ctxBbox.lineWidth = 3;
-          ctxBbox.strokeRect(b.x - 2, b.y - 2, b.width + 4, b.height + 4);
-          ctxBbox.fillStyle = "rgba(245, 158, 11, 0.25)";
-          ctxBbox.fillRect(b.x - 2, b.y - 2, b.width + 4, b.height + 4);
+      // 2. Bounding Boxes Canvas
+      const cBbox = document.getElementById("canvas-bboxes");
+      cBbox.width = w; cBbox.height = h;
+      const ctxBbox = cBbox.getContext("2d");
+      ctxBbox.drawImage(imgOrCanvas, 0, 0);
 
-          // Label
-          ctxBbox.fillStyle = "#d97706";
-          ctxBbox.fillRect(b.x - 2, b.y - 18, Math.min(b.width + 4, 110), 16);
-          ctxBbox.fillStyle = "#ffffff";
-          ctxBbox.font = "bold 11px monospace";
-          ctxBbox.fillText(item.type, b.x + 2, b.y - 6);
+      for (const item of OCR_ITEMS) {
+        if (!item.pii) continue;
+        const b = item.bbox;
+        ctxBbox.strokeStyle = "#f59e0b";
+        ctxBbox.lineWidth = 3;
+        ctxBbox.strokeRect(b.x - 2, b.y - 2, b.width + 4, b.height + 4);
+        ctxBbox.fillStyle = "rgba(245, 158, 11, 0.25)";
+        ctxBbox.fillRect(b.x - 2, b.y - 2, b.width + 4, b.height + 4);
+
+        // Label
+        ctxBbox.fillStyle = "#d97706";
+        ctxBbox.fillRect(b.x - 2, b.y - 18, Math.min(b.width + 4, 110), 16);
+        ctxBbox.fillStyle = "#ffffff";
+        ctxBbox.font = "bold 11px monospace";
+        ctxBbox.fillText(item.type, b.x + 2, b.y - 6);
+      }
+
+      // 3. Redacted Image Canvas (Operates on copy)
+      const cRedact = document.getElementById("canvas-redacted");
+      cRedact.width = w; cRedact.height = h;
+      const ctxRedact = cRedact.getContext("2d");
+      ctxRedact.drawImage(imgOrCanvas, 0, 0);
+
+      for (const item of OCR_ITEMS) {
+        if (!item.pii) continue;
+        const b = item.bbox;
+        ctxRedact.fillStyle = "#000000";
+        ctxRedact.fillRect(b.x - 3, b.y - 3, b.width + 6, b.height + 6);
+      }
+
+      // 4. Sanitized Context
+      const sanitizedLines = OCR_ITEMS.map((item) => {
+        if (item.pii) {
+          return item.text.replace(item.pii, "████████");
         }
+        return item.text;
+      });
+      document.getElementById("pre-sanitized-context").textContent = sanitizedLines.join("\n");
 
-        // 3. Redacted Image Canvas (Operates on copy)
-        const cRedact = document.getElementById("canvas-redacted");
-        cRedact.width = w; cRedact.height = h;
-        const ctxRedact = cRedact.getContext("2d");
-        ctxRedact.drawImage(img, 0, 0);
-
-        for (const item of OCR_ITEMS) {
-          if (!item.pii) continue;
-          const b = item.bbox;
-          ctxRedact.fillStyle = "#000000";
-          ctxRedact.fillRect(b.x - 3, b.y - 3, b.width + 6, b.height + 6);
+      // 5. Remote Payload & Pre-flight Assertion
+      const rawPiiSecrets = OCR_ITEMS.filter(i => i.pii).map(i => i.pii);
+      const remotePayload = {
+        status: "SANITIZED",
+        task: "Confirm user identity on webpage",
+        sanitizedVisualContext: sanitizedLines.join("\n"),
+        piiRedactionSummary: {
+          detectedLocally: 5,
+          redactedRegions: 5,
+          rawImageRetainedLocally: true
         }
-
-        // 4. Sanitized Context
-        const sanitizedLines = OCR_ITEMS.map((item) => {
-          if (item.pii) {
-            return item.text.replace(item.pii, "████████");
-          }
-          return item.text;
-        });
-        document.getElementById("pre-sanitized-context").textContent = sanitizedLines.join("\n");
-
-        // 5. Remote Payload & Pre-flight Assertion
-        const rawPiiSecrets = OCR_ITEMS.filter(i => i.pii).map(i => i.pii);
-        const remotePayload = {
-          status: "SANITIZED",
-          task: "Confirm user identity on webpage",
-          sanitizedVisualContext: sanitizedLines.join("\n"),
-          piiRedactionSummary: {
-            detectedLocally: 5,
-            redactedRegions: 5,
-            rawImageRetainedLocally: true
-          }
-        };
-
-        const payloadStr = JSON.stringify(remotePayload, null, 2);
-        // Authoritative Assertion Check
-        let passedAssertion = true;
-        for (const secret of rawPiiSecrets) {
-          if (payloadStr.includes(secret)) {
-            passedAssertion = false;
-            break;
-          }
-        }
-
-        document.getElementById("pre-remote-payload").textContent =
-          `// Pre-flight Security Assertion: ${passedAssertion ? "PASSED (Zero raw PII)" : "FAILED"}\n` + payloadStr;
-
-        // 6. Action Proposal & BrowserActionEngine
-        const actionResult = {
-          source: "REMOTE_REASONING_LLM",
-          proposedAction: {
-            actionType: "CLICK",
-            target: { id: "btn-verify" },
-            reasoningSummary: "Click Confirm & Proceed button to complete verification"
-          },
-          localValidation: {
-            authority: "BrowserActionEngine",
-            status: "COMPLETED",
-            destination: "LOCAL_BROWSER",
-            verifiedNoRawLeakage: true
-          }
-        };
-        document.getElementById("pre-action-result").textContent = JSON.stringify(actionResult, null, 2);
       };
-      img.src = DEMO_IMAGE_SRC;
+
+      const payloadStr = JSON.stringify(remotePayload, null, 2);
+      // Authoritative Assertion Check
+      let passedAssertion = true;
+      for (const secret of rawPiiSecrets) {
+        if (payloadStr.includes(secret)) {
+          passedAssertion = false;
+          break;
+        }
+      }
+
+      document.getElementById("pre-remote-payload").textContent =
+        `// Pre-flight Security Assertion: ${passedAssertion ? "PASSED (Zero raw PII)" : "FAILED"}\n` + payloadStr;
+
+      // 6. Action Proposal & BrowserActionEngine
+      const actionResult = {
+        source: "REMOTE_REASONING_LLM",
+        proposedAction: {
+          actionType: "CLICK",
+          target: { id: "btn-verify" },
+          reasoningSummary: "Click Confirm & Proceed button to complete verification"
+        },
+        localValidation: {
+          authority: "BrowserActionEngine",
+          status: "COMPLETED",
+          destination: "LOCAL_BROWSER",
+          verifiedNoRawLeakage: true
+        }
+      };
+      document.getElementById("pre-action-result").textContent = JSON.stringify(actionResult, null, 2);
+    }
+
+    function runPipelineDemo() {
+      let srcIndex = 0;
+      function tryLoadNext() {
+        if (srcIndex >= DEMO_IMAGE_SRCS.length) {
+          // Fallback to generated canvas
+          const fallbackCanvas = createSyntheticImageCanvas();
+          processImageSource(fallbackCanvas);
+          return;
+        }
+        const src = DEMO_IMAGE_SRCS[srcIndex++];
+        const img = new Image();
+        img.onload = () => processImageSource(img);
+        img.onerror = () => tryLoadNext();
+        img.src = src;
+      }
+      tryLoadNext();
     }
 
     document.getElementById("btn-trigger-demo").addEventListener("click", runPipelineDemo);

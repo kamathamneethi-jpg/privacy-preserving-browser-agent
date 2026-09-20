@@ -115,6 +115,19 @@ async function buildExtension() {
     define: envDefines
   });
 
+  // 5. Copy static demo fixtures to extension and dist directories
+  console.log("-> Copying static test fixtures to extension bundle...");
+  const extFixturesDir = resolve(extensionDir, "fixtures");
+  const distFixturesDir = resolve(distDir, "fixtures");
+  await mkdir(extFixturesDir, { recursive: true });
+  await mkdir(distFixturesDir, { recursive: true });
+
+  const fixtureImgSrc = resolve(rootDir, "tests/fixtures/pii-image-demo.png");
+  if (fs.existsSync(fixtureImgSrc)) {
+    fs.copyFileSync(fixtureImgSrc, resolve(extFixturesDir, "pii-image-demo.png"));
+    fs.copyFileSync(fixtureImgSrc, resolve(distFixturesDir, "pii-image-demo.png"));
+  }
+
   console.log("✔ Extension build completed successfully: files generated in apps/extension/dist/");
 }
 

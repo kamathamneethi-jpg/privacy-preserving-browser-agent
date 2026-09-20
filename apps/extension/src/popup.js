@@ -165,10 +165,13 @@ function renderImageToCanvas(mode = "REDACTED") {
   }
 }
 
-async function processImageSourceForPii(imgElement) {
+async function processImageSourceForPii(imgElement, options = {}) {
   if (secImgRawProcessed) secImgRawProcessed.textContent = "YES";
   if (secImgBackendRaw) secImgBackendRaw.textContent = "NO";
-  if (status) status.textContent = "Processing image on-device with local PaddleOCR...";
+  if (status) status.textContent = "Processing image on-device...";
+
+  const isDemoFixture = Boolean(options.isDemoFixture);
+  const extraDetections = Array.isArray(options.extraDetections) ? options.extraDetections : [];
 
   // 1. OCR text + bounding boxes
   let blocks = [];
@@ -177,11 +180,11 @@ async function processImageSourceForPii(imgElement) {
       blocks = await globalThis.PrivacyCore.recognizeImageText(imgElement);
     }
   } catch (err) {
-    console.warn("PaddleOCR on-device error, falling back:", err);
+    console.warn("OCR on-device error:", err);
   }
 
-  // Fallback demo blocks if image is our demo fixture or if canvas has no OCR output
-  if (!blocks || blocks.length === 0) {
+  // ONLY load synthetic demo blocks if explicitly running demo fixture
+  if ((!blocks || blocks.length === 0) && isDemoFixture) {
     blocks = [
       { text: "Customer Information", bbox: { x: 70, y: 55, width: 320, height: 32 }, confidence: 0.98 },
       { text: "Name: Shahrukh", bbox: { x: 95, y: 125, width: 224, height: 32 }, confidence: 0.96 },
@@ -192,44 +195,55 @@ async function processImageSourceForPii(imgElement) {
     ];
   }
 
-  // 2. Detect PII using existing detector
+  // 2. Detect PII from OCR blocks if any exist
   let detections = [];
-  if (typeof globalThis.PrivacyCore !== "undefined" && globalThis.PrivacyCore.hybridPiiDetector) {
-    detections = globalThis.PrivacyCore.hybridPiiDetector.detectPiiInOcrBlocks(blocks);
-  } else {
-    // Deterministic fallback matching existing detector
-    const patterns = [
-      { type: "NAME", regex: /\b(?:Name|Customer Name)\s*:\s*([A-Za-z]+)/i },
-      { type: "ID", regex: /\b(?:ID|User ID)\s*:\s*([A-Za-z0-9_#-]+)/i },
-      { type: "EMAIL", regex: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i },
-      { type: "PHONE", regex: /(?:\+?\d[\d(). -]{7,}\d)|\b\d{10}\b/ },
-      { type: "CREDIT_CARD", regex: /\b(?:Card|Credit Card)\s*:\s*([0-9 -]{13,19})/i }
-    ];
+  if (blocks && blocks.length > 0) {
+    if (typeof globalThis.PrivacyCore !== "undefined" && globalThis.PrivacyCore.hybridPiiDetector) {
+      detections = globalThis.PrivacyCore.hybridPiiDetector.detectPiiInOcrBlocks(blocks);
+    } else {
+      const patterns = [
+        { type: "NAME", regex: /\b(?:Name|Customer Name)\s*:\s*([A-Za-z]+)/i },
+        { type: "ID", regex: /\b(?:ID|User ID)\s*:\s*([A-Za-z0-9_#-]+)/i },
+        { type: "EMAIL", regex: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i },
+        { type: "PHONE", regex: /(?:\+?\d[\d(). -]{7,}\d)|\b\d{10}\b/ },
+        { type: "CREDIT_CARD", regex: /\b(?:Card|Credit Card)\s*:\s*([0-9 -]{13,19})/i }
+      ];
 
-    let counter = 0;
-    for (const b of blocks) {
-      for (const p of patterns) {
-        const m = b.text.match(p.regex);
-        if (m) {
-          counter++;
-          detections.push({
-            id: `PII_IMG_${counter}`,
-            type: p.type,
-            category: p.type.toLowerCase(),
-            value: m[1] || m[0],
-            confidence: 0.96,
-            bbox: b.bbox,
-            source: "IMAGE_OCR"
-          });
+      let counter = 0;
+      for (const b of blocks) {
+        for (const p of patterns) {
+          const m = b.text.match(p.regex);
+          if (m) {
+            counter++;
+            detections.push({
+              id: `PII_IMG_${counter}`,
+              type: p.type,
+              category: p.type.toLowerCase(),
+              value: m[1] || m[0],
+              confidence: 0.96,
+              bbox: b.bbox,
+              source: "IMAGE_OCR"
+            });
+          }
         }
       }
     }
   }
 
-  // 3. Local Redaction on Image Copy
+  // 3. Merge with viewport DOM detections (authoritative pixel localization from live page)
+  for (const ed of extraDetections) {
+    const isDup = detections.some(
+      (d) => d.value === ed.value && Math.abs(d.bbox.x - ed.bbox.x) < 20 && Math.abs(d.bbox.y - ed.bbox.y) < 20
+    );
+    if (!isDup) {
+      detections.push(ed);
+    }
+  }
+
+  // 4. Local Redaction on Image Copy
   let redactResult = null;
   if (typeof globalThis.PrivacyCore !== "undefined" && globalThis.PrivacyCore.redactImageLocally) {
-    redactResult = globalThis.PrivacyCore.redactImageLocally(imgElement, detections, { padding: 3 });
+    redactResult = globalThis.PrivacyCore.redactImageLocally(imgElement, detections, { padding: 4 });
   } else {
     const canvas = document.createElement("canvas");
     canvas.width = imgElement.width || imgElement.naturalWidth || 640;
@@ -240,7 +254,7 @@ async function processImageSourceForPii(imgElement) {
       ctx.fillStyle = "#000000";
       for (const d of detections) {
         if (d.bbox) {
-          ctx.fillRect(Math.max(0, d.bbox.x - 2), Math.max(0, d.bbox.y - 2), d.bbox.width + 4, d.bbox.height + 4);
+          ctx.fillRect(Math.max(0, d.bbox.x - 3), Math.max(0, d.bbox.y - 3), d.bbox.width + 6, d.bbox.height + 6);
         }
       }
     }
@@ -248,20 +262,23 @@ async function processImageSourceForPii(imgElement) {
   }
 
   lastOriginalImage = imgElement;
-  lastOcrBlocks = blocks;
+  lastOcrBlocks = blocks || [];
   lastImagePiiDetections = detections;
   lastRedactedCanvas = redactResult.sanitizedImage;
 
-  // 4. Generate sanitized text
-  let sanitizedText = blocks.map((b) => b.text).join("\n");
+  // 5. Generate sanitized text
+  let sanitizedText = (blocks || []).map((b) => b.text).join("\n");
   for (const det of detections) {
-    if (det.value) {
+    if (det.value && sanitizedText) {
       sanitizedText = sanitizedText.replaceAll(det.value, "████████");
     }
   }
+  if (!sanitizedText && detections.length > 0) {
+    sanitizedText = detections.map((d) => `[${d.type}]: ████████ (at x:${d.bbox.x}, y:${d.bbox.y})`).join("\n");
+  }
   lastSanitizedOcrText = sanitizedText;
 
-  // 5. Update Telemetry and View
+  // 6. Update Telemetry and View
   renderImageTelemetry({
     detectedCount: detections.length,
     types: [...new Set(detections.map((d) => d.type))],
@@ -277,32 +294,80 @@ async function processImageSourceForPii(imgElement) {
   if (imageDisplayContainer) imageDisplayContainer.style.display = "block";
 
   if (status) {
-    status.textContent = `Image scan complete. ${detections.length} PII items redacted locally. Zero raw pixels transmitted.`;
+    if (detections.length > 0) {
+      status.textContent = `Screenshot scan complete. ${detections.length} PII items redacted on-device. Zero raw pixels transmitted.`;
+    } else {
+      status.textContent = "Screenshot scan complete. 0 PII items detected in viewport. Webpage is safe.";
+    }
   }
 }
 
 // Button: Scan Current Page Screenshot
 if (btnScanScreenshot) {
   btnScanScreenshot.addEventListener("click", async () => {
-    if (status) status.textContent = "Capturing page screenshot locally...";
+    if (status) status.textContent = "Scanning active tab viewport and capturing screenshot on-device...";
     try {
+      // 1. Query live page content script for visible viewport PII and its exact viewport bounds
+      let viewportPiiResponse = null;
+      try {
+        viewportPiiResponse = await sendTabMessage({ type: "GET_VIEWPORT_PII" });
+      } catch (tabErr) {
+        console.warn("Could not retrieve viewport PII from tab message:", tabErr);
+      }
+
+      // 2. Capture visible tab screenshot locally
       if (typeof chrome !== "undefined" && chrome.tabs && chrome.tabs.captureVisibleTab) {
         chrome.tabs.captureVisibleTab(null, { format: "png" }, (dataUrl) => {
           if (chrome.runtime.lastError || !dataUrl) {
-            // Fallback for chrome:// or file:// tabs: generate document card from active tab or fixture
-            loadDemoImageFallback();
+            if (status) status.textContent = "Cannot capture screenshot on this tab (restricted or internal page).";
             return;
           }
           const img = new Image();
-          img.onload = () => processImageSourceForPii(img);
-          img.onerror = () => loadDemoImageFallback();
+          img.onload = () => {
+            // Map viewport items to screenshot pixel dimensions
+            const viewportWidth = viewportPiiResponse?.viewport?.width || window.innerWidth || img.naturalWidth || 1280;
+            const viewportHeight = viewportPiiResponse?.viewport?.height || window.innerHeight || img.naturalHeight || 800;
+            const scaleX = img.naturalWidth / viewportWidth;
+            const scaleY = img.naturalHeight / viewportHeight;
+
+            const mappedDetections = [];
+            if (viewportPiiResponse?.items && Array.isArray(viewportPiiResponse.items)) {
+              for (const item of viewportPiiResponse.items) {
+                if (!item.viewportBbox) continue;
+                const sx = Math.max(0, Math.round(item.viewportBbox.x * scaleX));
+                const sy = Math.max(0, Math.round(item.viewportBbox.y * scaleY));
+                const sw = Math.round(item.viewportBbox.width * scaleX);
+                const sh = Math.round(item.viewportBbox.height * scaleY);
+
+                if (sw > 0 && sh > 0) {
+                  mappedDetections.push({
+                    id: item.id || `PII_VIEW_${mappedDetections.length + 1}`,
+                    type: item.type || (item.category ? item.category.toUpperCase() : "PII"),
+                    category: (item.category || "pii").toLowerCase(),
+                    value: item.value,
+                    confidence: item.confidence || 0.95,
+                    bbox: { x: sx, y: sy, width: sw, height: sh },
+                    source: "VIEWPORT_DOM"
+                  });
+                }
+              }
+            }
+
+            processImageSourceForPii(img, {
+              isDemoFixture: false,
+              extraDetections: mappedDetections
+            });
+          };
+          img.onerror = () => {
+            if (status) status.textContent = "Failed to load captured screenshot image.";
+          };
           img.src = dataUrl;
         });
       } else {
-        loadDemoImageFallback();
+        if (status) status.textContent = "Screenshot capture unavailable in this environment.";
       }
-    } catch {
-      loadDemoImageFallback();
+    } catch (err) {
+      if (status) status.textContent = `Screenshot error: ${err.message}`;
     }
   });
 }
@@ -310,7 +375,7 @@ if (btnScanScreenshot) {
 // Fallback function when activeTab screenshot permission is restricted (e.g. file:// or internal tabs)
 function loadDemoImageFallback() {
   const img = new Image();
-  img.onload = () => processImageSourceForPii(img);
+  img.onload = () => processImageSourceForPii(img, { isDemoFixture: true });
   img.onerror = () => {
     // Generate synthetic test canvas dynamically
     const canvas = document.createElement("canvas");
@@ -335,13 +400,13 @@ function loadDemoImageFallback() {
       ctx.fillText("Phone: 9876543210", 95, 295);
       ctx.fillText("Card: 4532 1234 5678 9012", 95, 345);
     }
-    processImageSourceForPii(canvas);
+    processImageSourceForPii(canvas, { isDemoFixture: true });
   };
   img.src = "fixtures/pii-image-demo.png";
 }
 
 // Button: Load Test Image
-if (btnLoadTestImage && imgFileInput) {
+if (btnLoadTestImage) {
   btnLoadTestImage.addEventListener("click", () => {
     loadDemoImageFallback();
   });

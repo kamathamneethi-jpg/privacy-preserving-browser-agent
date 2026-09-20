@@ -14,14 +14,17 @@ import { GlinerAdapter, glinerAdapter } from "./gliner-adapter.js";
 import { GLINER_TARGET_LABELS, GLINER_CONFIG } from "./gliner-config.js";
 
 const EMAIL_PATTERN = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
-const PHONE_PATTERN = /(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b|\b\d{10}\b/g;
+const PHONE_PATTERN = /(?:(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}|\b[6-9]\d{9}\b|\b\d{10}\b)/g;
 const CARD_PATTERN = /\b(?:\d{4}[-\s]?){3}\d{4}\b|\b\d{13,19}\b/g;
 const CARD_LABEL_PATTERN = /\b(?:Card|Credit Card|Card Number)\s*:\s*([0-9 -]{13,19})/gi;
 const NAME_LABEL_PATTERN = /\b(?:Name|Full Name|Customer Name|User Name)\s*:\s*([A-Za-z]+(?:\s+[A-Za-z]+)*)/gi;
+const GREETING_NAME_PATTERN = /\b(?:Dear|Hello|Hi|Hey)\s+([A-Z][a-zA-Z0-9_-]+(?:\s+[a-zA-Z0-9_-]+){0,2})/gi;
 const ID_LABEL_PATTERN = /\b(?:ID|User ID|Customer ID|Account ID)\s*:\s*([A-Za-z0-9_#-]+)/gi;
 const IP_PATTERN = /\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b/g;
 const OTP_PATTERN = /\b(?:\d{4,8}|[A-Z0-9]{6})\b/g;
+const OTP_CONTEXT_PATTERN = /(?:(?:\b(?:otp|code|pin|verification\s+code|login\s+code|security\s+code|passcode|one-time\s+password)\b[^\w\n\r]{0,10}(\b\d{4,8}\b))|(\b\d{4,8}\b)(?=[^\w\n\r]{0,10}(?:is\s+your|was\s+your|-\s*your|-\s*login\s+code|login\s+code|verification\s+code|security\s+code)))/gi;
 const ACCOUNT_ID_PATTERN = /\b(?:[A-Z]{2}\d{2}[A-Z0-9]{11,30}|ACC-[A-Z0-9]{6,12})\b/g;
+const NAME_STOPWORDS = new Set(["customer", "user", "investor", "sir", "madam", "all", "team", "member", "there", "friend", "everyone", "viewer", "guest", "subscriber"]);
 
 function passesLuhn(candidate) {
   const digits = candidate.replace(/\D/g, "");
@@ -203,6 +206,42 @@ export class HybridPiiDetector {
         const start = match.index + match[0].indexOf(val);
         detections.push({
           type: PiiCategory.ACCOUNT_IDENTIFIER,
+          value: val,
+          start,
+          end: start + val.length,
+          confidence: 0.90,
+          source: "regex",
+          ...(nodeId ? { nodeId } : {})
+        });
+      }
+    }
+
+    // 8. OTP / Verification Code (in authentication/security context)
+    OTP_CONTEXT_PATTERN.lastIndex = 0;
+    for (const match of text.matchAll(OTP_CONTEXT_PATTERN)) {
+      const val = (match[1] || match[2] || "").trim();
+      if (val && val.length >= 4 && !detections.some((d) => d.value === val)) {
+        const start = match.index + match[0].indexOf(val);
+        detections.push({
+          type: "OTP",
+          value: val,
+          start,
+          end: start + val.length,
+          confidence: 0.95,
+          source: "regex",
+          ...(nodeId ? { nodeId } : {})
+        });
+      }
+    }
+
+    // 9. Name in greeting (Dear / Hello / Hi / Hey)
+    GREETING_NAME_PATTERN.lastIndex = 0;
+    for (const match of text.matchAll(GREETING_NAME_PATTERN)) {
+      const val = match[1]?.trim();
+      if (val && val.length >= 2 && !NAME_STOPWORDS.has(val.toLowerCase()) && !detections.some((d) => d.value === val)) {
+        const start = match.index + match[0].indexOf(val);
+        detections.push({
+          type: PiiCategory.PERSON_NAME,
           value: val,
           start,
           end: start + val.length,

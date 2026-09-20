@@ -30,13 +30,17 @@ const server = http.createServer((req, res) => {
   // Custom route shortcuts
   if (pathname === "/" || pathname === "/demo") {
     pathname = "/tests/fixtures/demo-target-page.html";
+  } else if (pathname === "/image-demo" || pathname === "/visual-demo") {
+    pathname = "/tests/fixtures/image-pipeline-visual-demo.html";
   } else if (pathname === "/popup") {
     pathname = "/apps/extension/popup.html";
   }
 
-  // Rewrite /fixtures/... or /dist/... or /src/... when requested relative to popup
+  // Rewrite paths for resilient fixture asset resolution
   let filePath;
-  if (pathname.startsWith("/fixtures/")) {
+  if (pathname.includes("pii-image-demo.png")) {
+    filePath = resolve(rootDir, "tests/fixtures/pii-image-demo.png");
+  } else if (pathname.startsWith("/fixtures/")) {
     filePath = resolve(rootDir, "tests" + pathname);
   } else if (pathname.startsWith("/src/") || pathname.startsWith("/dist/")) {
     filePath = resolve(rootDir, "apps/extension" + pathname);

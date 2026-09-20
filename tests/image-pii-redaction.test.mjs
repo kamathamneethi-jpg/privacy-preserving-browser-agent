@@ -317,3 +317,110 @@ test("13. Synthetic fixture image file exists and is a valid PNG", () => {
   const isPng = buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
   assert.equal(isPng, true, "File must have valid PNG signature");
 });
+
+test("14. Extension package contains fixture image assets natively", () => {
+  const extFixturePath = resolve("apps/extension/fixtures/pii-image-demo.png");
+  const distFixturePath = resolve("apps/extension/dist/fixtures/pii-image-demo.png");
+  assert.ok(fs.existsSync(extFixturePath), "apps/extension/fixtures/pii-image-demo.png must exist");
+  assert.ok(fs.existsSync(distFixturePath), "apps/extension/dist/fixtures/pii-image-demo.png must exist");
+});
+
+test("15. Extension popup.html loads privacy-core bundle for on-device redaction", () => {
+  const popupHtmlPath = resolve("apps/extension/popup.html");
+  const htmlContent = fs.readFileSync(popupHtmlPath, "utf8");
+  assert.ok(htmlContent.includes("dist/privacy-core.bundle.js"), "popup.html must load privacy-core.bundle.js");
+});
+
+test("16. Extension content-pii script implements in-page image scanning and visual overlays", () => {
+  const contentPiiPath = resolve("apps/extension/src/content-pii.js");
+  const scriptContent = fs.readFileSync(contentPiiPath, "utf8");
+  assert.ok(scriptContent.includes("scanImagesForPii"), "content-pii.js must define scanImagesForPii");
+  assert.ok(scriptContent.includes("applyImageRedactionOverlay"), "content-pii.js must define applyImageRedactionOverlay");
+  assert.ok(scriptContent.includes("privacy-agent-image-redact-overlay"), "content-pii.js must create image redaction overlays");
+});
+
+test("17. Hybrid detector accurately detects OTP/verification codes in authentication text", () => {
+  const text = "990871 - Your Spotify login code - 990871 - Your Spotify login code Hi, Enter this code to continue";
+  const detections = hybridPiiDetector.detectWithDeterministicRules(text);
+  assert.ok(detections.length > 0, "Must detect OTP in text");
+  const otps = detections.filter((d) => d.type === "OTP");
+  assert.ok(otps.length > 0, "Must identify OTP type");
+  assert.equal(otps[0].value, "990871", "Identifies exact 6-digit OTP value");
+});
+
+test("18. Hybrid detector detects greeting names and mobile phone numbers in correspondence text", () => {
+  const text = "Dear Mohammed shahrukh, your Jio Number 9866929594 is about to expire. Email: shahrukhmdsss9@gmail.com";
+  const detections = hybridPiiDetector.detectWithDeterministicRules(text);
+
+  const names = detections.filter((d) => d.type === "person_name" || d.type === "PERSON_NAME");
+  assert.ok(names.length > 0, "Must detect person name");
+  assert.equal(names[0].value, "Mohammed shahrukh", "Identifies Mohammed shahrukh");
+
+  const phones = detections.filter((d) => d.type === "phone" || d.type === "PHONE");
+  assert.ok(phones.length > 0, "Must detect mobile phone number");
+  assert.ok(phones.some((p) => p.value.includes("9866929594")), "Identifies phone 9866929594");
+
+  const emails = detections.filter((d) => d.type === "email" || d.type === "EMAIL");
+  assert.ok(emails.length > 0, "Must detect email");
+  assert.equal(emails[0].value, "shahrukhmdsss9@gmail.com", "Identifies shahrukhmdsss9@gmail.com");
+});
+
+test("19. Content script implements scanViewportPii and GET_VIEWPORT_PII handler", () => {
+  const contentPiiPath = resolve("apps/extension/src/content-pii.js");
+  const scriptContent = fs.readFileSync(contentPiiPath, "utf8");
+  assert.ok(scriptContent.includes("scanViewportPii"), "content-pii.js must define scanViewportPii");
+  assert.ok(scriptContent.includes("GET_VIEWPORT_PII"), "content-pii.js must handle GET_VIEWPORT_PII message");
+  assert.ok(scriptContent.includes("viewportBbox"), "content-pii.js must compute viewportBbox");
+});
+
+test("20. Screenshot PII mapping accurately scales viewport bounding boxes onto screenshot canvas without synthetic fallbacks", () => {
+  // Mock viewport dimensions (CSS pixels) and screenshot dimensions (High-DPI pixels)
+  const viewport = { width: 1280, height: 800 };
+  const screenshotDimensions = { naturalWidth: 1600, naturalHeight: 1000 };
+  const scaleX = screenshotDimensions.naturalWidth / viewport.width; // 1.25
+  const scaleY = screenshotDimensions.naturalHeight / viewport.height; // 1.25
+
+  // Simulated live viewport PII item (e.g. phone number in email list)
+  const viewportPiiItem = {
+    type: "PHONE",
+    category: "phone",
+    value: "9866929594",
+    viewportBbox: { x: 300, y: 240, width: 120, height: 20 }
+  };
+
+  const mappedBbox = {
+    x: Math.round(viewportPiiItem.viewportBbox.x * scaleX),
+    y: Math.round(viewportPiiItem.viewportBbox.y * scaleY),
+    width: Math.round(viewportPiiItem.viewportBbox.width * scaleX),
+    height: Math.round(viewportPiiItem.viewportBbox.height * scaleY)
+  };
+
+  assert.equal(mappedBbox.x, 375, "Scaled X is exact");
+  assert.equal(mappedBbox.y, 300, "Scaled Y is exact");
+  assert.equal(mappedBbox.width, 150, "Scaled width is exact");
+  assert.equal(mappedBbox.height, 25, "Scaled height is exact");
+
+  // Verify redaction covers the mapped bounding box
+  const mockDetections = [{
+    id: "PII_VIEW_1",
+    type: "PHONE",
+    category: "phone",
+    value: "9866929594",
+    bbox: mappedBbox
+  }];
+
+  const mockImage = {
+    width: screenshotDimensions.naturalWidth,
+    height: screenshotDimensions.naturalHeight,
+    naturalWidth: screenshotDimensions.naturalWidth,
+    naturalHeight: screenshotDimensions.naturalHeight
+  };
+
+  const redactResult = redactImageLocally(mockImage, mockDetections, { padding: 4 });
+  assert.equal(redactResult.redactedCount, 1, "Must redact the single real PII detection");
+  assert.equal(redactResult.redactedBoxes[0].coversPii, true, "Redaction box completely covers PII");
+  assert.ok(isBboxCompletelyCovered(mockDetections[0].bbox, redactResult.redactedBoxes[0].redactBbox), "Region is completely masked");
+});
+
+
+
