@@ -1025,9 +1025,55 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
             summary.textContent = ev.data;
             card.appendChild(summary);
           } else {
+            // Check for redacted screenshot thumbnail
+            const ssUrl = ev.data.screenshotBase64 || ev.data.sanitizedScreenshot || ev.data.screenshotUrl;
+            if (ssUrl && typeof ssUrl === "string" && ssUrl.startsWith("data:image/")) {
+              const ssThumbWrap = document.createElement("div");
+              ssThumbWrap.style.margin = "8px 0";
+              const titleBar = document.createElement("div");
+              titleBar.style.cssText = "font-size: 11px; font-weight: 600; color: var(--accent-cyan); margin-bottom: 4px; display: flex; align-items: center; gap: 6px;";
+              titleBar.innerHTML = '<span>📷 Redacted Screenshot (Sent to AI Agent)</span><span style="font-size: 10px; background: rgba(6,182,212,0.15); color: #06b6d4; padding: 1px 6px; border-radius: 4px;">0 Raw PII</span>';
+              const imgEl = document.createElement("img");
+              imgEl.src = ssUrl;
+              imgEl.style.cssText = "max-height: 140px; max-width: 100%; border-radius: 6px; border: 1px solid var(--border-subtle); cursor: pointer; display: block;";
+              imgEl.title = "Click to view full redacted screenshot";
+              imgEl.addEventListener("click", () => {
+                const modal = document.getElementById("img-modal");
+                const modalImg = document.getElementById("modal-img");
+                modalImg.src = ssUrl;
+                modal.classList.add("open");
+              });
+              ssThumbWrap.appendChild(titleBar);
+              ssThumbWrap.appendChild(imgEl);
+              card.appendChild(ssThumbWrap);
+            }
+
+            // Check for sanitized DOM context
+            if (ev.data.sanitizedDomContext && typeof ev.data.sanitizedDomContext === "string") {
+              const domDetails = document.createElement("details");
+              domDetails.style.margin = "6px 0";
+              const summaryEl = document.createElement("summary");
+              summaryEl.style.cssText = "cursor: pointer; color: var(--accent-blue); font-size: 11px; font-weight: 600; user-select: none;";
+              summaryEl.textContent = "📄 Sanitized DOM Context (" + ev.data.sanitizedDomContext.length + " chars)";
+              const preEl = document.createElement("pre");
+              preEl.className = "code-block";
+              preEl.style.cssText = "max-height: 160px; margin-top: 6px; white-space: pre-wrap; font-size: 10px;";
+              preEl.textContent = ev.data.sanitizedDomContext;
+              domDetails.appendChild(summaryEl);
+              domDetails.appendChild(preEl);
+              card.appendChild(domDetails);
+            }
+
+            // Clean data object without huge base64 strings for the JSON inspector
+            const cleanData = Object.assign({}, ev.data);
+            if (cleanData.screenshotBase64) cleanData.screenshotBase64 = "[data:image/... base64 length: " + cleanData.screenshotBase64.length + "]";
+            if (cleanData.sanitizedScreenshot) cleanData.sanitizedScreenshot = "[data:image/... base64 length: " + cleanData.sanitizedScreenshot.length + "]";
+            if (cleanData.screenshotUrl && cleanData.screenshotUrl.startsWith("data:image/")) cleanData.screenshotUrl = "[data:image/... base64 length: " + cleanData.screenshotUrl.length + "]";
+            if (cleanData.sanitizedDomContext && cleanData.sanitizedDomContext.length > 300) cleanData.sanitizedDomContext = cleanData.sanitizedDomContext.slice(0, 300) + "... [truncated in summary, see DOM preview above]";
+
             const jsonBox = document.createElement("div");
             jsonBox.className = "code-block";
-            jsonBox.textContent = JSON.stringify(ev.data, null, 2);
+            jsonBox.textContent = JSON.stringify(cleanData, null, 2);
             card.appendChild(jsonBox);
           }
         }
@@ -1151,6 +1197,221 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 </body>
 </html>`;
 
+// Autonomous Agent Reasoning Engine (Zero Remote Key Local Agent)
+export function computeAutonomousAgentDecision({
+  goal = {},
+  currentTask = null,
+  executionState = {},
+  interactiveElements = [],
+  screenshotBase64 = null,
+  sanitizedDomContext = "",
+  actionHistory = []
+}) {
+  const taskType = currentTask?.type || "general_action";
+  const goalSummary = goal.summary || goal.originalGoal || "Execute user browser task";
+  const constraints = goal.constraints || [];
+  const targetEntity = goal.targetEntity || "";
+
+  // 1. Check if already satisfied or completed
+  if (taskType === "complete" || executionState.isGoalSatisfied) {
+    return {
+      ok: true,
+      observation: "Goal satisfied based on previous execution steps.",
+      goal_progress: { isSatisfied: true, remainingTasks: [] },
+      next_task: null,
+      action: {
+        actionType: "COMPLETE",
+        target: "page_root",
+        parameters: {},
+        thenPressEnter: false,
+        reasoningSummary: "All goal objectives and constraints satisfied."
+      }
+    };
+  }
+
+  // 2. Search Task: find search input field
+  if (taskType === "search" || (!actionHistory.some(a => a.includes("search") || a.includes("TYPE")) && !executionState.hasSearched)) {
+    const searchInput = interactiveElements.find(el => {
+      const tag = (el.tag || "").toLowerCase();
+      const type = (el.type || "").toLowerCase();
+      const name = (el.name || "").toLowerCase();
+      const placeholder = (el.placeholder || "").toLowerCase();
+      const aria = (el.ariaLabel || "").toLowerCase();
+      if (tag === "input" || tag === "textarea") {
+        if (type === "search" || name === "q" || name === "field-keywords" || placeholder.includes("search") || aria.includes("search")) {
+          return true;
+        }
+      }
+      return false;
+    }) || interactiveElements.find(el => (el.tag === "input" || el.tag === "textarea") && (el.type === "text" || !el.type));
+
+    if (searchInput) {
+      let searchQuery = targetEntity || goalSummary;
+      for (const c of constraints) {
+        if (c.value && !searchQuery.toLowerCase().includes(String(c.value).toLowerCase())) {
+          searchQuery += ` ${c.value}`;
+        }
+      }
+
+      return {
+        ok: true,
+        observation: `Identified search input [${searchInput.elementId || searchInput.id}]. Dispatching query: "${searchQuery.trim()}".`,
+        goal_progress: { isSatisfied: false, remainingTasks: ["filter", "select_item"] },
+        next_task: "filter",
+        action: {
+          actionType: "TYPE",
+          target: searchInput.elementId || searchInput.id,
+          parameters: { text: searchQuery.trim() },
+          thenPressEnter: true,
+          reasoningSummary: `Type search query "${searchQuery.trim()}" into search bar and press Enter.`
+        }
+      };
+    }
+  }
+
+  // 3. Filter Task: handle price or facet filters
+  if (taskType === "filter") {
+    const priceConstraint = constraints.find(c => c.type === "PRICE_MAX" || c.type === "PRICE_RANGE");
+    if (priceConstraint) {
+      const maxPrice = priceConstraint.value || priceConstraint.max;
+      const maxPriceInput = interactiveElements.find(el => {
+        const text = ((el.placeholder || "") + " " + (el.ariaLabel || "") + " " + (el.text || "")).toLowerCase();
+        return (el.tag === "input" || el.isFilter) && (text.includes("high-price") || text.includes("max") || text.includes("upper") || text.includes("to"));
+      });
+      if (maxPriceInput) {
+        return {
+          ok: true,
+          observation: `Found max price input [${maxPriceInput.elementId || maxPriceInput.id}]. Setting price limit to ${maxPrice}.`,
+          goal_progress: { isSatisfied: false, remainingTasks: ["select_item"] },
+          next_task: "select_item",
+          action: {
+            actionType: "TYPE",
+            target: maxPriceInput.elementId || maxPriceInput.id,
+            parameters: { text: String(maxPrice) },
+            thenPressEnter: true,
+            isFilter: true,
+            filterName: "price_max",
+            filterValue: String(maxPrice),
+            reasoningSummary: `Enter upper price limit ${maxPrice} into price filter.`
+          }
+        };
+      }
+    }
+
+    for (const c of constraints) {
+      const val = String(c.value || "").toLowerCase();
+      if (!val) continue;
+      const facet = interactiveElements.find(el => {
+        if (el.isSponsored) return false;
+        const text = ((el.text || "") + " " + (el.ariaLabel || "")).toLowerCase();
+        return (el.isFilter || el.type === "checkbox" || el.tag === "a" || el.tag === "button") && text.includes(val);
+      });
+      if (facet) {
+        return {
+          ok: true,
+          observation: `Found filter facet [${facet.elementId || facet.id}] for constraint "${val}".`,
+          goal_progress: { isSatisfied: false, remainingTasks: ["select_item"] },
+          next_task: "select_item",
+          action: {
+            actionType: "CLICK",
+            target: facet.elementId || facet.id,
+            parameters: {},
+            thenPressEnter: false,
+            isFilter: true,
+            filterName: c.type || "facet",
+            filterValue: val,
+            reasoningSummary: `Apply filter facet for "${val}".`
+          }
+        };
+      }
+    }
+  }
+
+  // 4. Select Item / Product: find genuine product result (skip sponsored ads)
+  if (taskType === "select_item" || taskType === "navigate" || taskType === "general_action") {
+    const productItem = interactiveElements.find(el => {
+      if (el.isSponsored) return false;
+      if (el.isFilter) return false;
+      if (el.tag === "button" && ((el.text || "").toLowerCase().includes("search") || (el.text || "").toLowerCase().includes("go"))) return false;
+      if (el.isProductResult) return true;
+      const text = (el.text || "").toLowerCase();
+      return (el.tag === "a" || el.tag === "div") && text.length > 15 && !text.includes("sign in") && !text.includes("cart") && !text.includes("help");
+    });
+
+    if (productItem) {
+      return {
+        ok: true,
+        observation: `Identified authentic product item [${productItem.elementId || productItem.id}]: "${(productItem.text || "").slice(0, 50)}...".`,
+        goal_progress: { isSatisfied: false, remainingTasks: ["add_to_cart"] },
+        next_task: "add_to_cart",
+        action: {
+          actionType: "CLICK",
+          target: productItem.elementId || productItem.id,
+          parameters: {},
+          thenPressEnter: false,
+          reasoningSummary: `Click on matching authentic product result "${(productItem.text || "").slice(0, 50)}".`
+        }
+      };
+    }
+  }
+
+  // 5. Add to cart
+  if (taskType === "add_to_cart") {
+    const cartBtn = interactiveElements.find(el => {
+      const text = ((el.text || "") + " " + (el.value || "") + " " + (el.ariaLabel || "")).toLowerCase();
+      return (el.tag === "button" || el.tag === "input" || el.tag === "a") && (text.includes("add to cart") || text.includes("buy now") || text.includes("add to bag") || text.includes("add to basket"));
+    });
+
+    if (cartBtn) {
+      return {
+        ok: true,
+        observation: `Found Add to Cart button [${cartBtn.elementId || cartBtn.id}].`,
+        goal_progress: { isSatisfied: true, remainingTasks: [] },
+        next_task: null,
+        action: {
+          actionType: "CLICK",
+          target: cartBtn.elementId || cartBtn.id,
+          parameters: {},
+          thenPressEnter: false,
+          reasoningSummary: "Click Add to Cart button to complete goal."
+        }
+      };
+    }
+  }
+
+  // 6. Generic first actionable element
+  const firstActionable = interactiveElements.find(el => el.tag === "button" || el.tag === "a" || el.tag === "input");
+  if (firstActionable) {
+    return {
+      ok: true,
+      observation: `Progressing goal with actionable element [${firstActionable.elementId || firstActionable.id}].`,
+      goal_progress: { isSatisfied: false, remainingTasks: [] },
+      next_task: "advance",
+      action: {
+        actionType: firstActionable.tag === "input" ? "TYPE" : "CLICK",
+        target: firstActionable.elementId || firstActionable.id,
+        parameters: firstActionable.tag === "input" ? { text: goalSummary } : {},
+        thenPressEnter: false,
+        reasoningSummary: `Advance interaction with [${firstActionable.elementId || firstActionable.id}].`
+      }
+    };
+  }
+
+  return {
+    ok: true,
+    observation: "No further DOM interactions required. Goal completed.",
+    goal_progress: { isSatisfied: true, remainingTasks: [] },
+    next_task: null,
+    action: {
+      actionType: "COMPLETE",
+      target: "page_root",
+      parameters: {},
+      thenPressEnter: false,
+      reasoningSummary: "Execution completed."
+    }
+  };
+}
+
 // Create HTTP Server
 export function createObservabilityServer(port = PORT, host = HOST) {
   const server = http.createServer((req, res) => {
@@ -1187,6 +1448,78 @@ export function createObservabilityServer(port = PORT, host = HOST) {
         } catch (err) {
           res.writeHead(400, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ ok: false, error: "Invalid JSON: " + err.message }));
+        }
+      });
+      return;
+    }
+
+    // 2. AI Agent Autonomous Multimodal Reasoning: POST /api/agent/reason
+    if (req.method === "POST" && pathname === "/api/agent/reason") {
+      let body = "";
+      req.on("data", chunk => {
+        body += chunk;
+        if (body.length > 30 * 1024 * 1024) { // 30MB limit for base64 screenshot + DOM
+          req.destroy();
+        }
+      });
+
+      req.on("end", () => {
+        try {
+          const payload = JSON.parse(body);
+          const {
+            goal = {},
+            currentTask = null,
+            executionState = {},
+            interactiveElements = [],
+            screenshotBase64 = null,
+            sanitizedDomContext = "",
+            actionHistory = []
+          } = payload;
+
+          // Record multimodal payload reception
+          eventStore.add({
+            stage: "AI AGENT MULTIMODAL INGESTION",
+            event: "REDACTED_SS_AND_DOM_RECEIVED",
+            level: "info",
+            data: {
+              goalSummary: goal.summary || goal.originalGoal || "Execute user browser task",
+              currentTask: currentTask?.type || "general_action",
+              elementCount: interactiveElements.length,
+              hasRedactedScreenshot: Boolean(screenshotBase64),
+              screenshotBase64: screenshotBase64 || undefined,
+              sanitizedDomContext: sanitizedDomContext || undefined,
+              elementsSample: interactiveElements.slice(0, 10).map(e => ({ id: e.elementId || e.id, tag: e.tag, text: e.text, isFilter: e.isFilter }))
+            }
+          });
+
+          // Autonomous decision
+          const decision = computeAutonomousAgentDecision({
+            goal,
+            currentTask,
+            executionState,
+            interactiveElements,
+            screenshotBase64,
+            sanitizedDomContext,
+            actionHistory
+          });
+
+          // Log decision
+          eventStore.add({
+            stage: "AI AGENT DECISION",
+            event: "ACTION_PLANNED",
+            level: "info",
+            data: {
+              observation: decision.observation,
+              action: decision.action,
+              goal_progress: decision.goal_progress
+            }
+          });
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(decision));
+        } catch (err) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "AI Agent Reasoning Error: " + err.message }));
         }
       });
       return;

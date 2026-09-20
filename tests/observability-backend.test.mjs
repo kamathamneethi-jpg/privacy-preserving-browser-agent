@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert";
 import http from "node:http";
 import { createObservabilityServer, eventStore } from "../scripts/extension-log-server.mjs";
+import { MultimodalVisionAgent } from "../packages/privacy-core/src/multimodal-vision-agent.js";
 
 test("Observability Backend & Real-time Dashboard Test Suite", async (t) => {
   const TEST_PORT = 9876;
@@ -175,5 +176,80 @@ test("Observability Backend & Real-time Dashboard Test Suite", async (t) => {
     const exportRes = await fetch(`${baseUrl}/api/export`);
     assert.strictEqual(exportRes.status, 200);
     assert.ok(exportRes.headers.get("content-disposition")?.includes("attachment"));
+  });
+
+  // 10. AI Agent Reason Endpoint: POST /api/agent/reason with Redacted Screenshot & Sanitized DOM
+  await t.test("POST /api/agent/reason receives redacted screenshot and sanitized DOM, returning agent action", async () => {
+    const fakeRedactedScreenshot = "data:image/svg+xml;utf8,<svg><rect fill='%23000000'/></svg>";
+    const fakeSanitizedDom = "{\"tag\":\"body\",\"children\":[{\"id\":\"el_1\",\"tag\":\"input\",\"type\":\"search\"}]}";
+
+    const payload = {
+      goal: {
+        summary: "Search for white running shoes",
+        targetEntity: "white running shoes",
+        constraints: [{ type: "COLOR", value: "white" }]
+      },
+      currentTask: { type: "search", description: "Search for white running shoes" },
+      executionState: { stepCount: 1 },
+      interactiveElements: [
+        { elementId: "el_1", id: "el_1", tag: "input", type: "search", placeholder: "Search here" },
+        { elementId: "el_2", id: "el_2", tag: "button", text: "Submit" }
+      ],
+      screenshotBase64: fakeRedactedScreenshot,
+      sanitizedDomContext: fakeSanitizedDom,
+      actionHistory: []
+    };
+
+    const res = await fetch(`${baseUrl}/api/agent/reason`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    assert.strictEqual(res.status, 200);
+    const decision = await res.json();
+    assert.strictEqual(decision.ok, true);
+    assert.ok(decision.observation);
+    assert.ok(decision.action);
+    assert.strictEqual(decision.action.actionType, "TYPE");
+    assert.strictEqual(decision.action.target, "el_1");
+    assert.ok(decision.action.parameters.text.includes("white"));
+
+    // Verify that the event was recorded in eventStore with screenshotBase64 and sanitizedDomContext
+    const eventsRes = await fetch(`${baseUrl}/api/events?stage=AI%20AGENT%20MULTIMODAL%20INGESTION`);
+    assert.strictEqual(eventsRes.status, 200);
+    const events = await eventsRes.json();
+    assert.ok(events.length > 0);
+    const lastEvent = events[events.length - 1];
+    assert.strictEqual(lastEvent.event, "REDACTED_SS_AND_DOM_RECEIVED");
+    assert.strictEqual(lastEvent.data.hasRedactedScreenshot, true);
+    assert.strictEqual(lastEvent.data.screenshotBase64, fakeRedactedScreenshot);
+    assert.strictEqual(lastEvent.data.sanitizedDomContext, fakeSanitizedDom);
+  });
+
+  // 11. MultimodalVisionAgent.reason with provider="local" dispatches redacted SS + DOM cleanly
+  await t.test("MultimodalVisionAgent.reason with provider='local' transmits redacted ss and dom, receiving agent decision", async () => {
+    const fakeRedactedScreenshot = "data:image/svg+xml;utf8,<svg><rect fill='%23000000'/></svg>";
+    const fakeSanitizedDom = "{\"tag\":\"body\",\"children\":[{\"id\":\"el_10\",\"tag\":\"input\",\"type\":\"text\",\"placeholder\":\"Filter by size\"}]}";
+
+    const result = await MultimodalVisionAgent.reason({
+      provider: "local",
+      localEndpoint: `${baseUrl}/api/agent/reason`,
+      goal: { summary: "Filter by size 9", constraints: [{ type: "SIZE", value: "9" }] },
+      currentTask: { type: "filter", description: "Filter by size" },
+      executionState: { stepCount: 2 },
+      interactiveElements: [
+        { elementId: "el_10", id: "el_10", tag: "a", text: "Size 9", isFilter: true }
+      ],
+      screenshotBase64: fakeRedactedScreenshot,
+      sanitizedDomContext: fakeSanitizedDom,
+      actionHistory: []
+    });
+
+    assert.ok(result);
+    assert.strictEqual(result.ok, true);
+    assert.ok(result.action);
+    assert.strictEqual(result.action.actionType, "CLICK");
+    assert.strictEqual(result.action.target, "el_10");
   });
 });

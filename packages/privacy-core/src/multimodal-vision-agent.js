@@ -217,9 +217,48 @@ export class MultimodalVisionAgent {
     sanitizedDomContext = "",
     rawPiiValues = [],
     fetchClient = globalThis.fetch,
-    onTelemetry = null
+    onTelemetry = null,
+    localEndpoint = (typeof process !== "undefined" && process.env?.LOCAL_AGENT_URL) || "http://127.0.0.1:8765/api/agent/reason"
   }) {
-    if (!apiKey) {
+    // 1. Local AI Agent Server (Port 8765, Zero Remote Key Required)
+    const isLocal = provider === "local" || !apiKey;
+    if (isLocal) {
+      const localStartTime = Date.now();
+      try {
+        const localRes = await fetchClient(localEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            goal,
+            currentTask,
+            executionState,
+            interactiveElements,
+            screenshotBase64,
+            sanitizedDomContext,
+            actionHistory
+          })
+        });
+        if (localRes.ok) {
+          const decision = await localRes.json();
+          const latencyMs = Date.now() - localStartTime;
+          if (typeof onTelemetry === "function") {
+            try {
+              onTelemetry({
+                status: "RESPONSE",
+                provider: "local",
+                model: "Local-Heuristic-Agent-8765",
+                latencyMs,
+                actionType: decision?.action?.actionType || "CLICK",
+                target: decision?.action?.target || null,
+                observation: decision?.observation || null
+              });
+            } catch {}
+          }
+          return decision;
+        }
+      } catch (err) {
+        // Fallback to null if local server unavailable
+      }
       return null;
     }
 
@@ -262,6 +301,8 @@ export class MultimodalVisionAgent {
       headers: { ...headers, Authorization: `Bearer ${maskedAuth}` },
       messageCount: messages.length,
       hasScreenshot: Boolean(screenshotBase64),
+      screenshotBase64: screenshotBase64 || undefined,
+      sanitizedDomContext: sanitizedDomContext || undefined,
       elementCount: interactiveElements.length
     };
 
@@ -315,6 +356,27 @@ export class MultimodalVisionAgent {
           error: errorDetails || `HTTP Error ${response.status}`,
           latencyMs
         }, "error");
+
+        // Graceful fallback to Local Agent Server
+        try {
+          const fallbackRes = await fetchClient("http://127.0.0.1:8765/api/agent/reason", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              goal,
+              currentTask,
+              executionState,
+              interactiveElements,
+              screenshotBase64,
+              sanitizedDomContext,
+              actionHistory
+            })
+          });
+          if (fallbackRes.ok) {
+            return await fallbackRes.json();
+          }
+        } catch {}
+
         return null;
       }
 
@@ -338,6 +400,27 @@ export class MultimodalVisionAgent {
         error: err.message || String(err),
         latencyMs
       }, "error");
+
+      // Graceful fallback to Local Agent Server
+      try {
+        const fallbackRes = await fetchClient("http://127.0.0.1:8765/api/agent/reason", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            goal,
+            currentTask,
+            executionState,
+            interactiveElements,
+            screenshotBase64,
+            sanitizedDomContext,
+            actionHistory
+          })
+        });
+        if (fallbackRes.ok) {
+          return await fallbackRes.json();
+        }
+      } catch {}
+
       return null;
     }
   }
