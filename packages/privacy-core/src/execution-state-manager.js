@@ -125,7 +125,8 @@ export class ExecutionStateManager {
       ok,
       reason: actionRecord.reason || "",
       error: actionRecord.error || null,
-      taskType: actionRecord.taskType || null
+      taskType: actionRecord.taskType || null,
+      actionIntent: actionRecord.actionIntent || null
     };
 
     this.actionHistory.push(record);
@@ -185,6 +186,27 @@ export class ExecutionStateManager {
   }
 
   /**
+   * Records a populated/updated form field constraint.
+   */
+  recordFieldFilled(name, value) {
+    if (!this.filledFields) this.filledFields = [];
+    this.filledFields.push({
+      name: String(name || "").toLowerCase(),
+      value: String(value || "").toLowerCase()
+    });
+  }
+
+  /**
+   * Checks if a field has already been filled.
+   */
+  isFieldFilled(name, value) {
+    if (!this.filledFields) return false;
+    const n = String(name || "").toLowerCase();
+    const v = String(value || "").toLowerCase();
+    return this.filledFields.some(f => f.name === n && (f.value === v || !value));
+  }
+
+  /**
    * Checks if an action type was performed.
    */
   hasPerformedAction(actionType) {
@@ -192,7 +214,9 @@ export class ExecutionStateManager {
     return this.actionHistory.some(a =>
       (a.actionType || "").toLowerCase() === act ||
       (a.type || "").toLowerCase() === act ||
-      (a.taskType || "").toLowerCase() === act
+      (a.taskType || "").toLowerCase() === act ||
+      (a.actionIntent || "").toLowerCase() === act ||
+      (a.reason || "").toLowerCase().includes(act)
     );
   }
 

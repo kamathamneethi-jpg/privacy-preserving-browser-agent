@@ -702,12 +702,25 @@
       .filter(([, count]) => count > 0)
       .map(([category, count]) => ({ category, count, decision: redactDecision }));
 
+    const vw = (typeof window !== "undefined" && window.innerWidth) || (typeof document !== "undefined" && document.documentElement?.clientWidth) || 1280;
+    const vh = (typeof window !== "undefined" && window.innerHeight) || (typeof document !== "undefined" && document.documentElement?.clientHeight) || 800;
+    const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+    const scrollX = (typeof window !== "undefined" && window.scrollX) || 0;
+    const scrollY = (typeof window !== "undefined" && window.scrollY) || 0;
+
     return {
       totalFindings: localizedItems.length,
       categories,
       localizedItems,
       sanitizedDomText: sanitizedRep.sanitizedDomText,
       sanitizedDomNodes: sanitizedRep.sanitizedDomNodes,
+      viewport: {
+        width: vw,
+        height: vh,
+        devicePixelRatio: dpr,
+        scrollX,
+        scrollY
+      },
       debugSecurityStats: {
         rawPiiDetectedLocally: localizedItems.length,
         rawPiiInRemotePayload: 0,

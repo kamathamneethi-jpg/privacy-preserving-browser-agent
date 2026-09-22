@@ -56,10 +56,7 @@
       "nav a",
       "aside a",
       ".btn",
-      ".button",
-      "li[id^='p_'] a",
-      ".a-checkbox-label",
-      ".s-navigation-item"
+      ".button"
     ].join(", ");
 
     let rawElements = [];
@@ -97,7 +94,7 @@
         if (type === "button" || type === "submit" || type === "reset") {
           text = el.value || el.getAttribute("value") || el.getAttribute("aria-label") || el.getAttribute("title") || "";
           if (!text && typeof el.closest === "function") {
-            const btnWrapper = el.closest("span.a-button, button, form, div");
+            const btnWrapper = el.closest("button, [role='button'], form, div, span");
             if (btnWrapper) text = btnWrapper.textContent.replace(/\s+/g, " ").trim().slice(0, 80);
           }
         } else if (lowerType === "checkbox" || lowerType === "radio") {
@@ -155,14 +152,9 @@
       try {
         if (typeof el.closest === "function") {
           const adContainer = el.closest(
-            '[data-component-type="sp-sponsored-result"], ' +
-            '[data-component-type="sbv-video-single-product"], ' +
-            '[data-ad-preview], [data-ad-id], [data-ad-slot], [data-ad-details], [data-dfp-id], [data-ad], ' +
-            '.s-sponsored-label-info-icon, .puis-sponsored-label-text, .s-sponsored-info-icon, ' +
-            '[class*="sponsored" i], [id*="sponsored" i], [class*="ad-container" i], [class*="ad-unit" i], ' +
-            '[id*="google_ads" i], [class*="google-ads" i], [class*="advertisement" i], [class*="promoted" i], ' +
-            '[aria-label*="advertisement" i], [aria-label*="sponsored" i], ' +
-            'div[data-cel-widget*="sponsored" i], div[data-cel-widget*="sp_" i]'
+            '[data-component-type*="sponsored" i], [data-ad], [data-ad-id], [data-ad-slot], [data-ad-preview], ' +
+            '[class*="sponsored" i], [id*="sponsored" i], [class*="ad-container" i], [class*="advertisement" i], ' +
+            '[aria-label*="sponsored" i], [aria-label*="advertisement" i]'
           );
           if (adContainer) isSponsored = true;
         }
@@ -179,19 +171,18 @@
       try {
         if (typeof el.closest === "function") {
           const filterContainer = el.closest(
-            '#s-refinements, #filters, #refinements, .s-navigation-left, aside, nav#filters, ' +
-            '[data-component-type="s-refinements-left-nav"], [aria-label*="refine" i], [aria-label*="filter" i], ' +
-            '[id*="refinement"], [class*="refinement"], [class*="filter-container"], [class*="filter-group"], ' +
-            'li[id^="p_"], .s-navigation-item'
+            'aside, nav, form, fieldset, [role="search"], ' +
+            '[aria-label*="refine" i], [aria-label*="filter" i], ' +
+            '[id*="refinement" i], [class*="refinement" i], [class*="filter" i], [class*="facet" i], [id*="filter" i]'
           );
           if (filterContainer) {
             isFilter = true;
-            const section = el.closest('div[id^="p_"], div.a-section, li[id^="p_"]');
-            const sectionText = section ? (section.querySelector('span.a-text-bold, h4, h3, span[class*="heading"]')?.textContent || "") : "";
+            const section = el.closest('fieldset, section, div, li');
+            const sectionText = section ? (section.querySelector('legend, h4, h3, h2, label, span[class*="heading" i], span[class*="title" i]')?.textContent || "") : "";
             const lowerSec = sectionText.toLowerCase();
-            if (/price|₹|\$|eur|gbp/i.test(lowerSec) || (section && /p_36/i.test(section.id || ""))) {
+            if (/price|₹|\$|eur|gbp/i.test(lowerSec)) {
               filterCategory = "price";
-            } else if (/brand/i.test(lowerSec) || (section && /p_89/i.test(section.id || ""))) {
+            } else if (/brand/i.test(lowerSec)) {
               filterCategory = "brand";
             } else if (/colou?r/i.test(lowerSec)) {
               filterCategory = "color";
@@ -229,8 +220,8 @@
       }
 
       if ((tag === "input" && lowerType === "submit") || tag === "button") {
-        const isGo = /^(?:go|apply|submit)$/i.test(text || el.value || "");
-        if (isGo && (isFilter || filterCategory === "price" || el.closest('form[action*="s"], form[id*="price"]'))) {
+        const isGo = /^(?:go|apply|submit|filter)$/i.test(text || el.value || "");
+        if (isGo && (isFilter || filterCategory === "price" || el.closest('form[id*="price" i], form[class*="filter" i]'))) {
           isPriceGoButton = true;
           isFilter = true;
           filterCategory = "price";
@@ -262,8 +253,11 @@
       let isProductResult = false;
       try {
         if (!isSponsored && typeof el.closest === "function") {
-          const prodCard = el.closest('[data-component-type="s-search-result"], .s-result-item[data-asin]');
-          if (prodCard && prodCard.getAttribute("data-asin")) {
+          const prodCard = el.closest(
+            'article, [role="article"], [role="listitem"], ' +
+            '[class*="product" i], [class*="search-result" i], [class*="result-item" i], [class*="item-card" i], [data-testid*="product" i]'
+          );
+          if (prodCard) {
             isProductResult = true;
           }
         }

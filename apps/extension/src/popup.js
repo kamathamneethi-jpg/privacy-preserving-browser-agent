@@ -23,7 +23,19 @@ import {
   DynamicReplanner as CoreDynamicReplanner,
   GoalCompletionChecker as CoreGoalCompletionChecker,
   MultimodalVisionAgent as CoreMultimodalVisionAgent,
-  DEFAULT_MULTIMODAL_MODEL as CoreDefaultModel
+  DEFAULT_MULTIMODAL_MODEL as CoreDefaultModel,
+  transformViewportToBitmap as CoreTransformViewportToBitmap,
+  transformPageToBitmap as CoreTransformPageToBitmap,
+  sanitizeTelemetryData as CoreSanitizeTelemetryData,
+  sanitizeTelemetryTask as CoreSanitizeTelemetryTask,
+  sanitizeTelemetryError as CoreSanitizeTelemetryError,
+  evaluatePiiPolicyItem as CoreEvaluatePiiPolicyItem,
+  evaluateBatchPrivacyPolicy as CoreEvaluateBatchPrivacyPolicy,
+  evaluatePiiTaskRelevance as CoreEvaluatePiiTaskRelevance,
+  formatReviewerDecisionBadge as CoreFormatReviewerDecisionBadge,
+  assertCrossRepresentationConsistency as CoreAssertCrossRepresentationConsistency,
+  POLICY_ACTIONS as CorePolicyActions,
+  PROCESSING_DESTINATIONS as CoreProcessingDestinations
 } from "../../../packages/privacy-core/src/index.js";
 
 const PC = (typeof PrivacyCore !== "undefined" ? PrivacyCore : (typeof window !== "undefined" && window.PrivacyCore ? window.PrivacyCore : {}));
@@ -35,6 +47,18 @@ const ActiveDynamicReplanner = CoreDynamicReplanner || PC.DynamicReplanner;
 const ActiveGoalCompletionChecker = CoreGoalCompletionChecker || PC.GoalCompletionChecker;
 const ActiveMultimodalVisionAgent = CoreMultimodalVisionAgent || PC.MultimodalVisionAgent;
 const ActiveDefaultModel = CoreDefaultModel || PC.DEFAULT_MULTIMODAL_MODEL || "qwen/qwen-2.5-vl-72b-instruct";
+const ActiveTransformViewportToBitmap = CoreTransformViewportToBitmap || PC.transformViewportToBitmap;
+const ActiveTransformPageToBitmap = CoreTransformPageToBitmap || PC.transformPageToBitmap;
+const ActiveSanitizeTelemetryData = CoreSanitizeTelemetryData || PC.sanitizeTelemetryData || ((d) => d);
+const ActiveSanitizeTelemetryTask = CoreSanitizeTelemetryTask || PC.sanitizeTelemetryTask;
+const ActiveSanitizeTelemetryError = CoreSanitizeTelemetryError || PC.sanitizeTelemetryError;
+const ActiveEvaluatePiiPolicyItem = CoreEvaluatePiiPolicyItem || PC.evaluatePiiPolicyItem;
+const ActiveEvaluateBatchPrivacyPolicy = CoreEvaluateBatchPrivacyPolicy || PC.evaluateBatchPrivacyPolicy;
+const ActiveEvaluatePiiTaskRelevance = CoreEvaluatePiiTaskRelevance || PC.evaluatePiiTaskRelevance;
+const ActiveFormatReviewerDecisionBadge = CoreFormatReviewerDecisionBadge || PC.formatReviewerDecisionBadge || ((d) => ({ action: d?.decision || d?.action || "REDACT", label: d?.decision || d?.action || "REDACT", icon: "⚫", color: "BLACK" }));
+const ActiveAssertCrossRepresentationConsistency = CoreAssertCrossRepresentationConsistency || PC.assertCrossRepresentationConsistency;
+const ActivePolicyActions = CorePolicyActions || PC.POLICY_ACTIONS || { ALLOW: "ALLOW", TOKENIZE: "TOKENIZE", REDACT: "REDACT", LOCAL_ONLY: "LOCAL_ONLY" };
+const ActiveProcessingDestinations = CoreProcessingDestinations || PC.PROCESSING_DESTINATIONS || { REMOTE_REASONING: "REMOTE_REASONING", LOCAL_BROWSER: "LOCAL_BROWSER" };
 
 const doc = typeof document !== "undefined" ? document : { querySelector: () => null, querySelectorAll: () => [] };
 
@@ -70,6 +94,136 @@ const secSanitizedEntities = doc.querySelector("#sec-sanitized-entities");
 const togglePiiValuesButton = doc.querySelector("#toggle-pii-values");
 const clearHighlightsButton = doc.querySelector("#clear-highlights");
 const btnReloadExtension = doc.querySelector("#btn-reload-extension");
+
+const livePrivacyPanel = doc.querySelector("#live-privacy-transparency-panel");
+const transparencyTableBody = doc.querySelector("#transparency-table-body");
+const transparencyStatusBadge = doc.querySelector("#transparency-status-badge");
+const transparencyEmptyHint = doc.querySelector("#transparency-empty-hint");
+
+/**
+ * Renders the Live Privacy Transparency Panel dynamically from authoritative PolicyDecision objects.
+ *
+ * CRITICAL ARCHITECTURAL RULES:
+ * 1. popup.js NEVER acts as a second PolicyEngine. It strictly consumes authoritative PolicyDecision objects.
+ * 2. Visual presentation (icon, label, color) is strictly derived via formatReviewerDecisionBadge().
+ * 3. Never renders raw passwords, OTPs, CVVs, or secret values in the UI.
+ * 4. Dynamically adapts to 0, 1, or many runtime decisions with full transparency metadata.
+ */
+export function renderPrivacyTransparency(decisions = [], rootDoc = typeof document !== "undefined" ? document : null) {
+  const activeDoc = rootDoc || (typeof document !== "undefined" ? document : null);
+  if (!activeDoc) return;
+
+  const tBody = activeDoc.querySelector?.("#transparency-table-body") || transparencyTableBody;
+  const tBadge = activeDoc.querySelector?.("#transparency-status-badge") || transparencyStatusBadge;
+  const tHint = activeDoc.querySelector?.("#transparency-empty-hint") || transparencyEmptyHint;
+  const tPanel = activeDoc.querySelector?.("#live-privacy-transparency-panel") || livePrivacyPanel;
+
+  if (!tBody) return;
+  tBody.replaceChildren();
+
+  const decisionList = Array.isArray(decisions) ? decisions : (decisions?.items || []);
+
+  if (decisionList.length === 0) {
+    if (tHint) tHint.hidden = false;
+    if (tBadge) tBadge.textContent = "0 Decisions Evaluated";
+    return;
+  }
+
+  if (tHint) tHint.hidden = true;
+  if (tBadge) {
+    tBadge.textContent = `${decisionList.length} Authoritative Decision(s)`;
+  }
+
+  for (const dec of decisionList) {
+    if (!dec) continue;
+    const badge = typeof ActiveFormatReviewerDecisionBadge === "function"
+      ? ActiveFormatReviewerDecisionBadge(dec)
+      : { action: dec.decision || dec.action || "REDACT", icon: "⚫", label: dec.decision || dec.action || "REDACT", color: "BLACK" };
+
+    const tr = activeDoc.createElement("tr");
+    tr.style.borderBottom = "1px solid #e2e8f0";
+    tr.style.lineHeight = "1.3";
+
+    // 1. Decision Badge Column (🟢 ALLOW / 🔴 TOKENIZE / ⚫ REDACT / 🔒 LOCAL_ONLY)
+    const tdDecision = activeDoc.createElement("td");
+    tdDecision.style.padding = "6px";
+    tdDecision.style.whiteSpace = "nowrap";
+
+    const badgeSpan = activeDoc.createElement("span");
+    badgeSpan.style.display = "inline-flex";
+    badgeSpan.style.alignItems = "center";
+    badgeSpan.style.gap = "4px";
+    badgeSpan.style.padding = "2px 6px";
+    badgeSpan.style.borderRadius = "4px";
+    badgeSpan.style.fontWeight = "bold";
+    badgeSpan.style.fontSize = "10px";
+    badgeSpan.style.fontFamily = "monospace";
+
+    if (badge.action === "ALLOW") {
+      badgeSpan.style.background = "#dcfce7";
+      badgeSpan.style.color = "#15803d";
+      badgeSpan.style.border = "1px solid #86efac";
+    } else if (badge.action === "TOKENIZE") {
+      badgeSpan.style.background = "#fee2e2";
+      badgeSpan.style.color = "#b91c1c";
+      badgeSpan.style.border = "1px solid #fca5a5";
+    } else if (badge.action === "LOCAL_ONLY") {
+      badgeSpan.style.background = "#f3e8ff";
+      badgeSpan.style.color = "#7e22ce";
+      badgeSpan.style.border = "1px solid #d8b4fe";
+    } else {
+      badgeSpan.style.background = "#f1f5f9";
+      badgeSpan.style.color = "#334155";
+      badgeSpan.style.border = "1px solid #cbd5e1";
+    }
+
+    badgeSpan.textContent = `${badge.icon} ${badge.label}`;
+    tdDecision.appendChild(badgeSpan);
+
+    // 2. Category & Semantic Role Column
+    const tdCategory = activeDoc.createElement("td");
+    tdCategory.style.padding = "6px";
+    const catName = dec.category || dec.piiId || "unknown";
+    const roleName = dec.semanticRole || "UNKNOWN";
+    const sensitivityName = dec.sensitivity || "MEDIUM";
+    tdCategory.innerHTML = `<strong>${catName}</strong><br><span style="color:#64748b; font-size:10px;">Role: ${roleName} (${sensitivityName})</span>`;
+
+    // 3. Necessity & Relevance Column
+    const tdNecessity = activeDoc.createElement("td");
+    tdNecessity.style.padding = "6px";
+    const necessity = dec.taskNecessity || "UNKNOWN";
+    const relevance = dec.taskRelevance || dec.relevance || "UNKNOWN";
+    const reasonCode = (Array.isArray(dec.reasonCodes) ? dec.reasonCodes[0] : dec.reasonCode) || "POLICY_APPLIED";
+    tdNecessity.innerHTML = `<span style="font-weight:600; color:#1e293b;">${necessity}</span><br><span style="color:#64748b; font-size:10px;">${relevance} &bull; ${reasonCode}</span>`;
+
+    // 4. Enforcement, Screenshot & Remote Status Column
+    const tdEnforcement = activeDoc.createElement("td");
+    tdEnforcement.style.padding = "6px";
+
+    let remoteText = "REDACTED";
+    if (badge.action === "ALLOW") {
+      remoteText = "Transmitted (Safe Context)";
+    } else if (badge.action === "TOKENIZE") {
+      remoteText = dec.token ? `Token (${dec.token})` : "Tokenized";
+    } else if (badge.action === "LOCAL_ONLY") {
+      remoteText = "EXCLUDED (Zero Remote Egress)";
+    }
+
+    const ssText = badge.action === "ALLOW" ? "Screenshot: Clear" : "Screenshot: Masked";
+    tdEnforcement.innerHTML = `<span style="font-family:monospace; font-size:10px; font-weight:600;">Remote: ${remoteText}</span><br><span style="color:#64748b; font-size:10px;">${ssText}</span>`;
+
+    tr.appendChild(tdDecision);
+    tr.appendChild(tdCategory);
+    tr.appendChild(tdNecessity);
+    tr.appendChild(tdEnforcement);
+
+    tBody.appendChild(tr);
+  }
+
+  if (tPanel) {
+    tPanel.hidden = false;
+  }
+}
 
 if (btnReloadExtension) {
   btnReloadExtension.addEventListener("click", () => {
@@ -660,19 +814,25 @@ const modelInput = document.querySelector("#model-input");
 
 /**
  * Sends real-time stage logs and telemetry to local observability backend if active.
+ * Guarantees zero raw secrets or unmasked PII leave the browser boundary via telemetry.
  */
 function relayToTerminalLog(stage, event, data, level = "info") {
   try {
+    const sanitizedStage = typeof stage === "string" ? stage : "Observability Event";
+    const sanitizedEvent = typeof event === "string" ? event : "EVENT";
+    const sanitizedData = ActiveSanitizeTelemetryData ? ActiveSanitizeTelemetryData(data) : data;
+    const sanitizedLevel = level || "info";
+
     fetch("http://127.0.0.1:8765/api/events", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stage, event, data, level })
+      body: JSON.stringify({ stage: sanitizedStage, event: sanitizedEvent, data: sanitizedData, level: sanitizedLevel })
     }).catch(() => {
       // Backward compatibility fallback to /log
       fetch("http://127.0.0.1:8765/log", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stage, event, data })
+        body: JSON.stringify({ stage: sanitizedStage, event: sanitizedEvent, data: sanitizedData })
       }).catch(() => {});
     });
   } catch {}
@@ -943,6 +1103,18 @@ function renderPiiSummary(summary) {
     }
   }
 
+  // Live Privacy Transparency Integration (Phase 7)
+  let runtimeDecisions = summary.policyDecisions || summary.decisions;
+  if (!runtimeDecisions && Array.isArray(summary.localizedItems) && summary.localizedItems.length > 0 && typeof ActiveEvaluateBatchPrivacyPolicy === "function") {
+    runtimeDecisions = ActiveEvaluateBatchPrivacyPolicy({
+      piiItems: summary.localizedItems,
+      destination: ActiveProcessingDestinations.REMOTE_REASONING
+    });
+  }
+  if (runtimeDecisions) {
+    renderPrivacyTransparency(runtimeDecisions);
+  }
+
   piiResults.hidden = false;
 }
 
@@ -980,8 +1152,22 @@ export function extractNavigationUrl(task, currentUrl = "", parsedGoal = null) {
   const urlMatch = task.match(/https?:\/\/[^\s]+/i);
   if (urlMatch) return urlMatch[0];
 
-  // 2. Comprehensive dictionary of popular platforms & knowledge bases
-  const KNOWN_SITES = {
+  // 2. If parsed goal already identified targetUrl
+  if (parsedGoal?.navigation?.targetUrl) {
+    return parsedGoal.navigation.targetUrl;
+  }
+
+  // 3. Check explicit navigation requirements
+  const requiresExplicitNav = parsedGoal?.navigation?.requiresExplicitNavigation ?? false;
+
+  // If user is ALREADY on an external active website (!isInternal),
+  // NEVER redirect them away unless they explicitly instructed a website navigation!
+  if (!isInternal && !requiresExplicitNav) {
+    return null;
+  }
+
+  // 4. Platform URL mapping for explicit destinations or blank tab resolution
+  const PLATFORM_URLS = {
     google: "https://www.google.com",
     wikipedia: "https://www.wikipedia.org",
     youtube: "https://www.youtube.com",
@@ -1000,10 +1186,10 @@ export function extractNavigationUrl(task, currentUrl = "", parsedGoal = null) {
     duckduckgo: "https://duckduckgo.com"
   };
 
-  // 3. Check if target website was extracted in parsed goal or present in task
-  const targetSiteKey = parsedGoal?.targetWebsite || (ActiveGoalParser && ActiveGoalParser.extractTargetWebsite ? ActiveGoalParser.extractTargetWebsite(task) : null);
-  if (targetSiteKey && KNOWN_SITES[targetSiteKey]) {
-    const targetUrl = KNOWN_SITES[targetSiteKey];
+  const platformScopeEntity = parsedGoal?.entities?.find(e => e.candidateRoles?.includes("platform_scope") || e.candidateRoles?.includes("destination"))?.text?.toLowerCase();
+  const targetSiteKey = parsedGoal?.navigation?.destinationKeyword || parsedGoal?.targetWebsite || platformScopeEntity || (ActiveGoalParser && ActiveGoalParser.extractTargetWebsite ? ActiveGoalParser.extractTargetWebsite(task) : null);
+  if (targetSiteKey && PLATFORM_URLS[targetSiteKey]) {
+    const targetUrl = PLATFORM_URLS[targetSiteKey];
     try {
       const targetHost = new URL(targetUrl).hostname.replace(/^www\./i, "");
       if (!currentUrl.toLowerCase().includes(targetHost)) {
@@ -1014,16 +1200,9 @@ export function extractNavigationUrl(task, currentUrl = "", parsedGoal = null) {
     }
   }
 
-  // 4. Check for explicit domain navigation phrases (e.g. "go to cnn.com", "open example.org")
+  // 5. Explicit domain navigation phrases (e.g. "go to cnn.com", "open example.org")
   const domainPatterns = [
-    { regex: /\b(?:go to|open|search on|visit|navigate to|search in|on)\s+(?:www\.)?amazon\.in\b/i, url: "https://www.amazon.in" },
-    { regex: /\b(?:go to|open|search on|visit|navigate to|search in)\s+(?:www\.)?amazon\.com\b/i, url: "https://www.amazon.com" },
-    { regex: /\b(?:go to|open|search on|visit|navigate to)\s+(?:www\.)?google\.(?:com|in)\b/i, url: "https://www.google.com" },
-    { regex: /\b(?:go to|open|search on|visit|navigate to)\s+(?:www\.)?youtube\.com\b/i, url: "https://www.youtube.com" },
-    { regex: /\b(?:go to|open|search on|visit|navigate to)\s+(?:www\.)?wikipedia\.org\b/i, url: "https://www.wikipedia.org" },
-    { regex: /\b(?:go to|open|search on|visit|navigate to)\s+(?:www\.)?github\.com\b/i, url: "https://www.github.com" },
-    { regex: /\b(?:go to|open|search on|visit|navigate to)\s+(?:www\.)?flipkart\.com\b/i, url: "https://www.flipkart.com" },
-    { regex: /\b(?:go to|open|search on|visit|navigate to)\s+(?:www\.)?([a-zA-Z0-9-]+\.(?:com|in|org|net|io|co|gov|edu|ai|app|dev))\b/i, transform: (m) => `https://${m[1]}` }
+    { regex: /\b(?:go to|open|visit|navigate to)\s+(?:www\.)?([a-zA-Z0-9-]+\.(?:com|in|org|net|io|co|gov|edu|ai|app|dev))\b/i, transform: (m) => `https://${m[1]}` }
   ];
 
   for (const p of domainPatterns) {
@@ -1041,31 +1220,17 @@ export function extractNavigationUrl(task, currentUrl = "", parsedGoal = null) {
     }
   }
 
-  // 5. If user is ALREADY on an external active website (!isInternal),
-  // NEVER redirect them away unless they explicitly instructed a website navigation!
-  if (!isInternal) {
-    return null;
-  }
-
   // 6. If user is on an INTERNAL browser tab (chrome://newtab, about:blank, etc.),
   // resolve initial destination based on task domain:
-  const domain = parsedGoal?.domain || (ActiveGoalParser && ActiveGoalParser.detectDomain ? ActiveGoalParser.detectDomain(task) : "general");
-
-  if (targetSiteKey && KNOWN_SITES[targetSiteKey]) {
-    return KNOWN_SITES[targetSiteKey];
-  }
-  if (/\b(?:amazon)\b/i.test(task)) return "https://www.amazon.in";
-  if (/\b(?:flipkart)\b/i.test(task)) return "https://www.flipkart.com";
-  if (/\b(?:youtube|video|watch)\b/i.test(task)) return "https://www.youtube.com";
-  if (/\b(?:wikipedia|wiki|encyclopedia)\b/i.test(task)) return "https://www.wikipedia.org";
-  if (/\b(?:github|repo|commit|pull request|issue)\b/i.test(task)) return "https://www.github.com";
-
-  if (domain === "ecommerce") {
-    // If user starts from a blank tab without specifying store, Google search is the universal entry point
+  if (isInternal) {
+    const domain = parsedGoal?.domain || (ActiveGoalParser && ActiveGoalParser.detectDomain ? ActiveGoalParser.detectDomain(task) : "general");
+    if (domain === "ecommerce") {
+      return "https://www.google.com";
+    }
     return "https://www.google.com";
   }
 
-  return "https://www.google.com";
+  return null;
 }
 
 /**
@@ -1200,14 +1365,18 @@ function redactLocalDomNodes(domNodes) {
       isSanitized = true;
     }
 
-    // Name detection
+    // Name detection: ONLY redact if context explicitly indicates person name (never redact generic text nodes merely having /name/ in DOM path)
     NAME_PATTERN.lastIndex = 0;
-    if (NAME_PATTERN.test(text) || (node.elementPath && /name/i.test(node.elementPath))) {
-      text = text.replace(NAME_PATTERN, "[REDACTED]");
-      if (text.includes("[REDACTED]") || (node.elementPath && /name/i.test(node.elementPath))) {
-        if (!text.includes("[REDACTED]")) text = "[REDACTED]";
-        redactedCounts.Name++;
-        isSanitized = true;
+    if (NAME_PATTERN.test(text)) {
+      const pathHint = (node.elementPath || "").toLowerCase();
+      const isPersonNameField = /author|user_name|customer_name|full_name|first_name|last_name|recipient|cardholder/i.test(pathHint);
+      const isNotProduct = !/product|brand|title|item|heading|category|tag|btn|button|price/i.test(pathHint);
+      if (isPersonNameField || isNotProduct) {
+        text = text.replace(NAME_PATTERN, "[REDACTED]");
+        if (text.includes("[REDACTED]")) {
+          redactedCounts.Name++;
+          isSanitized = true;
+        }
       }
     }
 
@@ -1226,10 +1395,11 @@ function redactLocalDomNodes(domNodes) {
 
 /**
  * Captures visible tab screenshot and applies on-device pixel redaction
- * over all detected PII bounding boxes before converting to base64.
+ * in Canonical Bitmap Coordinates over all detected PII bounding boxes before converting to base64.
+ * Uses active tab viewport dimensions and scroll offsets rather than popup window dimensions.
  * Raw pixels NEVER leave the local client.
  */
-async function captureSanitizedScreenshot(viewportPiiItems = []) {
+export async function captureSanitizedScreenshot(viewportPiiItems = [], tabContext = {}) {
   if (typeof chrome === "undefined" || !chrome.tabs?.captureVisibleTab) {
     // Generate valid on-device sanitized fallback image data URL for headless/test environments
     return "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='640' height='480'><rect width='100%' height='100%' fill='%230f172a'/><text x='20' y='40' fill='%2338bdf8' font-size='14' font-family='monospace'>Sanitized Tab Perception (On-Device Redacted)</text><rect x='20' y='60' width='300' height='40' fill='%23000000' stroke='%23334155'/><text x='30' y='85' fill='%2394a3b8' font-size='12' font-family='monospace'>[REDACTED PII BOX]</text></svg>";
@@ -1243,24 +1413,77 @@ async function captureSanitizedScreenshot(viewportPiiItems = []) {
       img.onload = () => {
         try {
           const canvas = document.createElement("canvas");
-          canvas.width = img.naturalWidth || img.width;
-          canvas.height = img.naturalHeight || img.height;
+          const naturalW = img.naturalWidth || img.width || 1280;
+          const naturalH = img.naturalHeight || img.height || 800;
+          canvas.width = naturalW;
+          canvas.height = naturalH;
           const ctx = canvas.getContext("2d");
           if (!ctx) return resolve(rawDataUrl);
 
           ctx.drawImage(img, 0, 0);
 
-          // Redact all localized DOM PII bounding boxes with solid black rects
+          // Extract active tab viewport dimensions and scroll offsets
+          // NEVER use popup's window.innerWidth or window.innerHeight!
+          const vw = Math.max(1, Number(tabContext.viewportWidth || tabContext.viewport?.width || tabContext.width) || naturalW);
+          const vh = Math.max(1, Number(tabContext.viewportHeight || tabContext.viewport?.height || tabContext.height) || naturalH);
+          const sx = Number(tabContext.scrollX || tabContext.viewport?.scrollX || 0);
+          const sy = Number(tabContext.scrollY || tabContext.viewport?.scrollY || 0);
+          const dpr = Number(tabContext.devicePixelRatio || tabContext.viewport?.devicePixelRatio) || (naturalW / vw);
+
+          const transformContext = {
+            viewportWidth: vw,
+            viewportHeight: vh,
+            bitmapWidth: naturalW,
+            bitmapHeight: naturalH,
+            scrollX: sx,
+            scrollY: sy,
+            devicePixelRatio: dpr
+          };
+
+          // Redact all localized PII bounding boxes with solid black rects in Canonical Bitmap Coordinates
           if (Array.isArray(viewportPiiItems) && viewportPiiItems.length > 0) {
             ctx.fillStyle = "#000000";
             for (const item of viewportPiiItems) {
-              const bbox = item.bbox || item.boundingBox;
-              if (bbox && bbox.width > 0 && bbox.height > 0) {
-                const x = Math.max(0, bbox.x || bbox.left || 0);
-                const y = Math.max(0, bbox.y || bbox.top || 0);
-                const w = Math.min(canvas.width - x, bbox.width);
-                const h = Math.min(canvas.height - y, bbox.height);
-                ctx.fillRect(x, y, w, h);
+              let bitmapBox = null;
+
+              if (item.source === "OCR" || item.source === "IMAGE_OCR" || item.isBitmapCoord) {
+                const rawBox = item.bbox || item.boundingBox || item;
+                bitmapBox = {
+                  x: Math.max(0, Math.round(Number(rawBox.x || rawBox.left || 0))),
+                  y: Math.max(0, Math.round(Number(rawBox.y || rawBox.top || 0))),
+                  width: Math.round(Number(rawBox.width || rawBox.w || 0)),
+                  height: Math.round(Number(rawBox.height || rawBox.h || 0))
+                };
+              } else if (item.viewportBbox) {
+                bitmapBox = typeof ActiveTransformViewportToBitmap === "function"
+                  ? ActiveTransformViewportToBitmap(item.viewportBbox, transformContext)
+                  : {
+                      x: Math.round(Number(item.viewportBbox.x || 0) * (naturalW / vw)),
+                      y: Math.round(Number(item.viewportBbox.y || 0) * (naturalH / vh)),
+                      width: Math.round(Number(item.viewportBbox.width || 0) * (naturalW / vw)),
+                      height: Math.round(Number(item.viewportBbox.height || 0) * (naturalH / vh))
+                    };
+              } else if (item.bbox || item.boundingBox) {
+                const box = item.bbox || item.boundingBox;
+                bitmapBox = typeof ActiveTransformPageToBitmap === "function"
+                  ? ActiveTransformPageToBitmap(box, transformContext)
+                  : {
+                      x: Math.round((Number(box.x || 0) - sx) * (naturalW / vw)),
+                      y: Math.round((Number(box.y || 0) - sy) * (naturalH / vh)),
+                      width: Math.round(Number(box.width || 0) * (naturalW / vw)),
+                      height: Math.round(Number(box.height || 0) * (naturalH / vh))
+                    };
+              }
+
+              if (bitmapBox && bitmapBox.width > 0 && bitmapBox.height > 0) {
+                const pad = 2;
+                const rx = Math.max(0, bitmapBox.x - pad);
+                const ry = Math.max(0, bitmapBox.y - pad);
+                const rw = Math.min(canvas.width - rx, bitmapBox.width + pad * 2);
+                const rh = Math.min(canvas.height - ry, bitmapBox.height + pad * 2);
+                if (rw > 0 && rh > 0) {
+                  ctx.fillRect(rx, ry, rw, rh);
+                }
               }
             }
           }
@@ -1271,7 +1494,7 @@ async function captureSanitizedScreenshot(viewportPiiItems = []) {
             for (const det of lastImagePiiDetections) {
               const bbox = det.bbox;
               if (bbox && bbox.width > 0 && bbox.height > 0) {
-                ctx.fillRect(bbox.x, bbox.y, bbox.width, bbox.height);
+                ctx.fillRect(Math.max(0, bbox.x - 2), Math.max(0, bbox.y - 2), Math.min(canvas.width - bbox.x + 2, bbox.width + 4), Math.min(canvas.height - bbox.y + 2, bbox.height + 4));
               }
             }
           }
@@ -1323,7 +1546,8 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
   }
 
   // 2. Search Task: find search input field (supports Google <textarea name="q">, search inputs, etc.)
-  if (taskType === "search" || (stepNum === 1 && !stateManager.hasPerformedAction("search") && goal?.domain !== "form_filling")) {
+  const isDedicatedNonSearchTask = taskType === "perform_action" || taskType === "submit_form" || taskType === "submit" || taskType === "fill_form" || taskType === "close_modal";
+  if (taskType === "search" || (!isDedicatedNonSearchTask && stepNum === 1 && !stateManager.hasPerformedAction("search") && goal?.domain !== "form_filling")) {
     const searchInput = interactiveElements.find(el => {
       if (el.isSponsored || el.isAd) return false;
       if (el.tag !== "input" && el.tag !== "textarea") return false;
@@ -1474,8 +1698,46 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
     taskType = "select_candidate";
   }
 
-  // 4. Select / Inspect Candidate (Organic Results Only, Never Ads - works on Google, Wikipedia, stores, blogs)
+  // 4. Select / Inspect Candidate (Organic Results & In-Page Items matching constraints/ordinals)
   if (taskType === "select_candidate" || taskType === "inspect_candidate" || taskType === "inspect" || taskType === "select_result") {
+    const selection = currentTask?.metadata?.selection || goal?.selection || null;
+    const entities = currentTask?.metadata?.entities || goal?.entities || [];
+    const senderConstraints = constraints.filter(c => c.name === "sender" || c.name === "author" || c.candidateRoles?.includes("sender") || c.candidateRoles?.includes("author"));
+
+    // Option A: Specific Entity / Sender matching (e.g. "from LinkedIn", "by DeepMind", or named entity)
+    if (entities.length > 0 || senderConstraints.length > 0) {
+      const matchingCandidates = interactiveElements.filter(el => {
+        if (el.isSponsored || el.isAd) return false;
+        const t = `${el.text || ""} ${el.ariaLabel || ""} ${el.title || ""}`.toLowerCase();
+        return entities.some(ent => t.includes(ent.text.toLowerCase())) ||
+               senderConstraints.some(c => t.includes(String(c.value).toLowerCase()));
+      });
+
+      if (matchingCandidates.length > 0) {
+        let targetIdx = 0;
+        if (selection && selection.index !== null && selection.index !== undefined) {
+          if (selection.index === -1) {
+            targetIdx = matchingCandidates.length - 1;
+          } else {
+            targetIdx = Math.max(0, Math.min(selection.index, matchingCandidates.length - 1));
+          }
+        }
+        const chosen = matchingCandidates[targetIdx];
+        stateManager.recordCandidate({
+          title: chosen.text || chosen.ariaLabel || "Matching Candidate",
+          elementId: chosen.elementId,
+          url: chosen.href || null
+        });
+        return {
+          actionType: "CLICK",
+          target: chosen.elementId,
+          parameters: {},
+          reasoningSummary: `Selected candidate element "${(chosen.text || chosen.ariaLabel || '').slice(0, 45)}..." matching entity constraints.`
+        };
+      }
+    }
+
+    // Option B: Keyword / Organic Results Matching
     const candidateLink = interactiveElements.find(el => {
       if (el.isSponsored || el.isAd) return false;
       if (el.tag !== "a" && el.tag !== "div" && el.tag !== "li" && el.tag !== "h3" && el.tag !== "h2") return false;
@@ -1510,75 +1772,148 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
     }
   }
 
-  // 5. Form Filling (Populates registration, contact, application, and survey inputs)
-  if (taskType === "fill_form") {
-    const emptyField = interactiveElements.find(el => {
+  // 5. Add to Cart Task: specifically matches Add to Cart / Add to Bag / Add to Basket (Never confuses with Buy Now / Checkout)
+  if (taskType === "add_to_cart" || (/add to cart|add to bag|add to basket/i.test(goal?.rawRequest || goal?.originalGoal || "") && !stateManager.hasPerformedAction("add_to_cart"))) {
+    const cartBtn = interactiveElements.find(el => {
       if (el.isSponsored || el.isAd) return false;
-      if (el.tag !== "input" && el.tag !== "textarea") return false;
-      const type = (el.type || "").toLowerCase();
-      if (type === "hidden" || type === "submit" || type === "button" || type === "reset" || type === "image") return false;
-      if (el.value && String(el.value).trim().length > 0) return false;
-      return true;
+      const t = `${el.text || ""} ${el.value || ""} ${el.ariaLabel || ""} ${el.title || ""}`.toLowerCase();
+      return /^(?:add to (?:cart|bag|basket)|add item to cart)\b/i.test(t) ||
+             (/\b(?:add to cart|add to bag|add to basket)\b/i.test(t) && !/\b(?:buy now|checkout|place order)\b/i.test(t));
+    }) || interactiveElements.find(el => {
+      if (el.isSponsored || el.isAd) return false;
+      const t = `${el.text || ""} ${el.value || ""} ${el.ariaLabel || ""}`.toLowerCase();
+      return (el.tag === "button" || el.tag === "input" || el.role === "button") && /\b(?:cart|bag|basket)\b/i.test(t) && !/\b(?:view|go to|shopping)\b/i.test(t);
     });
 
-    if (emptyField) {
-      const type = (emptyField.type || "").toLowerCase();
-      const semType = emptyField.semanticType || "";
-      const fieldIdentifier = `${emptyField.name || ""} ${emptyField.placeholder || ""} ${emptyField.ariaLabel || ""} ${emptyField.id || ""}`.toLowerCase();
+    if (cartBtn) {
+      return {
+        actionType: "CLICK",
+        target: cartBtn.elementId,
+        parameters: {},
+        reasoningSummary: `Added item to cart via "${cartBtn.text || cartBtn.ariaLabel || cartBtn.value || 'Add to Cart'}".`
+      };
+    }
+  }
 
-      // Agreement Checkbox
+  // 6. Form Filling & Explicit Field Modification
+  if (taskType === "fill_form") {
+    // Phase 7.1: Explicit Overwrite Rule
+    let targetField = null;
+    let targetFillVal = null;
+    let targetReason = null;
+    let targetConstraintName = null;
+
+    // Helper to find constraint matching an element
+    const findMatchingConstraint = (el) => {
+      if (!Array.isArray(constraints) || constraints.length === 0) return null;
+      const semType = (el.semanticType || "").toLowerCase();
+      const type = (el.type || "").toLowerCase();
+      const fieldIdentifier = `${el.name || ""} ${el.id || ""} ${el.placeholder || ""} ${el.ariaLabel || ""} ${el.labelText || ""} ${el.text || ""}`.toLowerCase();
+
+      return constraints.find(c => {
+        const cName = String(c.name || c.attribute || "").toLowerCase().replace(/_/g, " ").trim();
+        if (!cName) return false;
+
+        const isTypeMatch =
+          (cName === "email" && (semType === "email" || type === "email" || /email/i.test(fieldIdentifier))) ||
+          (cName === "phone" && (semType === "phone" || type === "tel" || /phone|mobile|tel/i.test(fieldIdentifier))) ||
+          ((cName === "otp" || cName === "two factor code" || cName === "two_factor_code" || cName === "code" || cName === "auth code") && (semType === "otp" || /otp|2fa|code|two.?factor|auth.?otp/i.test(fieldIdentifier))) ||
+          ((cName === "name" || cName === "full name" || cName === "first name" || cName === "last name") && (semType === "name" || semType === "first_name" || semType === "last_name" || /name/i.test(fieldIdentifier))) ||
+          ((cName === "password" || cName === "account password") && (type === "password" || semType === "password" || /password/i.test(fieldIdentifier))) ||
+          (cName === "message" && (semType === "message" || el.tag === "textarea" || /message|comment/i.test(fieldIdentifier)));
+
+        const isNameMatch = cName === semType || fieldIdentifier.includes(cName) || cName.split(/\s+/).every(w => w.length > 2 && fieldIdentifier.includes(w));
+        return isTypeMatch || isNameMatch;
+      });
+    };
+
+    // Priority 1: Check elements in DOM order that match an explicit constraint whose value is not yet set
+    for (const el of interactiveElements) {
+      if (el.isSponsored || el.isAd) continue;
+      if (el.tag !== "input" && el.tag !== "textarea") continue;
+      const type = (el.type || "").toLowerCase();
+      if (type === "hidden" || type === "submit" || type === "button" || type === "reset" || type === "image") continue;
+
+      const matchingConstraint = findMatchingConstraint(el);
+      if (matchingConstraint) {
+        const cVal = matchingConstraint.value !== undefined && matchingConstraint.value !== null ? String(matchingConstraint.value) : "";
+        const currentVal = el.value !== undefined && el.value !== null ? String(el.value).trim() : "";
+        if (cVal && currentVal !== cVal.trim()) {
+          targetField = el;
+          targetFillVal = cVal;
+          targetConstraintName = matchingConstraint.name || matchingConstraint.attribute;
+          targetReason = `Updating form field "${el.name || el.id || el.elementId}" with requested value "${cVal}".`;
+          break;
+        }
+      }
+    }
+
+    // Priority 2: Generic Form Filling for unpopulated empty fields (when no element matched an explicit constraint with pending value)
+    if (!targetField) {
+      for (const el of interactiveElements) {
+        if (el.isSponsored || el.isAd) continue;
+        if (el.tag !== "input" && el.tag !== "textarea") continue;
+        const type = (el.type || "").toLowerCase();
+        if (type === "hidden" || type === "submit" || type === "button" || type === "reset" || type === "image") continue;
+        if (el.value && String(el.value).trim().length > 0) continue;
+
+        targetField = el;
+        const semType = (el.semanticType || "").toLowerCase();
+        const fieldIdentifier = `${el.name || ""} ${el.placeholder || ""} ${el.ariaLabel || ""} ${el.id || ""}`.toLowerCase();
+
+        if (type === "checkbox") {
+          return {
+            actionType: "CHECK",
+            target: el.elementId,
+            parameters: {},
+            reasoningSummary: `Checked terms or agreement checkbox "${el.name || el.ariaLabel || 'Agree'}".`
+          };
+        }
+
+        const matchingConstraint = findMatchingConstraint(el);
+        if (matchingConstraint && matchingConstraint.value) {
+          targetFillVal = matchingConstraint.value;
+          targetConstraintName = matchingConstraint.name || matchingConstraint.attribute;
+        } else {
+          if (semType === "email" || type === "email" || /email/i.test(fieldIdentifier)) {
+            targetFillVal = "user@example.com";
+          } else if (semType === "phone" || type === "tel" || /phone|mobile|tel/i.test(fieldIdentifier)) {
+            targetFillVal = "9876543210";
+          } else if (semType === "first_name" || /first.*name/i.test(fieldIdentifier)) {
+            targetFillVal = "John";
+          } else if (semType === "last_name" || /last.*name/i.test(fieldIdentifier)) {
+            targetFillVal = "Doe";
+          } else if (semType === "name" || /name/i.test(fieldIdentifier)) {
+            targetFillVal = "John Doe";
+          } else if (semType === "message" || el.tag === "textarea" || /message|comment|inquiry/i.test(fieldIdentifier)) {
+            targetFillVal = "Hello, I am interested in your service. Please reach out with details.";
+          } else {
+            targetFillVal = "Test Value";
+          }
+        }
+        targetReason = `Populating form field "${el.name || el.placeholder || el.ariaLabel || el.elementId}" with "${targetFillVal}".`;
+        break;
+      }
+    }
+
+    if (targetField && targetFillVal !== null) {
+      const type = (targetField.type || "").toLowerCase();
       if (type === "checkbox") {
         return {
           actionType: "CHECK",
-          target: emptyField.elementId,
+          target: targetField.elementId,
           parameters: {},
-          reasoningSummary: `Checked terms or agreement checkbox "${emptyField.name || emptyField.ariaLabel || 'Agree'}".`
+          reasoningSummary: targetReason || `Checked checkbox "${targetField.name || targetField.ariaLabel || 'Agree'}".`
         };
       }
-
-      // Check extracted user constraints for custom form data
-      let fillVal = null;
-      if (Array.isArray(constraints) && constraints.length > 0) {
-        const matchingConstraint = constraints.find(c => {
-          const cName = (c.name || c.attribute || "").toLowerCase();
-          return cName && (
-            cName === semType ||
-            fieldIdentifier.includes(cName) ||
-            (cName === "email" && (semType === "email" || type === "email")) ||
-            (cName === "phone" && (semType === "phone" || type === "tel")) ||
-            (cName === "name" && (semType === "name" || semType === "first_name" || semType === "last_name")) ||
-            (cName === "message" && (semType === "message" || emptyField.tag === "textarea"))
-          );
-        });
-        if (matchingConstraint) {
-          fillVal = matchingConstraint.value;
-        }
-      }
-
-      // Realistic domain defaults when no explicit value specified in prompt
-      if (!fillVal) {
-        if (semType === "email" || type === "email" || /email/i.test(fieldIdentifier)) {
-          fillVal = "user@example.com";
-        } else if (semType === "phone" || type === "tel" || /phone|mobile|tel/i.test(fieldIdentifier)) {
-          fillVal = "9876543210";
-        } else if (semType === "first_name" || /first.*name/i.test(fieldIdentifier)) {
-          fillVal = "John";
-        } else if (semType === "last_name" || /last.*name/i.test(fieldIdentifier)) {
-          fillVal = "Doe";
-        } else if (semType === "name" || /name/i.test(fieldIdentifier)) {
-          fillVal = "John Doe";
-        } else if (semType === "message" || emptyField.tag === "textarea" || /message|comment|inquiry/i.test(fieldIdentifier)) {
-          fillVal = "Hello, I am interested in your service. Please reach out with details.";
-        } else {
-          fillVal = "Test Value";
-        }
-      }
-
       return {
         actionType: "TYPE",
-        target: emptyField.elementId,
-        parameters: { text: String(fillVal) },
-        reasoningSummary: `Populating form field "${emptyField.name || emptyField.placeholder || emptyField.ariaLabel || emptyField.elementId}" with "${fillVal}".`
+        target: targetField.elementId,
+        parameters: { text: String(targetFillVal) },
+        isFieldFill: true,
+        fieldName: targetConstraintName || targetField.name || targetField.id || "field",
+        fieldValue: String(targetFillVal),
+        reasoningSummary: targetReason || `Populating field with "${targetFillVal}".`
       };
     }
 
@@ -1604,17 +1939,17 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
     taskType = "submit_form";
   }
 
-  // 6. Submit Form / Primary Action Execution
-  if (taskType === "submit_form" || taskType === "perform_action" || taskType === "submit_action") {
-    const actionKeywords = /\b(submit|send|send message|sign up|register|book now|continue|proceed|checkout|save|confirm|next|place order|add to cart|add to bag|buy now)\b/i;
+  // 7. Submit Form / Explicit User-Requested Final Action Execution
+  if (taskType === "submit_form" || taskType === "submit") {
     const actionBtn = interactiveElements.find(el => {
       if (el.isSponsored || el.isAd) return false;
-      const t = `${el.text || ""} ${el.value || ""} ${el.ariaLabel || ""}`.toLowerCase();
-      return actionKeywords.test(t);
+      const t = `${el.text || ""} ${el.value || ""} ${el.ariaLabel || ""} ${el.title || ""}`.toLowerCase();
+      return /^(?:submit|send|send message|sign up|register|book now|save|confirm|continue|proceed|complete|place order)\b/i.test(t) ||
+             /\b(?:confirm order|place order|submit form|confirm details)\b/i.test(t);
     }) || interactiveElements.find(el => !el.isSponsored && !el.isAd && (
       (el.tag === "button" && el.type === "submit") ||
       (el.tag === "input" && el.type === "submit") ||
-      (el.tag === "button" && /submit|send|save|next/i.test(el.text || ""))
+      (el.tag === "button" && /submit|send|save|next|confirm|continue/i.test(el.text || ""))
     ));
 
     if (actionBtn) {
@@ -1627,7 +1962,35 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
     }
   }
 
-  // 7. General Clickable Element Fallback (Organic, non-ad)
+  // 7b. Perform Generic User-Requested UI Action (e.g. subscribe, follow, star, like, bookmark, download, share, pin, play, favorite, join)
+  const actionIntent = currentTask?.actionIntent || goal?.actionIntent || (currentTask?.type === "perform_action" ? currentTask.actionIntent : null);
+  if (taskType === "perform_action" || (actionIntent && !stateManager.hasPerformedAction(actionIntent))) {
+    const intentVerb = String(actionIntent || "").toLowerCase().trim();
+    if (intentVerb) {
+      const intentRegex = new RegExp(`\\b${intentVerb}\\b`, "i");
+      const targetBtn = interactiveElements.find(el => {
+        if (el.isSponsored || el.isAd) return false;
+        const text = `${el.text || ""} ${el.ariaLabel || ""} ${el.title || ""} ${el.value || ""}`.toLowerCase();
+        return intentRegex.test(text);
+      }) || interactiveElements.find(el => {
+        if (el.isSponsored || el.isAd) return false;
+        const text = `${el.text || ""} ${el.ariaLabel || ""}`.toLowerCase();
+        return text.includes(intentVerb);
+      });
+
+      if (targetBtn) {
+        return {
+          actionType: "CLICK",
+          target: targetBtn.elementId,
+          parameters: {},
+          actionIntent: intentVerb,
+          reasoningSummary: `Executing user-requested action "${intentVerb}" via "${targetBtn.text || targetBtn.ariaLabel || targetBtn.value || intentVerb}".`
+        };
+      }
+    }
+  }
+
+  // 8. General Clickable Element Fallback (Organic, non-ad)
   const generalAction = interactiveElements.find(el =>
     !el.isSponsored && !el.isAd &&
     (el.tag === "button" || el.tag === "a") &&
@@ -1663,21 +2026,36 @@ if (runTaskButton) {
     if (aiAgentPayloadCard) aiAgentPayloadCard.hidden = true;
 
     const startTime = Date.now();
-    relayToTerminalLog("User Request", "Received user task instruction", { task: userTask });
+    const safeTaskMeta = ActiveSanitizeTelemetryTask ? ActiveSanitizeTelemetryTask(userTask) : { task: userTask };
+    relayToTerminalLog("User Request", "Received user task instruction", safeTaskMeta);
 
     try {
       // 1. Goal Decomposition into structured objectives and constraints
       const parsedGoal = ActiveGoalParser.parse(userTask);
       relayToTerminalLog("Goal Decomposition", "Parsed user goal and constraints", {
-        summary: parsedGoal.summary,
-        targetEntity: parsedGoal.targetEntity,
-        constraints: parsedGoal.constraints,
+        domain: parsedGoal.domain,
+        summary: parsedGoal.summary || parsedGoal.originalGoal,
         operations: parsedGoal.operations,
-        domain: parsedGoal.domain
+        constraintCount: parsedGoal.constraints?.length || 0
       });
 
-      // 2. Initialize dynamic task planner and execution state manager
-      const planner = new ActiveTaskPlanner(parsedGoal);
+      // 2. Query active browser tab context
+      let activeTab = null;
+      if (typeof chrome !== "undefined" && chrome.tabs?.query) {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        activeTab = tabs?.[0] || (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))?.[0] || null;
+      }
+
+      const currentUrl = activeTab?.url || "";
+      const isInternal = !currentUrl || currentUrl.startsWith("chrome://") || currentUrl.startsWith("about:") || currentUrl.startsWith("chrome-extension://") || currentUrl.startsWith("devtools://");
+      const currentBrowserContext = {
+        url: currentUrl,
+        title: activeTab?.title || "",
+        isInternalPage: isInternal
+      };
+
+      // 3. Initialize dynamic task planner and execution state manager with live context
+      const planner = new ActiveTaskPlanner(parsedGoal, currentBrowserContext);
       relayToTerminalLog("Task Plan", `Generated ${planner.tasks.length} initial sub-tasks`, planner.getPlanSummary());
 
       const stateManager = new ActiveExecutionStateManager({
@@ -1686,20 +2064,13 @@ if (runTaskButton) {
         maxConsecutiveFailures: 3
       });
 
-      // 3. Obtain API settings
+      // 4. Obtain API settings
       const userKey = (apiKeyInput?.value || "").trim();
       const provider = providerSelect?.value || DEFAULT_PROVIDER;
       const apiKey = userKey || getDefaultKeyForProvider(provider);
       const selectedModel = (modelInput?.value || "").trim() || getDefaultModelForProvider(provider);
 
-      // 4. Auto-Navigation if needed
-      let activeTab = null;
-      if (typeof chrome !== "undefined" && chrome.tabs?.query) {
-        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        activeTab = tabs?.[0] || (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))?.[0] || null;
-      }
-
-      const currentUrl = activeTab?.url || "";
+      // 5. Auto-Navigation if needed
       const targetNavUrl = extractNavigationUrl(userTask, currentUrl, parsedGoal);
 
       if (targetNavUrl) {
@@ -1744,6 +2115,21 @@ if (runTaskButton) {
         const piiFindings = scanRes?.summary || { totalFindings: 0 };
         renderPiiSummary(piiFindings);
 
+        // 5.2b Task-Aware Privacy Evaluation for Live Transparency (Phase 7)
+        if (Array.isArray(piiFindings.localizedItems) && piiFindings.localizedItems.length > 0) {
+          const taskContext = typeof ActiveEvaluatePiiTaskRelevance === "function"
+            ? ActiveEvaluatePiiTaskRelevance({ userInstruction: userTask, piiItems: piiFindings.localizedItems })
+            : { piiRelevance: [] };
+          const stepDecisions = typeof ActiveEvaluateBatchPrivacyPolicy === "function"
+            ? ActiveEvaluateBatchPrivacyPolicy({
+                piiItems: piiFindings.localizedItems,
+                contextAnalysis: taskContext,
+                destination: ActiveProcessingDestinations.REMOTE_REASONING
+              })
+            : [];
+          renderPrivacyTransparency(stepDecisions);
+        }
+
         // 5.3 Discover Interactive Elements on the CURRENT page state
         let observeErr = null;
         let observeRes = await sendTabMessage({ type: "OBSERVE_INTERACTIVE_DOM" }).catch((err) => {
@@ -1762,8 +2148,15 @@ if (runTaskButton) {
         const pageTitle = observeRes?.pageTitle || "";
         const pageUrl = observeRes?.url || "";
 
-        // 5.4 Capture On-Device Sanitized Screenshot (Masks all visual PII boxes)
-        const sanitizedScreenshot = await captureSanitizedScreenshot(piiFindings.localizedItems || []);
+        // 5.4 Capture On-Device Sanitized Screenshot (Masks all visual PII boxes using Active Tab Coordinates)
+        const tabViewportContext = piiFindings.viewport || {
+          viewportWidth: observeRes?.viewportWidth || 1280,
+          viewportHeight: observeRes?.viewportHeight || 800,
+          scrollX: observeRes?.scrollX || 0,
+          scrollY: observeRes?.scrollY || 0,
+          devicePixelRatio: observeRes?.devicePixelRatio || 1
+        };
+        const sanitizedScreenshot = await captureSanitizedScreenshot(piiFindings.localizedItems || [], tabViewportContext);
 
         stateManager.updateObservation({
           url: pageUrl,
@@ -1871,6 +2264,7 @@ if (runTaskButton) {
               target: visionResult.action.target,
               parameters: visionResult.action.parameters,
               thenPressEnter: visionResult.action.thenPressEnter,
+              actionIntent: visionResult.action.actionIntent || currentTask.actionIntent || parsedGoal.actionIntent,
               isFilter: visionResult.action.isFilter,
               filterName: visionResult.action.filterName,
               filterValue: visionResult.action.filterValue
@@ -1961,10 +2355,12 @@ if (runTaskButton) {
         }
 
         // 5.10 State Tracking & Loop Safeguards
+        const resolvedIntent = stepProposal.actionIntent || currentTask.actionIntent || parsedGoal.actionIntent || null;
         const outcome = stateManager.recordActionOutcome({
           actionType,
           target: targetId,
           parameters,
+          actionIntent: resolvedIntent,
           ok: Boolean(execRes?.ok),
           status: execRes?.status || (execRes?.ok ? "COMPLETED" : "FAILED_EXECUTION"),
           error: execRes?.error,
@@ -1978,6 +2374,7 @@ if (runTaskButton) {
           status: execRes?.status || (execRes?.ok ? "COMPLETED" : "FAILED_EXECUTION"),
           actionType,
           targetId,
+          actionIntent: resolvedIntent,
           reason: reasoningSummary,
           error: execRes?.error
         };
@@ -1993,6 +2390,9 @@ if (runTaskButton) {
         } else {
           if (stepProposal?.isFilter && stepProposal?.filterName) {
             stateManager.recordFilter(stepProposal.filterName, stepProposal.filterValue || "");
+          }
+          if (stepProposal?.isFieldFill && stepProposal?.fieldName) {
+            stateManager.recordFieldFilled?.(stepProposal.fieldName, stepProposal.fieldValue || "");
           }
           planner.completeCurrentTask({
             targetId,
@@ -2104,7 +2504,8 @@ if (runTaskButton) {
     } catch (err) {
       setPipelineStage("FAILED / DENIED");
       status.textContent = `Task execution error: ${err.message || "Cannot inspect tab."}`;
-      relayToTerminalLog("Pipeline Error", err.message, { error: err.message }, "error");
+      const safeErr = ActiveSanitizeTelemetryError ? ActiveSanitizeTelemetryError(err) : { error: err.message };
+      relayToTerminalLog("Pipeline Error", safeErr.message || "Execution error", safeErr, "error");
     }
   });
 }

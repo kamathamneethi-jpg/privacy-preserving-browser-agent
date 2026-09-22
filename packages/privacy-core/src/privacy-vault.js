@@ -43,6 +43,84 @@ export function createLocalPrivacyVault(customConfig = {}) {
 
   // In-memory private storage map: vaultId -> private Record object
   const vaultStore = new Map();
+  // In-memory private token mapping: token -> vaultId
+  const tokenMap = new Map();
+
+  /**
+   * Registers an opaque token to a stored vault ID.
+   *
+   * @param {string} token
+   * @param {string} vaultId
+   * @returns {boolean}
+   */
+  function registerToken(token, vaultId) {
+    if (!token || typeof token !== "string" || !vaultId || typeof vaultId !== "string") {
+      return false;
+    }
+    if (!vaultStore.has(vaultId)) {
+      return false;
+    }
+    tokenMap.set(token, vaultId);
+    return true;
+  }
+
+  /**
+   * Returns the vaultId associated with an opaque token.
+   *
+   * @param {string} token
+   * @returns {string|null}
+   */
+  function getVaultIdForToken(token) {
+    if (!token || typeof token !== "string") return null;
+    return tokenMap.get(token) || null;
+  }
+
+  /**
+   * Stores a sensitive secret and maps it to an opaque token.
+   *
+   * @param {string} token
+   * @param {object} params
+   * @returns {object}
+   */
+  function storeSecretWithToken(token, params = {}) {
+    const storeResult = storeSecret(params);
+    if (!storeResult.ok) {
+      return storeResult;
+    }
+    if (token && typeof token === "string") {
+      tokenMap.set(token, storeResult.vaultId);
+    }
+    return Object.freeze({
+      ...storeResult,
+      token: token || undefined
+    });
+  }
+
+  /**
+   * Retrieves a secret by its associated opaque token.
+   *
+   * @param {string} token
+   * @param {object} params
+   * @returns {object}
+   */
+  function retrieveSecretByToken(token, params = {}) {
+    if (!token || typeof token !== "string") {
+      return Object.freeze({
+        ok: false,
+        result: VAULT_ACCESS_RESULTS.DENIED_NOT_FOUND,
+        reason: "Invalid or missing token for secret retrieval."
+      });
+    }
+    const vaultId = tokenMap.get(token);
+    if (!vaultId) {
+      return Object.freeze({
+        ok: false,
+        result: VAULT_ACCESS_RESULTS.DENIED_NOT_FOUND,
+        reason: "No vault entry associated with provided token."
+      });
+    }
+    return retrieveSecret({ ...params, vaultId });
+  }
 
   /**
    * Cleans up expired entries internally, wiping secret material from memory.
@@ -412,6 +490,7 @@ export function createLocalPrivacyVault(customConfig = {}) {
       record.secretValue = null;
     }
     vaultStore.clear();
+    tokenMap.clear();
   }
 
   /**
@@ -431,6 +510,10 @@ export function createLocalPrivacyVault(customConfig = {}) {
   return Object.freeze({
     storeSecret,
     retrieveSecret,
+    storeSecretWithToken,
+    retrieveSecretByToken,
+    registerToken,
+    getVaultIdForToken,
     hasSecret,
     getVaultMetadata,
     listVaultMetadata,
@@ -452,6 +535,22 @@ export function storeSecret(params) {
 
 export function retrieveSecret(params) {
   return privacyVault.retrieveSecret(params);
+}
+
+export function storeSecretWithToken(token, params) {
+  return privacyVault.storeSecretWithToken(token, params);
+}
+
+export function retrieveSecretByToken(token, params) {
+  return privacyVault.retrieveSecretByToken(token, params);
+}
+
+export function registerToken(token, vaultId) {
+  return privacyVault.registerToken(token, vaultId);
+}
+
+export function getVaultIdForToken(token) {
+  return privacyVault.getVaultIdForToken(token);
 }
 
 export function hasSecret(vaultId) {
@@ -481,3 +580,4 @@ export function clearVault() {
 export function cleanupExpiredEntries() {
   return privacyVault.cleanupExpiredEntries();
 }
+

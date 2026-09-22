@@ -2,6 +2,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { sanitizeTelemetryData, evaluateMixedContentDemo } from "../packages/privacy-core/src/index.js";
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8765;
 const HOST = process.env.HOST || "127.0.0.1";
@@ -36,8 +37,9 @@ export const eventStore = {
 
     const stage = (rawPayload.stage || rawPayload.category || "GENERAL").toUpperCase();
     const event = rawPayload.event || rawPayload.action || "EVENT";
-    const data = rawPayload.data !== undefined ? rawPayload.data : rawPayload.payload || {};
-    const metadata = rawPayload.metadata || {};
+    const rawData = rawPayload.data !== undefined ? rawPayload.data : rawPayload.payload || {};
+    const data = sanitizeTelemetryData(rawData);
+    const metadata = sanitizeTelemetryData(rawPayload.metadata || {});
 
     const entry = {
       id,
@@ -656,6 +658,9 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <button class="tab-btn" data-tab="dom">
         🔍 DOM & Vision <span id="tab-count-dom" class="tab-badge">0</span>
       </button>
+      <button class="tab-btn" data-tab="privacy">
+        🛡️ Privacy Transparency <span id="tab-count-privacy" class="tab-badge">0</span>
+      </button>
       <button class="tab-btn" data-tab="diagnostics">
         🩺 Diagnostics & Health
       </button>
@@ -783,6 +788,109 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
       </div>
     </div>
+
+    <!-- TAB 5: Privacy Transparency & Reviewer Demonstration -->
+    <div id="pane-privacy" class="tab-pane">
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        <!-- Top Banner with Live Verification Sandbox Runner -->
+        <div class="metric-card" style="border-left: 4px solid var(--accent-green); background: #0b1522;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 8px;">
+            <div>
+              <div style="font-weight: 700; font-size: 16px; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
+                <span>🛡️ PolicyEngine Reviewer Transparency Matrix</span>
+                <span id="privacy-demo-badge" class="status-pill" style="font-size: 10px;">Authoritative 4-Way Decision Engine</span>
+              </div>
+              <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+                Demonstrating that a single PolicyEngine decision is consistently enforced across DOM, Screenshot, Remote Payload, Telemetry, and PrivacyVault.
+              </div>
+            </div>
+            <button id="btn-run-privacy-demo" class="btn" style="background: #059669; color: #ffffff; font-weight: 700; border-color: #10b981; padding: 8px 16px; cursor: pointer;">
+              ▶ Run Mixed-Content Verification
+            </button>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-top: 12px;">
+            <div style="padding: 10px; background: rgba(52, 211, 153, 0.08); border: 1px solid rgba(52, 211, 153, 0.25); border-radius: 6px;">
+              <div style="font-weight: 700; font-size: 12px; color: #34d399; margin-bottom: 2px;">🟢 ALLOW (Green)</div>
+              <div style="font-size: 11px; color: var(--text-muted);">Public & safe context permitted for task. Original value preserved across all representations.</div>
+            </div>
+            <div style="padding: 10px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 6px;">
+              <div style="font-weight: 700; font-size: 12px; color: #f87171; margin-bottom: 2px;">🔴 TOKENIZE (Red)</div>
+              <div style="font-size: 11px; color: var(--text-muted);">Sensitive data tokenized with opaque identifier for remote reasoning; raw value stored in local vault only.</div>
+            </div>
+            <div style="padding: 10px; background: rgba(148, 163, 184, 0.08); border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 6px;">
+              <div style="font-weight: 700; font-size: 12px; color: #94a3b8; margin-bottom: 2px;">⚫ REDACT (Black)</div>
+              <div style="font-size: 11px; color: var(--text-muted);">Unnecessary or unverified sensitive data stripped/masked. Original value completely removed.</div>
+            </div>
+            <div style="padding: 10px; background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.25); border-radius: 6px;">
+              <div style="font-weight: 700; font-size: 12px; color: #c084fc; margin-bottom: 2px;">🔒 LOCAL_ONLY (Purple)</div>
+              <div style="font-size: 11px; color: var(--text-muted);">Critical secrets (passwords, OTPs, CVVs) strictly isolated in on-device memory; zero remote egress.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Verification Results Container -->
+        <div id="privacy-demo-results-box" class="metric-card" style="display: none;">
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px; margin-bottom: 12px;">
+            <div style="font-weight: 700; font-size: 14px; color: var(--text-main);">
+              Mixed-Content Synthetic Verification Matrix (7 Information Classes)
+            </div>
+            <span id="privacy-demo-consistency-tag" style="font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px; background: rgba(52, 211, 153, 0.15); color: #34d399;">
+              ✔ 100% Boundary Consistency Verified
+            </span>
+          </div>
+
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Information Class</th>
+                  <th>Category</th>
+                  <th>Role & Necessity</th>
+                  <th>Authoritative Decision</th>
+                  <th>DOM Representation</th>
+                  <th>Screenshot</th>
+                  <th>Remote Payload</th>
+                  <th>Telemetry Metadata</th>
+                  <th>PrivacyVault</th>
+                </tr>
+              </thead>
+              <tbody id="privacy-demo-table-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Live Session Decisions Table -->
+        <div class="metric-card">
+          <div style="font-weight: 700; font-size: 14px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px; margin-bottom: 12px;">
+            Live Session Privacy Decisions (From Connected Extension)
+          </div>
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Entity ID</th>
+                  <th>Category</th>
+                  <th>Semantic Role</th>
+                  <th>Task Necessity</th>
+                  <th>Decision</th>
+                  <th>Reason Code</th>
+                  <th>Token Identifier</th>
+                </tr>
+              </thead>
+              <tbody id="session-privacy-table-body">
+                <tr>
+                  <td colspan="8" style="text-align: center; color: var(--text-dim); padding: 30px;">
+                    No live privacy decisions recorded in current session. Run a task in the extension to view live decisions.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
   </main>
 
   <!-- Screenshot Modal View -->
@@ -805,6 +913,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       filter: "ALL",
       activeTab: "timeline",
       apiCalls: [],
+      privacyDecisions: [],
       lastScreenshotUrl: null,
       stats: {
         totalEvents: 0,
@@ -931,7 +1040,25 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         document.getElementById("dom-elements-json").textContent = JSON.stringify(event.data.sample, null, 2);
       }
 
-      // Redactions / Screenshot
+      // Privacy Decisions & Redactions
+      if (e.includes("PRIVACY_DECISION") || s.includes("PRIVACY") || event.data?.decision || event.data?.decisions) {
+        if (event.data?.decision) {
+          state.privacyDecisions.push({
+            timeShort: event.timeShort,
+            ...event.data
+          });
+          renderPrivacyTable();
+        } else if (Array.isArray(event.data?.decisions)) {
+          for (const d of event.data.decisions) {
+            state.privacyDecisions.push({
+              timeShort: event.timeShort,
+              ...d
+            });
+          }
+          renderPrivacyTable();
+        }
+      }
+
       if (event.data?.piiCount !== undefined || event.data?.redactedCount !== undefined) {
         const count = event.data.piiCount || event.data.redactedCount || 0;
         state.stats.redactionsCount += count;
@@ -962,6 +1089,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       document.getElementById("tab-count-timeline").textContent = state.events.length;
       document.getElementById("tab-count-api").textContent = state.apiCalls.length;
       document.getElementById("tab-count-dom").textContent = state.stats.elementsCount;
+      const privTabCount = document.getElementById("tab-count-privacy");
+      if (privTabCount) privTabCount.textContent = state.privacyDecisions.length;
 
       if (state.stats.apiLatencies.length > 0) {
         const avg = Math.round(state.stats.apiLatencies.reduce((a,b)=>a+b,0) / state.stats.apiLatencies.length);
@@ -1128,6 +1257,101 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       if (e.target === modal) modal.classList.add("hidden");
     });
 
+    // Privacy Decision Table Rendering
+    function renderPrivacyTable() {
+      const tbody = document.getElementById("session-privacy-table-body");
+      if (!tbody) return;
+      if (state.privacyDecisions.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-dim); padding: 30px;">No live privacy decisions recorded in current session. Run a task in the extension to view live decisions.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = "";
+      for (const d of state.privacyDecisions) {
+        const tr = document.createElement("tr");
+        const badgeColor = d.decision === "ALLOW" ? "#34d399" : (d.decision === "TOKENIZE" ? "#f87171" : (d.decision === "LOCAL_ONLY" ? "#c084fc" : "#94a3b8"));
+        const badgeBg = d.decision === "ALLOW" ? "rgba(52, 211, 153, 0.15)" : (d.decision === "TOKENIZE" ? "rgba(239, 68, 68, 0.15)" : (d.decision === "LOCAL_ONLY" ? "rgba(168, 85, 247, 0.15)" : "rgba(148, 163, 184, 0.12)"));
+        const icon = d.decision === "ALLOW" ? "🟢" : (d.decision === "TOKENIZE" ? "🔴" : (d.decision === "LOCAL_ONLY" ? "🔒" : "⚫"));
+
+        const timeText = d.timeShort || "--";
+        const idText = d.piiId || d.id || "--";
+        const catText = d.category || "--";
+        const roleText = d.semanticRole || "unknown";
+        const necText = d.taskNecessity || "unknown";
+        const reasonText = (d.reasonCodes && d.reasonCodes[0]) || d.reasonCode || "--";
+        const tokenText = d.token || "--";
+
+        tr.innerHTML = "<td>" + timeText + "</td>" +
+          "<td style='font-family: var(--font-mono); font-weight: 600;'>" + idText + "</td>" +
+          "<td>" + catText + "</td>" +
+          "<td><span style='font-size: 11px; color: var(--text-muted);'>" + roleText + "</span></td>" +
+          "<td><span style='font-size: 11px; color: var(--text-dim);'>" + necText + "</span></td>" +
+          "<td><span style='display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; background: " + badgeBg + "; color: " + badgeColor + ";'><span>" + icon + "</span> " + d.decision + "</span></td>" +
+          "<td style='font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);'>" + reasonText + "</td>" +
+          "<td style='font-family: var(--font-mono); font-size: 11px; color: var(--accent-cyan);'>" + tokenText + "</td>";
+        tbody.appendChild(tr);
+      }
+    }
+
+    // Interactive Reviewer Mixed-Content Demo Runner
+    const btnRunDemo = document.getElementById("btn-run-privacy-demo");
+    if (btnRunDemo) {
+      btnRunDemo.addEventListener("click", async () => {
+        btnRunDemo.textContent = "⏳ Running Verification...";
+        btnRunDemo.disabled = true;
+        try {
+          const res = await fetch("/api/privacy/demo");
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const data = await res.json();
+
+          const resultsBox = document.getElementById("privacy-demo-results-box");
+          const tableBody = document.getElementById("privacy-demo-table-body");
+          const consistencyTag = document.getElementById("privacy-demo-consistency-tag");
+
+          if (resultsBox && tableBody) {
+            resultsBox.style.display = "block";
+            tableBody.innerHTML = "";
+
+            if (data.allConsistent) {
+              consistencyTag.textContent = "✔ 100% Boundary Consistency Verified (7/7 Classes)";
+              consistencyTag.style.background = "rgba(52, 211, 153, 0.15)";
+              consistencyTag.style.color = "#34d399";
+            } else {
+              consistencyTag.textContent = "⚠️ Inconsistency Detected";
+              consistencyTag.style.background = "rgba(239, 68, 68, 0.15)";
+              consistencyTag.style.color = "#f87171";
+            }
+
+            for (const row of (data.matrix || [])) {
+              const tr = document.createElement("tr");
+              const b = row.badge;
+              const badgeBg = b.color === "GREEN" ? "rgba(52, 211, 153, 0.15)" : (b.color === "RED" ? "rgba(239, 68, 68, 0.15)" : (b.color === "PURPLE" ? "rgba(168, 85, 247, 0.15)" : "rgba(148, 163, 184, 0.12)"));
+              const badgeColor = b.color === "GREEN" ? "#34d399" : (b.color === "RED" ? "#f87171" : (b.color === "PURPLE" ? "#c084fc" : "#94a3b8"));
+              const domColor = b.color === "GREEN" ? "#34d399" : (b.color === "RED" ? "#f87171" : "#94a3b8");
+              const ssColor = b.color === "GREEN" ? "#34d399" : "#f87171";
+              const vaultColor = row.representations.vault.indexOf("Stored") !== -1 ? "#c084fc" : "var(--text-dim)";
+
+              tr.innerHTML = "<td style='font-weight: 600; color: var(--text-main);'>" + row.name + "</td>" +
+                "<td><code style='color: var(--accent-cyan);'>" + row.category + "</code></td>" +
+                "<td><div style='font-size: 11px;'>Role: <strong>" + row.semanticRole + "</strong></div><div style='font-size: 10px; color: var(--text-dim);'>" + row.taskNecessity + "</div></td>" +
+                "<td><span style='display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; background: " + badgeBg + "; color: " + badgeColor + ";'><span>" + b.icon + "</span> " + b.label + "</span><div style='font-size: 9px; font-family: var(--font-mono); color: var(--text-dim); margin-top: 2px;'>" + row.reasonCode + "</div></td>" +
+                "<td style='font-family: var(--font-mono); font-size: 11px; color: " + domColor + ";'>" + row.representations.dom + "</td>" +
+                "<td style='font-size: 11px; color: " + ssColor + ";'>" + row.representations.screenshot + "</td>" +
+                "<td style='font-family: var(--font-mono); font-size: 11px; color: " + domColor + ";'>" + row.representations.remotePayload + "</td>" +
+                "<td style='font-size: 11px; color: #34d399;'>" + row.representations.telemetry + "</td>" +
+                "<td style='font-size: 11px; color: " + vaultColor + ";'>" + row.representations.vault + "</td>";
+
+              tableBody.appendChild(tr);
+            }
+          }
+        } catch (err) {
+          alert("Failed to run privacy verification demo: " + err.message);
+        } finally {
+          btnRunDemo.textContent = "▶ Re-Run Mixed-Content Verification";
+          btnRunDemo.disabled = false;
+        }
+      });
+    }
+
     // Clear logs button
     document.getElementById("btn-clear").addEventListener("click", async () => {
       if (!confirm("Clear all recorded telemetry history?")) return;
@@ -1135,11 +1359,13 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         await fetch("/api/events", { method: "DELETE" });
         state.events = [];
         state.apiCalls = [];
+        state.privacyDecisions = [];
         state.stats = { totalEvents: 0, agentSteps: 0, apiCalls: 0, apiLatencies: [], elementsCount: 0, redactionsCount: 0 };
         diagBanner.classList.add("hidden");
         updateMetricsUI();
         renderTimeline();
         renderApiTable();
+        renderPrivacyTable();
       } catch (err) {
         alert("Failed to clear: " + err.message);
       }
@@ -1179,8 +1405,10 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           if (event.event === "LOGS_CLEARED") {
             state.events = [];
             state.apiCalls = [];
+            state.privacyDecisions = [];
             renderTimeline();
             renderApiTable();
+            renderPrivacyTable();
             return;
           }
           processEvent(event);
@@ -1327,39 +1555,50 @@ export function computeAutonomousAgentDecision({
     }
   }
 
-  // 4. Select Item / Product: find genuine product result (skip sponsored ads)
-  if (taskType === "select_item" || taskType === "navigate" || taskType === "general_action") {
+  // 4. Select Candidate / Item: find genuine product or search result (skip sponsored ads)
+  if (taskType === "select_candidate" || taskType === "select_item" || taskType === "inspect" || taskType === "inspect_candidate" || taskType === "navigate" || taskType === "general_action") {
     const productItem = interactiveElements.find(el => {
-      if (el.isSponsored) return false;
+      if (el.isSponsored || el.isAd) return false;
       if (el.isFilter) return false;
       if (el.tag === "button" && ((el.text || "").toLowerCase().includes("search") || (el.text || "").toLowerCase().includes("go"))) return false;
       if (el.isProductResult) return true;
-      const text = (el.text || "").toLowerCase();
-      return (el.tag === "a" || el.tag === "div") && text.length > 15 && !text.includes("sign in") && !text.includes("cart") && !text.includes("help");
+      const text = (el.text || el.ariaLabel || "").toLowerCase();
+      return (el.tag === "a" || el.tag === "div" || el.tag === "li" || el.tag === "h3" || el.tag === "h2") &&
+        text.length > 10 &&
+        !/\b(sign in|login|register|cart|basket|home|help|privacy|terms|menu)\b/i.test(text);
     });
 
     if (productItem) {
+      const isCartNext = /add to cart|add to bag|add to basket/i.test(goalSummary);
+      const isPerformActionNext = Boolean(goal.actionIntent || currentTask?.actionIntent || taskType === "perform_action");
+      const nextTask = isCartNext ? "add_to_cart" : (isPerformActionNext ? "perform_action" : "submit");
       return {
         ok: true,
-        observation: `Identified authentic product item [${productItem.elementId || productItem.id}]: "${(productItem.text || "").slice(0, 50)}...".`,
-        goal_progress: { isSatisfied: false, remainingTasks: ["add_to_cart"] },
-        next_task: "add_to_cart",
+        observation: `Identified authentic candidate item [${productItem.elementId || productItem.id}]: "${(productItem.text || productItem.ariaLabel || '').slice(0, 50)}...".`,
+        goal_progress: { isSatisfied: false, remainingTasks: [nextTask] },
+        next_task: nextTask,
         action: {
           actionType: "CLICK",
           target: productItem.elementId || productItem.id,
           parameters: {},
           thenPressEnter: false,
-          reasoningSummary: `Click on matching authentic product result "${(productItem.text || "").slice(0, 50)}".`
+          reasoningSummary: `Click on matching authentic candidate result "${(productItem.text || productItem.ariaLabel || '').slice(0, 50)}".`
         }
       };
     }
   }
 
-  // 5. Add to cart
-  if (taskType === "add_to_cart") {
+  // 5. Add to Cart: strictly matches Add to Cart / Add to Bag / Add to Basket (preserves user intent)
+  if (taskType === "add_to_cart" || (/add to cart|add to bag|add to basket/i.test(goalSummary) && !actionHistory.some(a => /add to cart|cart|bag/i.test(a)))) {
     const cartBtn = interactiveElements.find(el => {
+      if (el.isSponsored || el.isAd) return false;
+      const text = ((el.text || "") + " " + (el.value || "") + " " + (el.ariaLabel || "") + " " + (el.title || "")).toLowerCase();
+      return /^(?:add to (?:cart|bag|basket)|add item to cart)\b/i.test(text) ||
+             (/\b(?:add to cart|add to bag|add to basket)\b/i.test(text) && !/\b(?:buy now|checkout|place order)\b/i.test(text));
+    }) || interactiveElements.find(el => {
+      if (el.isSponsored || el.isAd) return false;
       const text = ((el.text || "") + " " + (el.value || "") + " " + (el.ariaLabel || "")).toLowerCase();
-      return (el.tag === "button" || el.tag === "input" || el.tag === "a") && (text.includes("add to cart") || text.includes("buy now") || text.includes("add to bag") || text.includes("add to basket"));
+      return (el.tag === "button" || el.tag === "input" || el.role === "button") && /\b(?:cart|bag|basket)\b/i.test(text) && !/\b(?:view|go to)\b/i.test(text);
     });
 
     if (cartBtn) {
@@ -1379,8 +1618,102 @@ export function computeAutonomousAgentDecision({
     }
   }
 
-  // 6. Generic first actionable element
-  const firstActionable = interactiveElements.find(el => el.tag === "button" || el.tag === "a" || el.tag === "input");
+  // 5b. Generic UI Action Task (e.g., subscribe, follow, star, like, bookmark, download, share, pin, play, favorite, join)
+  const actionIntent = currentTask?.actionIntent || goal?.actionIntent;
+  if (taskType === "perform_action" || (actionIntent && !actionHistory.some(a => String(a).toLowerCase().includes(String(actionIntent).toLowerCase())))) {
+    const intentVerb = String(actionIntent || "").toLowerCase().trim();
+    if (intentVerb) {
+      const intentRegex = new RegExp(`\\b${intentVerb}\\b`, "i");
+      const targetBtn = interactiveElements.find(el => {
+        if (el.isSponsored || el.isAd) return false;
+        const text = `${el.text || ""} ${el.ariaLabel || ""} ${el.title || ""} ${el.value || ""}`.toLowerCase();
+        return intentRegex.test(text);
+      }) || interactiveElements.find(el => {
+        if (el.isSponsored || el.isAd) return false;
+        const text = `${el.text || ""} ${el.ariaLabel || ""}`.toLowerCase();
+        return text.includes(intentVerb);
+      });
+
+      if (targetBtn) {
+        return {
+          ok: true,
+          observation: `Found target element for requested action "${intentVerb}" [${targetBtn.elementId || targetBtn.id}].`,
+          goal_progress: { isSatisfied: true, remainingTasks: [] },
+          next_task: null,
+          action: {
+            actionType: "CLICK",
+            target: targetBtn.elementId || targetBtn.id,
+            parameters: {},
+            actionIntent: intentVerb,
+            thenPressEnter: false,
+            reasoningSummary: `Click "${targetBtn.text || targetBtn.ariaLabel || intentVerb}" to perform requested ${intentVerb} action.`
+          }
+        };
+      }
+    }
+  }
+
+  // 6. Form Filling
+  if (taskType === "fill_form") {
+    const emptyField = interactiveElements.find(el => {
+      if (el.isSponsored || el.isAd) return false;
+      if (el.tag !== "input" && el.tag !== "textarea") return false;
+      const type = (el.type || "").toLowerCase();
+      if (type === "hidden" || type === "submit" || type === "button" || type === "reset") return false;
+      return !el.value || String(el.value).trim().length === 0;
+    });
+
+    if (emptyField) {
+      const semType = emptyField.semanticType || (emptyField.type || "").toLowerCase();
+      const fieldId = `${emptyField.name || ""} ${emptyField.placeholder || ""} ${emptyField.ariaLabel || ""}`.toLowerCase();
+      let fillVal = "user@example.com";
+      if (semType === "phone" || /phone|mobile|tel/i.test(fieldId)) fillVal = "9876543210";
+      else if (semType === "name" || /name/i.test(fieldId)) fillVal = "John Doe";
+      else if (semType === "message" || emptyField.tag === "textarea") fillVal = "Hello, requesting information.";
+
+      return {
+        ok: true,
+        observation: `Populating form field [${emptyField.elementId || emptyField.id}].`,
+        goal_progress: { isSatisfied: false, remainingTasks: ["submit_form"] },
+        next_task: "submit_form",
+        action: {
+          actionType: "TYPE",
+          target: emptyField.elementId || emptyField.id,
+          parameters: { text: fillVal },
+          thenPressEnter: false,
+          reasoningSummary: `Fill form field with "${fillVal}".`
+        }
+      };
+    }
+  }
+
+  // 7. Submit Form
+  if (taskType === "submit_form" || taskType === "submit") {
+    const submitBtn = interactiveElements.find(el => {
+      if (el.isSponsored || el.isAd) return false;
+      const t = `${el.text || ""} ${el.value || ""} ${el.ariaLabel || ""}`.toLowerCase();
+      return /^(?:submit|send|register|sign up|book now|save|confirm)\b/i.test(t);
+    }) || interactiveElements.find(el => (el.tag === "button" || el.tag === "input") && (el.type === "submit" || /submit|send/i.test(el.text || "")));
+
+    if (submitBtn) {
+      return {
+        ok: true,
+        observation: `Found Submit button [${submitBtn.elementId || submitBtn.id}].`,
+        goal_progress: { isSatisfied: true, remainingTasks: [] },
+        next_task: null,
+        action: {
+          actionType: "CLICK",
+          target: submitBtn.elementId || submitBtn.id,
+          parameters: {},
+          thenPressEnter: false,
+          reasoningSummary: "Click Submit button to complete form action."
+        }
+      };
+    }
+  }
+
+  // 8. Generic first actionable element
+  const firstActionable = interactiveElements.find(el => !el.isSponsored && !el.isAd && (el.tag === "button" || el.tag === "a" || el.tag === "input"));
   if (firstActionable) {
     return {
       ok: true,
@@ -1588,6 +1921,19 @@ export function createObservabilityServer(port = PORT, host = HOST) {
         "Content-Disposition": `attachment; filename="agent-telemetry-${Date.now()}.json"`
       });
       res.end(JSON.stringify(eventStore.events, null, 2));
+      return;
+    }
+
+    // 7. Privacy Reviewer Verification Demo: GET /api/privacy/demo
+    if (req.method === "GET" && pathname === "/api/privacy/demo") {
+      try {
+        const demoResults = evaluateMixedContentDemo();
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(demoResults));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
       return;
     }
 

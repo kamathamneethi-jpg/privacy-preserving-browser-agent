@@ -2,9 +2,12 @@
  * Dynamic Task Planner Module.
  * Decomposes high-level structured goals into dynamic, manageable sub-tasks.
  *
- * Invariant: Tasks are NOT a rigid fixed sequence. The planner maintains task state
- * and allows tasks to be dynamically inserted, skipped, reordered, or branched
- * based on live browser observations and replanning events.
+ * Invariants:
+ * 1. Current-Page-First: If the user is on an active web page and did not request explicit navigation,
+ *    the planner operates directly inside the current browser context.
+ * 2. Extensible Semantics: Operates on generic capabilities and semantic roles, never hardcoded domains.
+ * 3. Dynamic Replanning: Tasks are NOT a rigid fixed sequence. The planner allows tasks to be
+ *    inserted, skipped, reordered, or branched based on live browser observations.
  */
 
 import { BROWSER_OPERATIONS, TASK_DOMAINS } from "./goal-parser.js";
@@ -18,9 +21,10 @@ export const TASK_STATUS = Object.freeze({
 });
 
 export class TaskPlanner {
-  constructor(goalSpec = {}) {
+  constructor(goalSpec = {}, currentBrowserContext = {}) {
     this.goalSpec = goalSpec;
-    this.plan = Object.keys(goalSpec).length > 0 ? TaskPlanner.generateInitialPlan(goalSpec) : [];
+    this.currentBrowserContext = currentBrowserContext;
+    this.plan = Object.keys(goalSpec).length > 0 ? TaskPlanner.generateInitialPlan(goalSpec, currentBrowserContext) : [];
     this.currentTaskIndex = 0;
   }
 
@@ -33,13 +37,14 @@ export class TaskPlanner {
   }
 
   /**
-   * Generates an initial task plan from a structured goal.
-   * Adapts dynamically to the domain and requested operations.
+   * Generates an initial task plan from a structured goal and active browser context.
+   * Adapts dynamically to page capabilities and requested operations.
    *
    * @param {object} goalSpec - Output of GoalParser.parse()
+   * @param {object} [currentBrowserContext={}] - Live browser context ({ url, title, isInternalPage, pageCapabilities })
    * @returns {Array<object>} Initial task plan
    */
-  static generateInitialPlan(goalSpec) {
+  static generateInitialPlan(goalSpec, currentBrowserContext = {}) {
     const tasks = [];
     let counter = 1;
 
@@ -47,19 +52,40 @@ export class TaskPlanner {
     const ops = new Set(goalSpec.operations || goalSpec.required_operations || []);
     const constraints = goalSpec.constraints || [];
     const targetEntity = goalSpec.targetEntity || "item";
+    const selection = goalSpec.selection || null;
+    const entities = goalSpec.entities || [];
+    const navigation = goalSpec.navigation || {};
 
-    // 1. Navigation / Search Destination Task
-    if (ops.has(BROWSER_OPERATIONS.NAVIGATE) || goalSpec.targetWebsite || (!goalSpec.currentUrl && domain !== TASK_DOMAINS.FORM_FILLING)) {
+    const isInternalPage = Boolean(
+      currentBrowserContext.isInternalPage ||
+      (!currentBrowserContext.url && !goalSpec.currentUrl) ||
+      (currentBrowserContext.url && (currentBrowserContext.url.startsWith("chrome://") || currentBrowserContext.url.startsWith("about:") || currentBrowserContext.url.startsWith("chrome-extension://")))
+    );
+
+    // 1. Navigation Task:
+    // Strictly ONLY when user explicitly requested navigation OR when starting from an empty/internal browser tab
+    const requiresExplicitNav = Boolean(navigation.requiresExplicitNavigation || navigation.isExplicit);
+    const requiresBlankTabNav = isInternalPage && domain !== TASK_DOMAINS.FORM_FILLING && !goalSpec.currentUrl;
+
+    if (requiresExplicitNav || requiresBlankTabNav || ops.has(BROWSER_OPERATIONS.NAVIGATE)) {
       tasks.push({
         id: `task_${counter++}`,
         type: "navigate",
         description: `Navigate to appropriate website for ${targetEntity}`,
-        status: TASK_STATUS.PENDING
+        status: TASK_STATUS.PENDING,
+        metadata: {
+          destination: navigation.destinationKeyword || goalSpec.targetWebsite || null,
+          targetUrl: navigation.targetUrl || null
+        }
       });
     }
 
-    // 2. Query / Search Input Task (Ecommerce, Research, or explicitly requested search)
-    if (ops.has(BROWSER_OPERATIONS.SEARCH) || domain === TASK_DOMAINS.ECOMMERCE || domain === TASK_DOMAINS.RESEARCH) {
+    // 2. Query / Search Input Task:
+    // Triggered when user explicitly instructed search, OR when domain is ecommerce/research and no direct item selection was specified
+    const hasDirectItemSelection = Boolean(selection || entities.some(e => e.candidateRoles?.includes("sender") || e.candidateRoles?.includes("author")));
+    const shouldSearch = ops.has(BROWSER_OPERATIONS.SEARCH) && (!hasDirectItemSelection || /search|query|find\s+information/i.test(goalSpec.rawRequest || ""));
+
+    if (shouldSearch) {
       tasks.push({
         id: `task_${counter++}`,
         type: "search",
@@ -68,8 +94,8 @@ export class TaskPlanner {
       });
     }
 
-    // 3. Filter Application Task (if filterable constraints exist, mainly ecommerce or faceted search)
-    const hasFilterableConstraints = constraints.some(c => c.name !== "url" && c.name !== "candidate_count" && c.attribute !== "url");
+    // 3. Filter Application Task (if filterable constraints exist)
+    const hasFilterableConstraints = constraints.some(c => c.name !== "url" && c.name !== "candidate_count" && c.attribute !== "url" && c.name !== "sender" && c.name !== "author");
     if (ops.has(BROWSER_OPERATIONS.FILTER) && hasFilterableConstraints && domain !== TASK_DOMAINS.FORM_FILLING && domain !== TASK_DOMAINS.NAVIGATION) {
       const constraintDesc = constraints.map(c => `${c.attribute || c.name} ${c.operator} ${c.value}`).join(", ");
       tasks.push({
@@ -91,18 +117,33 @@ export class TaskPlanner {
     }
 
     // 5. Inspect / Select Candidate Results Task
-    if (domain === TASK_DOMAINS.NAVIGATION) {
+    if (hasDirectItemSelection || ops.has(BROWSER_OPERATIONS.SEARCH) || domain === TASK_DOMAINS.ECOMMERCE || domain === TASK_DOMAINS.RESEARCH) {
+      let desc = `Inspect visible candidate results and verify attributes`;
+      if (selection?.ordinal) {
+        desc = `Locate and select ${selection.ordinal} ${targetEntity} matching constraints`;
+      } else if (entities.length > 0) {
+        const entDesc = entities.map(e => `${e.preposition || 'matching'} ${e.text}`).join(" ");
+        desc = `Locate and select ${targetEntity} ${entDesc}`;
+      } else if (domain === TASK_DOMAINS.RESEARCH || ops.has(BROWSER_OPERATIONS.SEARCH)) {
+        desc = `Inspect primary article or search result for "${targetEntity}"`;
+      }
+
+      tasks.push({
+        id: `task_${counter++}`,
+        type: "select_candidate",
+        description: desc,
+        status: TASK_STATUS.PENDING,
+        metadata: {
+          selection,
+          entities,
+          constraints
+        }
+      });
+    } else if (domain === TASK_DOMAINS.NAVIGATION || ops.has(BROWSER_OPERATIONS.INSPECT)) {
       tasks.push({
         id: `task_${counter++}`,
         type: "inspect",
         description: `Inspect target page elements and verify content`,
-        status: TASK_STATUS.PENDING
-      });
-    } else if (ops.has(BROWSER_OPERATIONS.INSPECT) || domain === TASK_DOMAINS.ECOMMERCE || domain === TASK_DOMAINS.RESEARCH) {
-      tasks.push({
-        id: `task_${counter++}`,
-        type: "select_candidate",
-        description: domain === TASK_DOMAINS.RESEARCH ? `Inspect primary article or search result for "${targetEntity}"` : `Inspect visible candidate results and verify attributes`,
         status: TASK_STATUS.PENDING
       });
     }
@@ -117,14 +158,27 @@ export class TaskPlanner {
       });
     }
 
-    // 7. Final Action Task (submit form, add to cart, book)
-    if (domain === TASK_DOMAINS.FORM_FILLING || ops.has(BROWSER_OPERATIONS.SUBMIT) || ops.has(BROWSER_OPERATIONS.ADD_TO_CART) || ops.has(BROWSER_OPERATIONS.SUBMIT_FORM) || /add to cart|buy|submit|book/i.test(goalSpec.rawRequest || goalSpec.originalGoal || "")) {
-      const isCart = ops.has(BROWSER_OPERATIONS.ADD_TO_CART) || /add to cart|buy/i.test(goalSpec.rawRequest || goalSpec.originalGoal || "");
+    // 7. Final Action Task (perform_action, submit form, add to cart, book)
+    const actionVerb = goalSpec.actionIntent ? String(goalSpec.actionIntent).toLowerCase() : null;
+    const isDirectOpenOnly = (actionVerb === "open" || actionVerb === "read" || actionVerb === "view") && hasDirectItemSelection;
+
+    if ((ops.has(BROWSER_OPERATIONS.PERFORM_ACTION) || goalSpec.actionIntent) && !isDirectOpenOnly && domain !== TASK_DOMAINS.FORM_FILLING) {
+      const intent = goalSpec.actionIntent || "action";
+      tasks.push({
+        id: `task_${counter++}`,
+        type: "perform_action",
+        actionIntent: intent,
+        description: `Execute requested action: ${intent} for ${targetEntity}`,
+        status: TASK_STATUS.PENDING
+      });
+    } else if (domain === TASK_DOMAINS.FORM_FILLING || ops.has(BROWSER_OPERATIONS.SUBMIT) || ops.has(BROWSER_OPERATIONS.ADD_TO_CART) || ops.has(BROWSER_OPERATIONS.SUBMIT_FORM) || /add to cart|buy|submit|book|confirm/i.test(goalSpec.rawRequest || goalSpec.originalGoal || "")) {
+      const isCart = ops.has(BROWSER_OPERATIONS.ADD_TO_CART) || /add to cart|add to bag|add to basket/i.test(goalSpec.rawRequest || goalSpec.originalGoal || "");
       const isForm = domain === TASK_DOMAINS.FORM_FILLING || ops.has(BROWSER_OPERATIONS.SUBMIT_FORM);
       tasks.push({
         id: `task_${counter++}`,
-        type: isForm ? "submit_form" : (isCart ? "perform_action" : "submit"),
-        description: isForm ? "Submit completed form" : (isCart ? "Add selected item to cart" : "Execute requested final action"),
+        type: isCart ? "add_to_cart" : (isForm ? "submit_form" : "submit"),
+        actionIntent: goalSpec.actionIntent || (isCart ? "add_to_cart" : (isForm ? "submit" : "action")),
+        description: isCart ? "Add selected item to cart" : (isForm ? (goalSpec.actionIntent ? `Submit or confirm form action: ${goalSpec.actionIntent}` : "Submit completed form") : "Execute requested final action"),
         status: TASK_STATUS.PENDING
       });
     }
@@ -141,11 +195,12 @@ export class TaskPlanner {
   }
 
   /**
-   * Initializes the planner with a goal specification.
+   * Initializes the planner with a goal specification and optional browser context.
    */
-  initialize(goalSpec) {
+  initialize(goalSpec, currentBrowserContext = {}) {
     this.goalSpec = goalSpec;
-    this.plan = TaskPlanner.generateInitialPlan(goalSpec);
+    this.currentBrowserContext = currentBrowserContext;
+    this.plan = TaskPlanner.generateInitialPlan(goalSpec, currentBrowserContext);
     this.currentTaskIndex = 0;
   }
 
@@ -231,3 +286,4 @@ export class TaskPlanner {
     return this.getPlanSummary();
   }
 }
+

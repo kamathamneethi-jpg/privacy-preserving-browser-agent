@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mixed Order &amp; Registration Demo Portal</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, sans-serif;
+        margin: 20px;
+        background: #f8fafc;
+        color: #0f172a;
+      }
+      .card {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 16px;
+        max-width: 600px;
+      }
+      .form-group {
+        margin-bottom: 12px;
+      }
+      label {
+        display: block;
+        font-size: 12px;
+        font-weight: 600;
+        margin-bottom: 4px;
+        color: #334155;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 8px;
+        border: 1px solid #cbd5e1;
+        border-radius: 4px;
+        font-size: 13px;
+      }
+      .product-price {
+        font-size: 18px;
+        font-weight: bold;
+        color: #16a34a;
+      }
+      .support-note {
+        font-size: 11px;
+        color: #64748b;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Order &amp; Account Setup</h1>
+
+      <!-- Public Product Information Section -->
+      <section class="card" id="product-details-card">
+        <h2 id="product-title">Noise-Canceling Wireless Headphones Pro</h2>
+        <p class="product-price" id="product-price">$199.99</p>
+        <p id="product-specifications">
+          Specifications: 40-hour battery life, active noise cancellation, Bluetooth 5.3 connectivity, matte black finish.
+        </p>
+      </section>
+
+      <!-- Order & Account Form Section -->
+      <section class="card" id="checkout-form-card">
+        <h2>Delivery &amp; Account Verification</h2>
+        
+        <form id="order-form" action="#" method="post">
+          <div class="form-group">
+            <label for="recipient-email">Recipient Email Address:</label>
+            <input type="email" id="recipient-email" name="recipient_email" value="alex.taylor@example.net" />
+          </div>
+
+          <div class="form-group">
+            <label for="customer-phone">Customer Contact Phone:</label>
+            <input type="tel" id="customer-phone" name="customer_phone" value="+1-555-0188" />
+          </div>
+
+          <div class="form-group">
+            <label for="account-password">Account Password (Required for Registration):</label>
+            <input type="password" id="account-password" name="account_password" value="SyntheticDemoSecret#2026" />
+          </div>
+
+          <div class="form-group">
+            <label for="auth-otp">Two-Factor Authentication Code:</label>
+            <input type="text" id="auth-otp" name="auth_otp" placeholder="Enter 6-digit OTP" value="958214" />
+          </div>
+
+          <p class="support-note" id="hotline-text">
+            Customer helpline: 1-800-555-0199 (Mon-Fri 9am-5pm)
+          </p>
+
+          <button type="submit" id="btn-submit-order" style="background:#0284c7; color:#fff; padding:8px 16px; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">
+            Confirm Order
+          </button>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

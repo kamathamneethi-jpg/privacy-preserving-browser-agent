@@ -42,11 +42,18 @@ export function redactTextString(originalText, detections = [], policyProvider =
 
     // Determine policy action
     let decision = POLICY_ACTIONS.REDACT;
+    let providedToken = null;
     if (typeof policyProvider === "function") {
       const pol = policyProvider(det);
-      decision = typeof pol === "string" ? pol : pol?.action || pol?.decision || POLICY_ACTIONS.REDACT;
-    } else if (policyProvider[det.type]) {
-      decision = policyProvider[det.type];
+      decision = typeof pol === "string" ? pol : pol?.decision || pol?.action || POLICY_ACTIONS.REDACT;
+      providedToken = typeof pol === "object" ? pol?.token : null;
+    } else if (policyProvider[det.type] || policyProvider[det.category]) {
+      const pol = policyProvider[det.type] || policyProvider[det.category];
+      decision = typeof pol === "string" ? pol : pol?.decision || pol?.action || POLICY_ACTIONS.REDACT;
+      providedToken = typeof pol === "object" ? pol?.token : null;
+    } else if (det.policyDecision) {
+      decision = det.policyDecision.decision || det.policyDecision.action || POLICY_ACTIONS.REDACT;
+      providedToken = det.policyDecision.token;
     }
 
     // Apply policy decision
@@ -54,9 +61,9 @@ export function redactTextString(originalText, detections = [], policyProvider =
       result += originalText.substring(det.start, det.end);
       allowedCount++;
     } else if (decision === POLICY_ACTIONS.TOKENIZE || decision === "TOKENIZE") {
-      const categoryUpper = (det.type || "PII").toUpperCase().replace(/_FIELD$/, "");
-      const token = `{{${categoryUpper}_${tokenCounter.index++}}}`;
-      tokens[token] = { category: det.type, span: [det.start, det.end] };
+      const categoryUpper = (det.type || det.category || "PII").toUpperCase().replace(/_FIELD$/, "");
+      const token = providedToken ? (providedToken.startsWith("{{") ? providedToken : `{{${providedToken}}}`) : `{{${categoryUpper}_${tokenCounter.index++}}}`;
+      tokens[token] = { category: det.type || det.category, span: [det.start, det.end], decision: POLICY_ACTIONS.TOKENIZE };
       result += token;
       redactedCount++;
     } else if (decision === POLICY_ACTIONS.LOCAL_ONLY || decision === "LOCAL_ONLY") {

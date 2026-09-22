@@ -9,6 +9,8 @@
  * 3. Structured Output: Enforces a strict JSON action decision schema with valid DOM element targets.
  */
 
+import { sanitizeTelemetryData } from "./telemetry-sanitizer.js";
+
 export const DEFAULT_MULTIMODAL_MODEL = "Qwen/Qwen3-VL-4B-Instruct";
 export const HUGGINGFACE_DEFAULT_MODEL = "Qwen/Qwen3-VL-4B-Instruct";
 export const OPENROUTER_DEFAULT_MODEL = "qwen/qwen-2.5-vl-72b-instruct:free";
@@ -221,8 +223,7 @@ export class MultimodalVisionAgent {
     localEndpoint = (typeof process !== "undefined" && process.env?.LOCAL_AGENT_URL) || "http://127.0.0.1:8765/api/agent/reason"
   }) {
     // 1. Local AI Agent Server (Port 8765, Zero Remote Key Required)
-    const isLocal = provider === "local" || !apiKey;
-    if (isLocal) {
+    if (provider === "local") {
       const localStartTime = Date.now();
       try {
         const localRes = await fetchClient(localEndpoint, {
@@ -259,6 +260,10 @@ export class MultimodalVisionAgent {
       } catch (err) {
         // Fallback to null if local server unavailable
       }
+      return null;
+    }
+
+    if (!apiKey || typeof apiKey !== "string" || !apiKey.trim()) {
       return null;
     }
 
@@ -308,8 +313,12 @@ export class MultimodalVisionAgent {
 
     // Helper to report telemetry without blocking
     const reportTelemetry = (status, data, level = "info") => {
+      const sanitizedEventData = sanitizeTelemetryData({
+        ...telemetryRequest,
+        ...data
+      });
       if (typeof onTelemetry === "function") {
-        try { onTelemetry({ status, ...data }); } catch {}
+        try { onTelemetry({ status, ...sanitizedEventData }); } catch {}
       }
       try {
         if (typeof globalThis.fetch === "function") {
@@ -320,10 +329,7 @@ export class MultimodalVisionAgent {
               stage: "API REASONING",
               event: `LLM_API_${status}`,
               level,
-              data: {
-                ...telemetryRequest,
-                ...data
-              }
+              data: sanitizedEventData
             })
           }).catch(() => {});
         }

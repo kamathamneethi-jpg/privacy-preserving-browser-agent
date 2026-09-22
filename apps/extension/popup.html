@@ -118,6 +118,40 @@
         </div>
       </section>
 
+      <!-- Live Privacy Transparency Section (Phase 7) -->
+      <section id="live-privacy-transparency-panel" style="margin-top:10px; padding:10px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <h2 style="font-size:13px; margin:0; color:#0f172a; font-weight:bold; display:flex; align-items:center; gap:5px;">
+            <span>🛡 LIVE PRIVACY TRANSPARENCY</span>
+          </h2>
+          <span id="transparency-status-badge" style="font-size:11px; background:#e0f2fe; color:#0369a1; padding:2px 6px; border-radius:4px; font-weight:600;">Authoritative Policy</span>
+        </div>
+
+        <p style="font-size:11px; color:#64748b; margin:0 0 8px 0;">
+          Authoritative runtime decisions from PolicyEngine across perception, context, and enforcement layers.
+        </p>
+
+        <div id="transparency-matrix-container" style="overflow-x:auto;">
+          <table style="width:100%; border-collapse:collapse; font-size:11px; font-family:system-ui, -apple-system, sans-serif;">
+            <thead>
+              <tr style="background:#f1f5f9; border-bottom:1px solid #cbd5e1; text-align:left; color:#475569; font-size:10px; text-transform:uppercase;">
+                <th style="padding:4px 6px;">Decision</th>
+                <th style="padding:4px 6px;">Category / Role</th>
+                <th style="padding:4px 6px;">Necessity</th>
+                <th style="padding:4px 6px;">Enforcement &amp; Remote</th>
+              </tr>
+            </thead>
+            <tbody id="transparency-table-body">
+              <!-- Dynamically populated from actual runtime PolicyDecision objects -->
+            </tbody>
+          </table>
+        </div>
+
+        <div id="transparency-empty-hint" style="font-size:11px; color:#94a3b8; font-style:italic; padding:6px 0;">
+          No privacy entities evaluated yet. Scan page or execute a task to view live transparency.
+        </div>
+      </section>
+
       <!-- Image Privacy & Redaction Section -->
       <section id="image-privacy-panel" style="margin-top:10px; padding:10px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">

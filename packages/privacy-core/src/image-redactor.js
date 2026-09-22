@@ -46,26 +46,22 @@ export function isBboxCompletelyCovered(piiBbox, redactBbox) {
 export function evaluateImagePiiPolicy(piiItem, options = {}) {
   const destination = options.destination || PROCESSING_DESTINATIONS.LOCAL_BROWSER;
   const rawCat = (piiItem.category || piiItem.type || "").toLowerCase();
-  const isCritical = ["payment_card", "credit_card", "payment_card_field", "password", "otp"].includes(rawCat);
 
   const decision = evaluatePiiPolicyItem({
     piiItem: {
       id: piiItem.id || "PII_IMG_1",
       category: rawCat || "unknown",
-      confidence: piiItem.confidence || 0.95
+      confidence: piiItem.confidence || 0.95,
+      bbox: piiItem.bbox
     },
     destination,
+    relevanceItem: options.relevanceItem || piiItem.relevanceItem,
+    context: options.context || piiItem.context,
     authorization: options.authorization || {}
   });
 
-  let action = decision.action;
-  if (isCritical) {
-    action = POLICY_ACTIONS.LOCAL_ONLY;
-  } else if (action !== POLICY_ACTIONS.ALLOW) {
-    action = POLICY_ACTIONS.REDACT;
-  }
-
-  const requiresRedaction = action === POLICY_ACTIONS.REDACT || action === POLICY_ACTIONS.LOCAL_ONLY;
+  const action = decision.decision || decision.action;
+  const requiresRedaction = action !== POLICY_ACTIONS.ALLOW;
 
   return {
     ...decision,
@@ -152,7 +148,8 @@ export function redactImageLocally(imageSource, piiDetections = [], options = {}
 
     // Check policy decision: default to REDACT if not specified
     const policy = det.policyDecision || evaluateImagePiiPolicy(det, options);
-    if (policy.requiresRedaction === false && policy.action === POLICY_ACTIONS.ALLOW) {
+    const action = policy.decision || policy.action;
+    if (policy.requiresRedaction === false || action === POLICY_ACTIONS.ALLOW) {
       continue;
     }
 

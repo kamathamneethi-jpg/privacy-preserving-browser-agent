@@ -162,7 +162,7 @@ export class SanitizedContextBuilder {
 
         if (overlaps || textMatches) {
           isSensitive = true;
-          appliedAction = policyItem.action || POLICY_ACTIONS.REDACT;
+          appliedAction = policyItem.decision || policyItem.action || POLICY_ACTIONS.REDACT;
           token = policyItem.token || null;
           break;
         }
@@ -244,8 +244,9 @@ export class SanitizedContextBuilder {
       if (!pii) continue;
 
       const piiCat = String(pii.category || "").toLowerCase();
-      const action = policyItem.action || POLICY_ACTIONS.REDACT;
-      const token = policyItem.token || `TOKEN_${piiCat.toUpperCase()}`;
+      const action = policyItem.decision || policyItem.action || POLICY_ACTIONS.REDACT;
+      const rawToken = policyItem.token || `PII_TOKEN_${piiCat.toUpperCase()}`;
+      const token = rawToken.startsWith("{{") ? rawToken : `{{${rawToken}}}`;
 
       // Check if node represents or contains sensitive field
       const isMatchingField = (attrs.name && attrs.name.toLowerCase().includes(piiCat)) ||
@@ -255,21 +256,27 @@ export class SanitizedContextBuilder {
 
       if (isMatchingField || (attrs.value !== undefined && action !== POLICY_ACTIONS.ALLOW)) {
         if (action === POLICY_ACTIONS.TOKENIZE) {
-          attrs.token = `{{${token}}}`;
-          attrs.sanitizedValue = `{{${token}}}`;
+          attrs.token = token;
+          attrs.sanitizedValue = token;
         } else if (action === POLICY_ACTIONS.LOCAL_ONLY) {
           attrs.sanitizedValue = "[LOCAL_ONLY_PROTECTED]";
+        } else if (action === POLICY_ACTIONS.ALLOW) {
+          // preserve value
         } else {
           attrs.sanitizedValue = `[${piiCat.toUpperCase()}_REDACTED]`;
         }
-        delete attrs.value;
+        if (action !== POLICY_ACTIONS.ALLOW) {
+          delete attrs.value;
+        }
       }
 
       if (nodeText) {
         if (action === POLICY_ACTIONS.TOKENIZE) {
-          nodeText = `{{${token}}}`;
+          nodeText = token;
         } else if (action === POLICY_ACTIONS.LOCAL_ONLY) {
           nodeText = "[LOCAL_ONLY_PROTECTED]";
+        } else if (action === POLICY_ACTIONS.ALLOW) {
+          // preserve nodeText
         } else if (action === POLICY_ACTIONS.REDACT) {
           nodeText = `[${piiCat.toUpperCase()}_REDACTED]`;
         }
@@ -384,12 +391,13 @@ export class SanitizedContextBuilder {
       // 3. Build token mappings
       const tokenMapping = {};
       for (const pol of policyDecisions) {
-        if (pol.action === POLICY_ACTIONS.TOKENIZE) {
+        const action = pol.decision || pol.action;
+        if (action === POLICY_ACTIONS.TOKENIZE) {
           const pii = pol.piiItem || pol;
-          const tokenKey = pol.token || generatePiiToken(pii.category || "item", pii.id || "1");
+          const tokenKey = pol.token || generatePiiToken(pii.category || pol.category || "item", pii.id || pol.id || "1");
           tokenMapping[tokenKey] = Object.freeze({
             token: tokenKey,
-            category: pii.category || "unknown",
+            category: pii.category || pol.category || "unknown",
             type: TOKEN_TYPES.OPAQUE_ID,
             decision: POLICY_ACTIONS.TOKENIZE
           });

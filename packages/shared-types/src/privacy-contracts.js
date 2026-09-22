@@ -76,6 +76,27 @@ export const TASK_RELEVANCE_LEVELS = Object.freeze({
   UNKNOWN: "UNKNOWN"
 });
 
+export const TASK_NECESSITY_LEVELS = Object.freeze({
+  REMOTE_REASONING_REQUIRED: "REMOTE_REASONING_REQUIRED",
+  LOCAL_EXECUTION_ONLY: "LOCAL_EXECUTION_ONLY",
+  CONTEXTUAL_REFERENCE: "CONTEXTUAL_REFERENCE",
+  UNNECESSARY: "UNNECESSARY",
+  UNKNOWN: "UNKNOWN"
+});
+
+export const SEMANTIC_ROLES = Object.freeze({
+  ACCOUNT_IDENTIFIER: "account_identifier",
+  RECIPIENT: "recipient",
+  SHIPPING_INFO: "shipping_information",
+  BILLING_INFO: "billing_information",
+  AUTH_SECRET: "authentication_secret",
+  SEARCH_TARGET: "search_target",
+  PUBLIC_ATTRIBUTE: "public_product_attribute",
+  CONTEXTUAL_REFERENCE: "contextual_reference",
+  GENERAL_DATA: "general_data",
+  UNKNOWN: "unknown"
+});
+
 export const CONTEXT_EVIDENCE_CODES = Object.freeze({
   EXPLICIT_TASK_KEYWORD: "EXPLICIT_TASK_KEYWORD",
   DOM_SEMANTIC_MATCH: "DOM_SEMANTIC_MATCH",
@@ -90,6 +111,13 @@ export const SENSITIVITY_LEVELS = Object.freeze({
   LOW: "LOW",
   MEDIUM: "MEDIUM",
   HIGH: "HIGH",
+  CRITICAL: "CRITICAL"
+});
+
+export const SECURITY_LEVELS = Object.freeze({
+  PUBLIC: "PUBLIC",
+  CONFIDENTIAL: "CONFIDENTIAL",
+  RESTRICTED: "RESTRICTED",
   CRITICAL: "CRITICAL"
 });
 
@@ -128,7 +156,36 @@ export const POLICY_REASON_CODES = Object.freeze({
   TOKENIZATION_PREFERRED: "TOKENIZATION_PREFERRED",
   LOCAL_ONLY_REQUIRED: "LOCAL_ONLY_REQUIRED",
   REDACTION_REQUIRED: "REDACTION_REQUIRED",
-  SAFE_DEFAULT: "SAFE_DEFAULT"
+  SAFE_DEFAULT: "SAFE_DEFAULT",
+  // Generalized Task-Aware Decision Codes
+  REMOTE_REASONING_REQUIRED: "REMOTE_REASONING_REQUIRED",
+  LOCAL_EXECUTION_ONLY: "LOCAL_EXECUTION_ONLY",
+  CONTEXTUAL_REFERENCE: "CONTEXTUAL_REFERENCE",
+  UNNECESSARY: "UNNECESSARY",
+  PUBLIC_DATA_ALLOWED: "PUBLIC_DATA_ALLOWED",
+  SAFE_CONTEXT_ALLOWED: "SAFE_CONTEXT_ALLOWED",
+  CONFIDENTIAL_DATA_TOKENIZED: "CONFIDENTIAL_DATA_TOKENIZED",
+  CRITICAL_SECRET_LOCAL_ONLY: "CRITICAL_SECRET_LOCAL_ONLY",
+  UNNECESSARY_DATA_REDACTED: "UNNECESSARY_DATA_REDACTED",
+  MINIMIZATION_DEFAULT: "MINIMIZATION_DEFAULT"
+});
+
+export const TASK_AWARE_POLICY_REASON_CODES = POLICY_REASON_CODES;
+
+export const TASK_AWARE_POLICY_DECISION_SHAPE = Object.freeze({
+  id: "string",
+  category: "string",
+  sensitivity: "string",
+  taskRelevance: "string",
+  taskNecessity: "string",
+  semanticRole: "string",
+  destination: "string",
+  decision: "string",
+  token: "string",
+  placeholder: "string",
+  reason: "string",
+  reasonCodes: "array",
+  confidence: "number"
 });
 
 // --- Step 9: Secure Local Privacy Vault Contracts ---

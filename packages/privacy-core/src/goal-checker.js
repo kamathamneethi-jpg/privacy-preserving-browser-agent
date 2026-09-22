@@ -1,6 +1,6 @@
 /**
  * Goal Completion Checker Module.
- * Evaluates whether the user's original goal and explicit constraints have been satisfied.
+ * Evaluates whether the user's original goal, explicit constraints, and semantic intent have been satisfied.
  *
  * Invariant: Never flags completion prematurely just because an action (like search or click) succeeded.
  * Evaluates candidate data, constraint verification, and requested operations.
@@ -60,14 +60,20 @@ export class GoalCompletionChecker {
     }
 
     // 2. Check if add to cart or buy was requested and performed
-    const requiresCart = operations.has("add_to_cart") || /\b(?:add to cart|add to bag|buy|purchase)\b/i.test(goalText);
+    const requiresCartOnly = operations.has("add_to_cart") || /\b(?:add to cart|add to bag|add to basket)\b/i.test(goalText);
+    const requiresBuyOrPurchase = /\b(?:buy now|purchase|checkout|order now)\b/i.test(goalText);
+    const requiresCart = requiresCartOnly || requiresBuyOrPurchase;
+
     if (requiresCart) {
       const cartActionExecuted = actionHistory.some(a => {
         const text = typeof a === "string" ? a : `${a.actionType || ""} ${a.reason || ""} ${a.target || ""}`;
-        return /\b(?:add to cart|cart|bag|bought|purchased|checkout)\b/i.test(text);
+        if (requiresCartOnly) {
+          return /\b(?:add to cart|add to bag|add to basket|cart|bag)\b/i.test(text);
+        }
+        return /\b(?:add to cart|cart|bag|bought|purchased|checkout|buy now)\b/i.test(text);
       });
       if (!cartActionExecuted) {
-        missingRequirements.push("Requested item has not been added to cart yet (add to cart action missing).");
+        missingRequirements.push(requiresCartOnly ? "Requested item has not been added to cart yet (add to cart action missing)." : "Purchase or cart action has not been executed yet.");
       }
     }
 
@@ -83,8 +89,29 @@ export class GoalCompletionChecker {
       }
     }
 
+    // 3b. Check if generic UI action was requested and performed (e.g. subscribe, follow, star, like, bookmark, download, share, etc.)
+    const actionIntent = goal.actionIntent || (planner && Array.isArray(planner.tasks) ? planner.tasks.find(t => t.type === "perform_action")?.actionIntent : null);
+    const isDirectOpenOnly = (actionIntent === "open" || actionIntent === "read" || actionIntent === "view") && (goal.selection || goal.entities?.length > 0);
+    const requiresPerformAction = Boolean((actionIntent || operations.has("perform_action")) && !isDirectOpenOnly);
+
+    if (requiresPerformAction) {
+      const intentVerb = String(actionIntent || "action").toLowerCase().trim();
+      const actionExecuted = actionHistory.some(a => {
+        if (typeof a === "string") {
+          return a.toLowerCase().includes(intentVerb);
+        }
+        const text = `${a.actionType || ""} ${a.reason || ""} ${a.actionIntent || ""} ${a.target || ""} ${a.targetId || ""}`.toLowerCase();
+        return text.includes(intentVerb) || (a.actionIntent && a.actionIntent.toLowerCase() === intentVerb);
+      }) || (typeof stateManager?.hasPerformedAction === "function" && stateManager.hasPerformedAction(intentVerb))
+         || (Array.isArray(stateManager?.executedActions) && stateManager.executedActions.some(a => (a.actionIntent && a.actionIntent.toLowerCase() === intentVerb) || (a.reason && a.reason.toLowerCase().includes(intentVerb))));
+      if (!actionExecuted) {
+        missingRequirements.push(`Requested action '${intentVerb}' has not been executed yet.`);
+      }
+    }
+
     // 4. Check if search was requested and performed
-    const requiresSearch = operations.has("search") || goal.domain === "ecommerce" || (goal.domain === "research" && !goal.currentUrl) || /\b(?:search|find|look for)\b/i.test(goalText);
+    const hasPendingSearchTask = planner && Array.isArray(planner.tasks) && planner.tasks.some(t => t.type === "search" && t.status !== TASK_STATUS.COMPLETED);
+    const requiresSearch = operations.has("search") && hasPendingSearchTask;
     if (requiresSearch) {
       const searchActionExecuted = actionHistory.some(a => {
         const text = typeof a === "string" ? a : `${a.actionType || ""} ${a.reason || ""} ${a.target || ""}`;
@@ -172,3 +199,4 @@ export class GoalCompletionChecker {
     };
   }
 }
+

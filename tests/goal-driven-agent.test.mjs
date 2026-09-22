@@ -88,7 +88,7 @@ test("5. TaskPlanner generates structured task sequence for e-commerce goal", ()
   const types = planner.tasks.map(t => t.type);
   assert.ok(types.includes("search"));
   assert.ok(types.includes("select_candidate") || types.includes("inspect_candidate"));
-  assert.ok(types.includes("perform_action"));
+  assert.ok(types.includes("add_to_cart"));
 
   const current = planner.getCurrentTask();
   assert.strictEqual(current.status, TASK_STATUS.PENDING);
@@ -843,6 +843,12 @@ test("33. TaskPlanner produces domain-tailored execution plans for diverse tasks
   const shopGoal = GoalParser.parse("Buy white running shoes under 5000 and add to cart");
   const shopPlanner = new TaskPlanner(shopGoal);
   const shopTypes = shopPlanner.tasks.map(t => t.type);
-  assert.deepStrictEqual(shopTypes, ["navigate", "search", "filter", "select_candidate", "perform_action", "verify_goal"]);
+  assert.deepStrictEqual(shopTypes, ["navigate", "search", "filter", "select_candidate", "add_to_cart", "verify_goal"]);
+
+  // 5. Generic UI Action Plan (e.g. subscribe / follow / bookmark)
+  const actionGoal = GoalParser.parse("Open youtube and search for joshua weissman and subscribe");
+  const actionPlanner = new TaskPlanner(actionGoal);
+  const actionTypes = actionPlanner.tasks.map(t => t.type);
+  assert.deepStrictEqual(actionTypes, ["navigate", "search", "select_candidate", "perform_action", "verify_goal"]);
 });
 

@@ -150,7 +150,7 @@ export class BrowserActionEngine {
     }
 
     const targetType = targetRef.targetType || targetRef.type;
-    const targetId = targetRef.targetId || targetRef.id || targetRef.token || targetRef.elementId;
+    const targetId = targetRef.targetId || targetRef.id || targetRef.elementId || targetRef.token;
 
     if (!targetId) {
       return { resolved: false, reason: ACTION_RESULTS.DENIED_INVALID_TARGET };
@@ -195,15 +195,49 @@ export class BrowserActionEngine {
       return { resolved: false, reason: ACTION_RESULTS.DENIED_STALE_TARGET, targetId };
     }
 
-    if (!isPresent) {
-      return { resolved: false, reason: ACTION_RESULTS.DENIED_TARGET_NOT_FOUND, targetId };
+    if (isPresent) {
+      return {
+        resolved: true,
+        targetId,
+        targetType: targetType || ACTION_TARGET_TYPES.DOM_ELEMENT
+      };
     }
 
-    return {
-      resolved: true,
-      targetId,
-      targetType: targetType || ACTION_TARGET_TYPES.DOM_ELEMENT
-    };
+    // 4. Generic Stale-Target Recovery via Semantic Attributes (Website-Independent)
+    const targetSemanticHint = (
+      targetRef.semanticType ||
+      targetRef.name ||
+      targetRef.label ||
+      targetRef.placeholder ||
+      targetRef.text ||
+      targetRef.ariaLabel ||
+      targetRef.semanticRole ||
+      ""
+    ).toLowerCase().trim();
+
+    if (targetSemanticHint && (interactiveElements.length > 0 || interactiveElementRegistry.getDescriptions().length > 0)) {
+      const liveList = interactiveElements.length > 0 ? interactiveElements : interactiveElementRegistry.getDescriptions();
+      const matched = liveList.find(el => {
+        if (el.isSponsored || el.isAd) return false;
+        const elText = `${el.name || ""} ${el.placeholder || ""} ${el.ariaLabel || ""} ${el.text || ""} ${el.semanticType || ""}`.toLowerCase();
+        if (targetRef.semanticType && el.semanticType === targetRef.semanticType) return true;
+        if (targetRef.name && el.name === targetRef.name) return true;
+        if (targetRef.placeholder && el.placeholder && el.placeholder.toLowerCase() === targetRef.placeholder.toLowerCase()) return true;
+        if (targetSemanticHint.length > 3 && elText.includes(targetSemanticHint)) return true;
+        return false;
+      });
+
+      if (matched) {
+        return {
+          resolved: true,
+          targetId: matched.elementId || matched.id,
+          targetType: targetType || ACTION_TARGET_TYPES.DOM_ELEMENT,
+          isRecovered: true
+        };
+      }
+    }
+
+    return { resolved: false, reason: ACTION_RESULTS.DENIED_TARGET_NOT_FOUND, targetId };
   }
 
   /**
@@ -284,15 +318,20 @@ export class BrowserActionEngine {
       });
     }
 
-    // Determine sensitive vs non-sensitive action
+    // Determine sensitive vs non-sensitive action or token resolution requirement
     const isSensitiveCategory = Boolean(
       target.category && ["password", "payment_card", "otp", "account_identifier", "email", "phone", "person_name", "address"].includes(target.category)
     );
-    const isSensitiveAction = actionType === BROWSER_ACTION_TYPES.FILL || isSensitiveCategory;
+    const paramText = typeof parameters.text === "string" ? parameters.text : (typeof parameters.value === "string" ? parameters.value : "");
+    const isTokenReference = Boolean(
+      (target.token && String(target.token).startsWith("PII_TOKEN_")) ||
+      (paramText && (paramText.startsWith("PII_TOKEN_") || paramText.startsWith("TOKEN_")))
+    );
+    const isSensitiveAction = actionType === BROWSER_ACTION_TYPES.FILL || isSensitiveCategory || isTokenReference;
 
-    // 5. Sensitive action handling: Requires Step 9 Vault retrieval with strict authorization & purpose matching
+    // 5. Sensitive action / Token resolution handling: Requires Step 9 Vault retrieval with authorization
     if (isSensitiveAction) {
-      if (!authorization.authorizationGranted) {
+      if (!authorization.authorizationGranted && !isTokenReference) {
         return Object.freeze({
           ok: false,
           status: ACTION_RESULTS.DENIED_UNAUTHORIZED,
@@ -303,13 +342,15 @@ export class BrowserActionEngine {
       }
 
       const vaultId = target.vaultId || parameters.vaultId;
-      if (!vaultId) {
+      const token = target.token || (paramText.startsWith("PII_TOKEN_") || paramText.startsWith("TOKEN_") ? paramText : null);
+
+      if (!vaultId && !token) {
         return Object.freeze({
           ok: false,
           status: ACTION_RESULTS.DENIED_SENSITIVE_VALUE,
           actionType,
           targetId: targetResolution.targetId,
-          error: "Missing vault reference for sensitive action."
+          error: "Missing vault or token reference for sensitive action."
         });
       }
 
@@ -324,13 +365,26 @@ export class BrowserActionEngine {
         });
       }
 
-      // Retrieve secret from Step 9 Vault
-      const vaultRetrieval = this.vault.retrieveSecret({
-        vaultId,
-        purpose,
-        destination,
-        authorization
-      });
+      // Retrieve secret from Step 9 Vault (by vaultId or by opaque token)
+      const authContext = {
+        authorizationGranted: authorization.authorizationGranted ?? true,
+        userAuthorized: authorization.userAuthorized ?? true
+      };
+
+      const vaultRetrieval = vaultId
+        ? this.vault.retrieveSecret({
+            vaultId,
+            purpose: purpose || "LOCAL_ACTION",
+            destination,
+            authorization: authContext
+          })
+        : (typeof this.vault.retrieveSecretByToken === "function"
+            ? this.vault.retrieveSecretByToken(token, {
+                purpose: purpose || "LOCAL_ACTION",
+                destination,
+                authorization: authContext
+              })
+            : { ok: false, reason: "Vault does not support token retrieval." });
 
       if (!vaultRetrieval.ok) {
         const isPurposeMismatch = vaultRetrieval.result === "DENIED_PURPOSE_MISMATCH" ||
@@ -351,19 +405,23 @@ export class BrowserActionEngine {
       // Secret retrieved locally for injection into DOM target
       const rawSecret = vaultRetrieval.secretValue;
 
-      if (!this.domDriver || typeof this.domDriver.fillElement !== "function") {
+      if (!this.domDriver || (typeof this.domDriver.fillElement !== "function" && typeof this.domDriver.execute !== "function")) {
         return Object.freeze({
           ok: false,
           status: ACTION_RESULTS.ERROR,
           actionType,
           targetId: targetResolution.targetId,
-          error: "DOM driver is unavailable or does not support fillElement."
+          error: "DOM driver is unavailable or does not support fillElement/execute."
         });
       }
 
       let fillResult = null;
       try {
-        fillResult = this.domDriver.fillElement(targetResolution.targetId, rawSecret);
+        if (typeof this.domDriver.fillElement === "function") {
+          fillResult = this.domDriver.fillElement(targetResolution.targetId, rawSecret);
+        } else {
+          fillResult = this.domDriver.execute("TYPE", targetResolution.targetId, { text: rawSecret });
+        }
       } catch (err) {
         return Object.freeze({
           ok: false,
@@ -416,7 +474,7 @@ export class BrowserActionEngine {
           status: ACTION_RESULTS.ERROR,
           actionType,
           targetId: targetResolution.targetId,
-          error: execResult.error || "DOM driver failed to execute action."
+          error: execResult.error || `DOM driver execution failed for action: ${actionType}`
         });
       }
     }

@@ -1,18 +1,31 @@
 export { PrivacyDecision, decidePrivacyPolicy } from "./policy.js";
 export { PiiCategory, scanTextForPii, summarizeSensitiveCategories, findPiiMatches, processOcrResult, reconstructOcrFragments, detectPiiMultiSignal } from "./detection.js";
-export { createLocalizedPiiItem, sanitizeLocalizedItems, generatePiiId } from "./localization.js";
+export {
+  createLocalizedPiiItem,
+  sanitizeLocalizedItems,
+  generatePiiId,
+  transformViewportToBitmap,
+  transformPageToBitmap,
+  transformYoloToBitmap,
+  transformBitmapToViewport
+} from "./localization.js";
 export { analyzeDomElementSemantics } from "./dom-semantics.js";
 export { fuseDetectedPiiItems, areBoundingBoxesOverlapping } from "./fusion.js";
 export { DETECTION_CONFIG, EVIDENCE_GROUPS, calculateMultiSignalConfidence } from "./config.js";
-export { analyzeTaskIntent, evaluatePiiTaskRelevance } from "./context-analyzer.js";
+export { analyzeTaskIntent, evaluatePiiTaskRelevance, inferSemanticRole, determineTaskNecessity } from "./context-analyzer.js";
 export {
   TASK_INTENT_TYPES,
   TASK_RELEVANCE_LEVELS,
+  TASK_NECESSITY_LEVELS,
+  SEMANTIC_ROLES,
   CONTEXT_EVIDENCE_CODES,
   SENSITIVITY_LEVELS,
+  SECURITY_LEVELS,
   PROCESSING_DESTINATIONS,
   POLICY_ACTIONS,
   POLICY_REASON_CODES,
+  TASK_AWARE_POLICY_REASON_CODES,
+  TASK_AWARE_POLICY_DECISION_SHAPE,
   VAULT_ENTRY_STATES,
   VAULT_PURPOSES,
   VAULT_ACCESS_RESULTS,
@@ -47,7 +60,7 @@ export {
   SYSTEM_ENVIRONMENT_REPORT_SHAPE,
   BENCHMARK_METRICS_SHAPE
 } from "../../shared-types/src/privacy-contracts.js";
-export { POLICY_VERSION, CATEGORY_SENSITIVITY_MAP, POLICY_CONFIG } from "./policy-config.js";
+export { POLICY_VERSION, CATEGORY_SENSITIVITY_MAP, PUBLIC_SAFE_CATEGORIES, DEFAULT_CATEGORY_ROLES, POLICY_CONFIG } from "./policy-config.js";
 export { evaluatePiiPolicyItem, evaluateBatchPrivacyPolicy, sanitizeRemotePayload, generateOpaqueToken, generatePiiToken } from "./policy-engine.js";
 export { VAULT_VERSION, VAULT_CONFIG } from "./vault-config.js";
 export {
@@ -55,6 +68,10 @@ export {
   privacyVault,
   storeSecret,
   retrieveSecret,
+  storeSecretWithToken,
+  retrieveSecretByToken,
+  registerToken,
+  getVaultIdForToken,
   hasSecret,
   getVaultMetadata,
   listVaultMetadata,
@@ -199,7 +216,8 @@ export {
   GoalParser,
   CONSTRAINT_OPERATORS,
   BROWSER_OPERATIONS,
-  TASK_DOMAINS
+  TASK_DOMAINS,
+  CANDIDATE_ROLES
 } from "./goal-parser.js";
 
 export {
@@ -225,3 +243,21 @@ export {
   HUGGINGFACE_DEFAULT_MODEL,
   OPENROUTER_DEFAULT_MODEL
 } from "./multimodal-vision-agent.js";
+
+export {
+  sanitizeTelemetryString,
+  sanitizeTelemetryTask,
+  sanitizeTelemetryError,
+  createSafePrivacyDecisionTelemetry,
+  sanitizeTelemetryData,
+  assertNoTelemetryLeaks
+} from "./telemetry-sanitizer.js";
+
+export {
+  VISUALIZATION_COLORS,
+  formatReviewerDecisionBadge,
+  evaluateMixedContentDemo,
+  assertCrossRepresentationConsistency
+} from "./reviewer-transparency-engine.js";
+
+

@@ -61,6 +61,48 @@ The **Privacy-Preserving Browser Agent** is fully functional end-to-end:
   - `train_vit`: ViT page context safety classifier.
   - `export`: ONNX export for on-device browser deployment via ONNX Runtime Web.
 
+### Milestone 7: Generic Multi-Step Agent Architecture, Task-Aware Privacy & Canonical Visual Redaction [COMPLETED]
+- [x] Generic element discovery and container heuristics without website-specific selectors (`packages/privacy-core/src/interactive-element-registry.js`, `apps/extension/src/action-runtime.js`).
+- [x] Semantic stale-target recovery in `BrowserActionEngine` resolving targets across dynamic DOM mutations.
+- [x] Strict action intent separation (`ADD_TO_CART` vs `BUY_NOW` vs `SUBMIT_FORM`) preserving exact user task semantics.
+- [x] Task-aware quad-state privacy policy (`REDACT`, `TOKENIZE`, `ALLOW`, `LOCAL_ONLY`) preventing over-redaction of non-sensitive metadata (titles, prices, buttons).
+- [x] Vault tokenization API (`storeSecretWithToken`, `retrieveSecretByToken`) and local DOM value injection during browser action execution.
+- [x] Canonical Bitmap Coordinate Transformation pipeline (`transformViewportToBitmap`, `transformPageToBitmap`, `transformYoloToBitmap`, `transformBitmapToViewport`) resolving spatial misalignment without arbitrary pixel offsets.
+- [x] Comprehensive 25-requirement automated test suite in `tests/generic-agent-architecture.test.mjs` (20/20 test suites pass).
+
+### Milestone 8: Compound User Intent & Generic UI Action Architecture [COMPLETED]
+- [x] Generic action intent preservation in `GoalParser` (`perform_action` + `actionIntent`) for arbitrary actions (`subscribe`, `follow`, `bookmark`, `star`, `like`, `download`, `share`, `pin`, `play`, `favorite`).
+- [x] Generic `perform_action` task planning in `TaskPlanner`.
+- [x] Explicit UI action verification in `GoalCompletionChecker` ensuring `isSatisfied: false` until target action executes successfully.
+- [x] Generic UI element matching in `apps/extension/src/popup.js` and `scripts/extension-log-server.mjs` matching accessible labels, visible text, and values without website selectors.
+- [x] Dedicated test suite in `tests/compound-intent-resolution.test.mjs` (9/9 tests pass).
+
+### Milestone 9: Generalized Intent & Context-Aware Architecture [COMPLETED]
+- [x] Compositional intent model distinguishing named `ENTITY` from navigation `DESTINATION` (`packages/privacy-core/src/goal-parser.js`).
+- [x] Preposition-derived candidate roles (`sender`, `source`, `author`, `recipient`, `brand`, `platform_scope`) as candidate hypotheses.
+- [x] Open-ended target vocabulary extensible to unseen domains (`invoice`, `pull request`, `patient record`, `flight`, `resume`, `ticket`, `mail`, `document`, `paper`).
+- [x] Context-aware & current-page-first execution in `TaskPlanner` preventing unnecessary navigation away from active web applications.
+- [x] Strict navigation gating in `apps/extension/src/popup.js` honoring `requiresExplicitNavigation` and resolving candidates by ordinal and entity constraints.
+- [x] Intent-based goal completion verification in `GoalCompletionChecker` verifying action execution on qualifying candidates.
+- [x] Comprehensive 28-test synthetic verification suite in `tests/generalized-intent-architecture.test.mjs` (28/28 tests pass).
+
+### Milestone 10: Task-Aware Privacy, Unified Sanitization, Telemetry Safety & Reviewer Visualization (Phases 1–6) [COMPLETED]
+- [x] **Phase 1**: Formalized privacy contracts and data schemas (`TASK_AWARE_POLICY_DECISION_SHAPE`, `TASK_AWARE_POLICY_REASON_CODES`, `TASK_RELEVANCE_LEVELS`, `TASK_NECESSITY_LEVELS`, `SEMANTIC_ROLES`).
+- [x] **Phase 2**: Generalized semantic role inference, task relevance, and operational necessity engine (`packages/privacy-core/src/context-analyzer.js`).
+- [x] **Phase 3 & 3.1**: Authoritative deterministic 4-way privacy decision engine (`ALLOW`, `TOKENIZE`, `REDACT`, `LOCAL_ONLY`) enforcing data minimization and security invariants (`packages/privacy-core/src/policy-engine.js`).
+- [x] **Phase 4**: Unified sanitization across DOM text, visual screenshot masks, and remote reasoning payloads consuming authoritative PolicyEngine decisions (`packages/privacy-core/src/sanitized-context-builder.js`, `image-redactor.js`, `dom-redactor.js`).
+- [x] **Phase 5**: Telemetry Safety & Observability Invariant Enforcement (`packages/privacy-core/src/telemetry-sanitizer.js`, `apps/extension/src/popup.js`, `scripts/extension-log-server.mjs`, `multimodal-vision-agent.js`) ensuring logging, error handling, SSE streams, and task submission cannot bypass privacy boundaries.
+- [x] **Phase 6**: End-to-End Privacy Validation & Reviewer Visualization (`packages/privacy-core/src/reviewer-transparency-engine.js`, `scripts/extension-log-server.mjs`, `tests/phase6-end-to-end-privacy-demo.test.mjs`) providing 4-way visual color badges (`🟢 ALLOW`, `🔴 TOKENIZE`, `⚫ REDACT`, `🔒 LOCAL_ONLY`), 7-class mixed content verification matrix, and adversarial cross-representation sentinel verification.
+
+### Milestone 11: End-to-End Runtime Privacy Validation & Live Extension Transparency (Phase 7) [COMPLETED]
+- [x] **Phase 7 Step 1**: Read-only source audit and runtime tracing verifying zero dual-decision duplication and single PolicyEngine authority.
+- [x] **Phase 7 Step 2**: Live Extension Transparency Panel (`#live-privacy-transparency-panel`) in `apps/extension/popup.html` and dynamic runtime consumption via `renderPrivacyTransparency()` in `apps/extension/src/popup.js`.
+- [x] **Controlled Generic Demo Fixture**: Pure mixed HTML fixture in `tests/fixtures/controlled-privacy-demo.html` with zero hardcoded decision metadata.
+- [x] **LOCAL_ONLY Remote Egress Correction**: Verified secrets are completely excluded (`EXCLUDED`) from remote payloads while protected locally in DOM (`[LOCAL_ONLY_PROTECTED]`) and masked in screenshots.
+- [x] **Token & Vault Consistency**: Verified single token consistency across DOM, Remote, PolicyEngine, and PrivacyVault.
+- [x] **Dedicated Automated Test Suite**: 10-requirement validation suite in `tests/phase7-runtime-transparency.test.mjs` (10/10 tests pass).
+- [x] **Zero Hardcoding Invariant**: Source audit verified zero website-specific or decision-mapping branches introduced.
+
 ---
 
 ## Next Enhancement Items
@@ -68,3 +110,5 @@ The **Privacy-Preserving Browser Agent** is fully functional end-to-end:
 - [ ] **Physical ONNX Model Binaries in Extension Package**: Package trained `yolo_pii.onnx` and `vit_context.onnx` directly into `apps/extension/` for local visual inference.
 - [ ] **Voice Input for Agent Tasks**: Add Web Speech API integration in extension popup.
 - [ ] **Multi-Tab Orchestration**: Extend planner to coordinate tasks across multiple browser tabs concurrently.
+
+
