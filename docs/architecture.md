@@ -1,86 +1,111 @@
-# Architecture Decisions & Trust Boundary
+# System Architecture & Trust Boundary
 
-> 📌 **Mandatory Note for AI Agents**: Read [`../AGENTS.md`](../AGENTS.md) and [`../to-do.md`](../to-do.md) first before modifying architecture or data flows.
-
----
-
-## 1. The Trust Boundary
-
-The Chrome Extension and Privacy Core run strictly on-device. Raw webpage DOM, unmasked PII, credentials, and the local privacy vault never leave the user's device.
-
-Only a sanitized, privacy-filtered payload is permitted to cross the network boundary to reasoning models or telemetry services.
+> 📌 **Reference**: For master invariants, consult [`../AGENTS.md`](../AGENTS.md) and [`../to-do.md`](../to-do.md).
 
 ---
 
-## 2. End-to-End Data Flow
+## 1. Architectural Overview
+
+The **Privacy-Preserving Autonomous Browser Agent** enforces a strict separation between **local browser execution** and **remote AI reasoning**. Autonomous browser automation typically requires sending full DOM trees and screenshots to external multimodal LLMs, which leaks raw Personally Identifiable Information (PII), credentials, session tokens, and financial data.
+
+This architecture introduces an on-device privacy filter that inspects, analyzes, and sanitizes all page context before any data crosses the external network boundary.
 
 ```text
                                   LOCAL CLIENT BROWSER
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
 │                                                                                         │
-│  Live Webpage DOM ──► Dynamic Perception (InteractiveElementRegistry: el_1, el_2)        │
+│  User Task ──► GoalParser ──► TaskPlanner                                               │
+│                     │                                                                   │
+│                     ▼                                                                   │
+│  Live Webpage DOM ──► Dynamic Perception (InteractiveElementRegistry: el_1, el_2, ...)  │
 │          │                                                                              │
-│          ├──────────► Local PII Detection & Luhn Validator (content-pii.js)             │
+│          ├──────────► On-Device Detection (content-pii.js, GLiNER, YOLO, OCR)           │
 │          │                               │                                              │
 │          │                               ▼                                              │
-│          │                 Privacy Policy Engine (policy-engine.js)                     │
+│          │                 ContextAnalyzer (context-analyzer.js)                        │
+│          │                               │ (Role, Necessity, Relevance)                 │
+│          │                               ▼                                              │
+│          │                 PolicyEngine (policy-engine.js) [AUTHORITATIVE DECISION]     │
 │          │                 ├── ALLOW                                                    │
+│          │                 ├── TOKENIZE ──► PrivacyVault (privacy-vault.js)             │
 │          │                 ├── REDACT                                                   │
-│          │                 ├── TOKENIZE                                                 │
-│          │                 └── LOCAL_ONLY ──► In-Memory Local Vault (privacy-vault.js)  │
+│          │                 └── LOCAL_ONLY ──► PrivacyVault (Critical Secrets)           │
 │          │                                                                              │
 │          ▼                                                                              │
-│  MultimodalVisionAgent (multimodal-vision-agent.js)                                     │
-│  ├── 1. Redacted Screenshot: On-device visual PII bounding box blackouts                │
-│  └── 2. Sanitized DOM Context: Semantic elements with abstract IDs el_1, el_2          │
+│  MultimodalVisionAgent & Sanitizers                                                     │
+│  ├── DOM Sanitizer: Text masked or replaced with tokens                                 │
+│  ├── Screenshot Sanitizer: On-device visual bounding-box solid redaction               │
+│  └── Telemetry Sanitizer: Audited logging stream (telemetry-sanitizer.js)               │
 │                                                                                         │
 └──────────────────────────────────────────┬──────────────────────────────────────────────┘
-                                           │ (Sanitized Egress / Port 8765 Relay)
+                                           │ (Sanitized Egress: Tokens, Redacted Image, Opaque IDs)
                                            ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
 │                           REMOTE MODEL REASONING BOUNDARY                               │
 │                                                                                         │
-│  Hugging Face (Qwen3-VL-4B) / OpenRouter / Groq / Local Heuristic                       │
-│  • Consumes: Redacted Screenshot + Sanitized DOM tree                                   │
-│  • Produces: Abstract Action Intent (e.g. CLICK el_3, TYPE el_1 "white shoes")          │
+│  External Reasoning Models (Hugging Face / OpenRouter / Groq / Local Heuristic)          │
+│  • Consumes: Redacted Screenshot + Sanitized Structural DOM + Abstract IDs (el_1, el_2) │
+│  • Emits: Abstract Action Intent (e.g. CLICK el_5, TYPE el_1 "{{EMAIL_1}}")             │
+│  • Has ZERO access to raw PII, passwords, OTPs, or Privacy Vault storage                │
 │                                                                                         │
 └──────────────────────────────────────────┬──────────────────────────────────────────────┘
-                                           │ (Action Proposals Only)
+                                           │ (Abstract Action Intent Only)
                                            ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
 │                               LOCAL EXECUTION AUTHORITY                                 │
 │                                                                                         │
 │  BrowserActionEngine (browser-action-engine.js)                                         │
-│  • Validates target existence and freshness (isConnected check)                         │
-│  • Authorizes vault secret injection for local input if approved                        │
+│  • Validates target existence and DOM freshness                                         │
+│  • Injects real vault values locally if authorized for action execution                 │
 │                                                                                         │
 │  ActionRuntime (action-runtime.js) & DomDriver (dom-driver.js)                          │
-│  • safeClick: Disarms javascript:void(0) pseudo-protocols to eliminate MV3 CSP errors  │
-│  • Executes authoritative DOM mutations: CLICK, TYPE, CHECK, SELECT, PRESS_KEY          │
+│  • safeClick: Disarms javascript: pseudo-protocols to eliminate MV3 CSP errors          │
+│  • Executes authoritative browser mutations: CLICK, TYPE, CHECK, SELECT, PRESS_KEY      │
 │                                                                                         │
 └─────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 3. Policy Decision Precedence
+## 2. Core Components & Responsibilities
 
-The local privacy engine enforces four deterministic decisions before any data may be handled:
-
-1. **`ALLOW`**: Explicitly non-sensitive data (e.g. search keywords like `"running shoes"`, public UI labels).
-2. **`LOCAL_ONLY`**: High-security credentials (passwords, payment cards, OTPs) used strictly for authorized local browser actions. Never sent remotely.
-3. **`TOKENIZE`**: Context-relevant sensitive items needed for reference (e.g. email replaced by `{{EMAIL_1}}`). The raw value remains in the local vault.
-4. **`REDACT`**: Sensitive or uncertain information not needed for task completion is permanently masked. Default decision.
+| Component | Location | Primary Responsibility |
+| :--- | :--- | :--- |
+| **GoalParser** | [`packages/privacy-core/src/goal-parser.js`](../packages/privacy-core/src/goal-parser.js) | Parses natural-language user instructions into structured goals, candidate roles, constraints, and required operations. |
+| **TaskPlanner** | [`packages/privacy-core/src/task-planner.js`](../packages/privacy-core/src/task-planner.js) | Decomposes structured goals into multi-step executable sub-tasks (`search`, `filter`, `fill_form`, `submit_form`). |
+| **Perception Layer** | [`packages/privacy-core/src/interactive-element-registry.js`](../packages/privacy-core/src/interactive-element-registry.js) | Discovers interactive DOM nodes dynamically, assigning abstract element IDs (`el_1`, `el_2`) and spatial coordinates. |
+| **ContextAnalyzer** | [`packages/privacy-core/src/context-analyzer.js`](../packages/privacy-core/src/context-analyzer.js) | Evaluates contextual signals: semantic role, task relevance, operational necessity, and sensitivity. |
+| **PolicyEngine** | [`packages/privacy-core/src/policy-engine.js`](../packages/privacy-core/src/policy-engine.js) | **Single authoritative privacy decision-maker**. Emits deterministic decisions (`ALLOW`, `TOKENIZE`, `REDACT`, `LOCAL_ONLY`). |
+| **PrivacyVault** | [`packages/privacy-core/src/privacy-vault.js`](../packages/privacy-core/src/privacy-vault.js) | Temporary in-memory vault for token-to-secret mappings. Strictly local; completely inaccessible to remote reasoning. |
+| **SanitizedContextBuilder** | [`packages/privacy-core/src/sanitized-context-builder.js`](../packages/privacy-core/src/sanitized-context-builder.js) | Constructs sanitized DOM context for outbound payloads, replacing sensitive text with tokens or redaction markers. |
+| **ImageRedactor** | [`packages/privacy-core/src/image-redactor.js`](../packages/privacy-core/src/image-redactor.js) | Masks sensitive visual bounding boxes on-device before screenshots leave the client. |
+| **TelemetrySanitizer** | [`packages/privacy-core/src/telemetry-sanitizer.js`](../packages/privacy-core/src/telemetry-sanitizer.js) | Scrubs raw user tasks, credentials, and vault internals from logging and observability channels. |
+| **BrowserActionEngine** | [`packages/privacy-core/src/browser-action-engine.js`](../packages/privacy-core/src/browser-action-engine.js) | **Sole local execution authority**. Validates proposed actions and resolves local vault tokens before DOM mutation. |
+| **DomDriver & ActionRuntime** | [`packages/privacy-core/src/dom-driver.js`](../packages/privacy-core/src/dom-driver.js), [`apps/extension/src/action-runtime.js`](../apps/extension/src/action-runtime.js) | Executes authorized actions in the live DOM. Includes `safeClick` CSP mitigation. |
+| **Extension UI & Transparency** | [`apps/extension/src/popup.js`](../apps/extension/src/popup.js), [`apps/extension/popup.html`](../apps/extension/popup.html) | User interface rendering live task execution, model selection, and the runtime privacy transparency panel. |
 
 ---
 
-## 4. CSP-Safe Navigation & Click Invariant
+## 3. Trust Boundaries & Invariants
 
-Webpages frequently attach click handlers to anchors with pseudo-protocol hrefs (e.g. `<a href="javascript:void(0)">` on Amazon). When clicked from an extension context, the browser default action attempts to navigate to the JavaScript URL, violating Chrome Manifest V3 Content Security Policy.
+### Invariant 1: Single Policy Decision Authority
+All outbound data channels (DOM serialization, visual screenshots, remote payloads, and telemetry) consume decisions produced exclusively by the **`PolicyEngine`**. No subsystem creates parallel or conflicting privacy policies.
 
-The `safeClick` engine:
-1. Temporarily disarms the anchor's `href` attribute.
-2. Attaches a capturing `preventDefault` handler.
-3. Dispatches realistic mouse events (`mousedown`, `mouseup`, `click`) and executes `.click()`.
-4. Restores the original `href` in a `finally` block.
-This ensures 100% compatibility with all webpage event listeners while completely eliminating CSP errors.
+### Invariant 2: Local Execution Authority
+Remote AI models act strictly as reasoning advisors proposing abstract element actions (e.g. `CLICK el_5`). The **`BrowserActionEngine`** running in the local browser extension evaluates validity, checks target connectivity, and retains sole authority to execute DOM changes.
+
+### Invariant 3: Zero Remote Access to PrivacyVault
+The **`PrivacyVault`** exists purely in client memory. Tokens (e.g. `{{EMAIL_1}}`) are resolved back to real values only at the moment of local DOM action execution. Remote reasoning engines never receive access to vault contents or token mapping dictionaries.
+
+### Invariant 4: Dual-Modality Redaction Parity
+A sensitive entity classified as `TOKENIZE`, `REDACT`, or `LOCAL_ONLY` is protected in **both** text and visual modalities. When an image screenshot is captured, the corresponding visual bounding box is blacked out on-device before transmission.
+
+### Invariant 5: CSP-Safe Action Execution
+Clicking elements with `javascript:` pseudo-protocols (e.g. `<a href="javascript:void(0)">`) in Chrome Manifest V3 can trigger CSP violations. The `safeClick` routine disarms pseudo-protocols temporarily, dispatches native DOM events, and restores attributes in a `finally` block.
+
+---
+
+## 4. Hardware & Acceleration Architecture
+
+- **WebGPU Manager** ([`packages/privacy-core/src/webgpu-manager.js`](../packages/privacy-core/src/webgpu-manager.js)): Implements two-stage hardware detection (browser API availability + ONNX Runtime provider compatibility) to accelerate on-device neural models with graceful fallback to WASM or CPU.
+- **Privacy Safeguard**: Capability reporting exposes only coarse capability tiers (`high-performance` vs `fallback`) without leaking hardware vendor strings or GPU fingerprints.

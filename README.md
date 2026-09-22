@@ -1,128 +1,240 @@
 # Privacy-Preserving Autonomous Browser Agent
 
-> 🚨 **MANDATORY INSTRUCTION FOR ALL INCOMING AI AGENTS & DEVELOPERS** 🚨:
-> In **EVERY** new conversation, session, or task, you **MUST** read and review the `.md` documentation files **FIRST** before analyzing, modifying, or executing any code in this repository.
-> Start with [`AGENTS.md`](AGENTS.md), then [`to-do.md`](to-do.md), [`progress.md`](progress.md), and [`DEMO_WALKTHROUGH.md`](DEMO_WALKTHROUGH.md).
-
-> **Smart India Hackathon (SIH 2026)**
-> A privacy-first autonomous browser agent that perceives webpages, reasons over structural DOM and visual layout, and executes multi-step web tasks while keeping 100% of sensitive information and secrets strictly on the user's local device.
+> **Smart India Hackathon (SIH 2026)**  
+> A task-aware, on-device privacy filter and autonomous browser agent architecture that enables natural-language web task automation while keeping sensitive personal information, credentials, and visual pixels strictly protected on the user's local device.
 
 ---
 
-## 🔒 The Zero-Leakage Privacy Boundary
+## 1. Project Overview
 
-Raw sensitive data **NEVER** leaves the client's browser. The extension detects sensitive content locally and enforces strict on-device privacy decisions before sharing sanitized context with remote models:
+Autonomous browser agents typically send complete DOM trees and raw webpage screenshots to cloud-hosted multimodal AI models to determine navigation and interaction steps. This design introduces severe privacy risks: personal identity numbers, email addresses, contact phone numbers, session tokens, passwords, and payment card details are routinely transmitted across external networks.
 
-- **`REDACT`** — Replaces irrelevant sensitive data with opaque redaction markers.
-- **`TOKENIZE`** — Replaces task-relevant sensitive fields with local abstract references (e.g. `{{EMAIL_1}}`, `{{PHONE_1}}`).
-- **`LOCAL_ONLY`** — Retains high-security secrets (passwords, OTPs, credit cards) exclusively inside the local encrypted privacy vault. The remote AI receives only abstract actions.
-- **Dual-Modality Redaction**: Visual perception and OCR happen on-device. When screenshots are sent to multimodal reasoning models, detected sensitive regions are blacked out on-device beforehand.
-- **CSP-Safe Execution Authority**: Action execution happens exclusively within the local browser runtime with `safeClick` disarming `javascript:` pseudo-protocols to prevent Content Security Policy violations.
+This project introduces a **100% On-Device Privacy Boundary** for browser automation. Before any data leaves the client browser, an on-device perception and policy engine analyzes the page context, determines task relevance, and strictly sanitizes text, visual pixels, and remote payloads. Local browser actions are executed with authoritative local control, ensuring that external AI models receive only the abstract context necessary to deduce the user's intent.
 
 ---
 
-## 🚀 Quickstart & Workflows
+## 2. Core Idea: Task-Aware Data Minimization
 
-### 1. Build Extension Bundle
-```bash
-node scripts/build-extension.mjs
+The system enforces **Task-Aware Data Minimization**:
+> *Remote AI models act as reasoning advisors and receive only the minimum information required for the task. High-security credentials and raw personal data remain exclusively inside the local browser runtime.*
+
+### The Four Deterministic Privacy Outcomes
+
+The on-device **`PolicyEngine`** evaluates contextual signals (semantic role, task necessity, relevance, and sensitivity) and assigns one of four authoritative decisions:
+
+| Decision | Meaning | Representation in Remote Payload | Representation in DOM | Screenshot Visual Masking |
+| :--- | :--- | :--- | :--- | :--- |
+| **`ALLOW`** | Safe public information needed for task comprehension. | Raw safe value (e.g. `"Running Shoes"`, `"$199.99"`) | Unmodified | **Clear (Unmasked)** |
+| **`TOKENIZE`** | Sensitive data required for task reasoning where an abstract reference suffices. | Opaque Token (e.g. `{{EMAIL_1}}`, `{{PHONE_1}}`) | Replaced with token | **Masked (Solid Blackout)** |
+| **`REDACT`** | Sensitive data unnecessary for the task or incidental page data. | `[REDACTED]` marker | Replaced with `[REDACTED]` | **Masked (Solid Blackout)** |
+| **`LOCAL_ONLY`** | Critical security secrets (passwords, OTP/2FA codes, payment credentials). | **EXCLUDED** (Omitted entirely from payload) | Protected locally `[LOCAL_ONLY_PROTECTED]` | **Masked (Solid Blackout)** |
+
+---
+
+## 3. System Architecture
+
+```text
+User Task
+    ↓
+GoalParser ──► TaskPlanner
+    ↓
+Browser Observation / Perception (InteractiveElementRegistry: el_1, el_2, ...)
+    ↓
+ContextAnalyzer (Semantic Roles, Task Relevance, Operational Necessity)
+    ↓
+PolicyEngine [AUTHORITATIVE DECISION]
+    ↓
+┌──────────────┬──────────────┬──────────────┐
+│     DOM      │  Screenshot  │    Remote    │
+│  Sanitizer   │  Sanitizer   │   Context    │
+└──────────────┴──────────────┴──────────────┘
+    ↓
+PrivacyVault (Temporary Local In-Memory Storage)
+    ↓
+BrowserActionEngine (Local Execution Authority & safeClick CSP Defense)
 ```
-Generates production files in `apps/extension/dist/`.
 
-### 2. Launch Observability Server & Live Telemetry Dashboard
-```bash
-node scripts/extension-log-server.mjs
-```
-- **Live Web Dashboard**: `http://127.0.0.1:8765`
-- **Real-Time SSE Stream**: `http://127.0.0.1:8765/api/events/stream`
-- **Telemetry Ingestion API**: `http://127.0.0.1:8765/api/events`
-- **JSON Audit Export**: `http://127.0.0.1:8765/api/export`
-
-### 3. Load Extension in Google Chrome
-1. Navigate to `chrome://extensions` in Google Chrome.
-2. Toggle **Developer mode** ON (top-right switch).
-3. Click **Load unpacked** and select the folder:
-   `apps/extension`
-4. The extension icon will appear in your Chrome toolbar.
-5. To reload after code changes, simply click the **`🔄 Reload`** button in the popup header.
-
-### 4. Run Automated Tests
-```bash
-# Run privacy, DOM action, and observability test suites
-node --test tests/generic-dom-actions.test.mjs tests/observability-backend.test.mjs tests/content-pii-scan.test.mjs tests/groq-model-provider.test.mjs
-```
+### End-to-End Privacy Flow
+1. **Perception**: Dynamic DOM discovery assigns opaque element IDs (`el_1`, `el_2`, ...) and bounding boxes. On-device detectors (regex, DOM semantics, OCR, YOLO, GLiNER) identify candidate entities.
+2. **Context Analysis**: The `ContextAnalyzer` evaluates the relationship between detected data and user intent, deriving semantic roles (`ACCOUNT_IDENTIFIER`, `RECIPIENT`, `AUTH_SECRET`, etc.) and task necessity.
+3. **Authoritative Policy Decision**: The `PolicyEngine` issues an immutable decision (`ALLOW`, `TOKENIZE`, `REDACT`, `LOCAL_ONLY`).
+4. **Unified Enforcement**:
+   - **DOM Sanitizer**: Replaces sensitive nodes with abstract tokens or redaction markers.
+   - **Screenshot Sanitizer**: Solid blackouts are applied to bounding boxes on an in-memory canvas before visual export.
+   - **Remote Payload Builder**: Formats the JSON payload, replacing tokenized fields and completely excluding `LOCAL_ONLY` secrets.
+5. **Local Execution**: The remote model proposes an action (e.g. `CLICK el_5` or `TYPE el_1 "{{EMAIL_1}}"`). The local `BrowserActionEngine` resolves the token from `PrivacyVault` and executes the DOM mutation using `safeClick`.
 
 ---
 
-## 🤖 Supported Reasoning Models
+## 4. Key Privacy Mechanisms
 
-The browser agent supports free-tier multimodal and reasoning models:
+### A. Tokenization & Local Privacy Vault
+When a field is relevant to reasoning but sensitive (e.g. recipient email address), the system generates an opaque token (e.g. `{{EMAIL_1}}`). The raw value is stored in an isolated, in-memory `PrivacyVault` with TTL expiration. Remote reasoning models only observe and manipulate the token.
 
-1. **Hugging Face Serverless (Multimodal Vision Agent)**:
-   - Model: `Qwen/Qwen3-VL-4B-Instruct`
-   - Requirement: Free Hugging Face User Access Token (`hf_...`)
-   - Capabilities: Dual-modality ingestion (redacted screenshot + sanitized DOM tree)
-2. **OpenRouter (Free Tier)**:
-   - Models: `qwen/qwen-2.5-vl-72b-instruct:free`, `google/gemma-2-9b-it:free`, `meta-llama/llama-3.2-11b-vision-instruct:free`
-   - Requirement: Free OpenRouter API Key
-3. **Groq (Fast Cloud Inference)**:
-   - Model: `llama-3.3-70b-versatile`
-   - Requirement: Groq API Key
-4. **Local On-Device Heuristic Planner (100% Offline & Free)**:
-   - Requirement: None (zero API key, zero network egress, runs 100% locally on port 8765 or in-browser)
+### B. Dual-Modality Visual Screenshot Privacy
+Multimodal vision models receive screenshots where all bounding boxes corresponding to `TOKENIZE`, `REDACT`, and `LOCAL_ONLY` data are overwritten with solid black rectangles on-device. Raw screenshot bitmaps are never transmitted.
 
----
+### C. Telemetry & Observability Boundary
+All logging, SSE event streams, and error boundaries pass through `telemetry-sanitizer.js`. The tested telemetry paths are audited and protected against evaluated raw-value, credential, and vault-mapping leakage.
 
-## 🎯 WebPII Object Detection (YOLO11n Fine-Tuning)
+### D. Reviewer Transparency Layer
+The extension popup provides a live **Privacy Transparency Panel** rendering reviewer-friendly badges:
+- `🟢 ALLOW`: Public / Safe context.
+- `🔴 TOKENIZE`: Abstract tokenized reference.
+- `⚫ REDACT`: Unnecessary sensitive data masked.
+- `🔒 LOCAL_ONLY`: Critical credential isolated to local execution.
 
-This sub-project fine-tunes a pretrained **YOLO11n** (`yolo11n.pt`) detector for on-device detection of 16 categories of Personally Identifiable Information (PII) on rendered webpage screenshots.
+> 💡 **Important Architectural Note**: The visual colors are for presentation only. They consume the actual `PolicyDecision` generated on-device by the `PolicyEngine` and do not define or alter privacy logic.
 
-### Key Experiment Details
-- **Architecture**: Ultralytics **YOLO11n** (Nano) starting from pretrained `yolo11n.pt` weights.
-- **Dataset**: `datasets/webpii_yolo/`
-  - **Train**: 40,384 images, 40,384 labels (469,135 annotations)
-  - **Test**: 4,481 images, 4,481 labels (51,715 annotations)
-  - **Total**: 44,865 images, 520,850 annotations across 16 classes
-- **16 PII Classes**:
-  ```text
-  0: NAME             4: LOCATION         8: SECURITY_CODE    12: GIFT_CODE
-  1: EMAIL            5: POSTCODE         9: USERNAME         13: COMPANY
-  2: PHONE            6: DATE_OF_BIRTH   10: PASSWORD         14: COUNTRY
-  3: ADDRESS          7: PAYMENT_CARD    11: PROMO_CODE       15: OTHER_PII
-  ```
+### E. Zero Website-Specific Hardcoding
+The privacy model operates strictly on semantic roles, accessible labels, input types, and task necessity. It contains zero hardcoded selector lists, task-matching rules, or website-specific branches (e.g. Amazon, Google, Flipkart).
 
 ---
 
-## 📁 Repository Layout
+## 5. Repository Layout
 
 ```text
 privacy-preserving-browser-agent/
 ├── apps/
-│   └── extension/             Chrome Extension (Manifest V3 popup, DOM perception, action runtime)
+│   └── extension/             # Chrome Extension (Manifest V3 popup, DOM perception, action runtime)
+│       ├── manifest.json      # MV3 extension manifest
+│       ├── popup.html         # User popup UI with live transparency panel
+│       └── src/
+│           ├── popup.js       # Re-Act agent loop, model dispatcher, transparency renderer
+│           └── action-runtime.js # Authoritative local DOM executor with safeClick
 ├── packages/
-│   ├── privacy-core/          On-device PII detection, tokenization, vault, DOM registry, & vision agent
-│   └── shared-types/          Shared schemas and privacy contracts
+│   ├── privacy-core/          # Core on-device privacy, perception, and action library
+│   │   └── src/
+│   │       ├── goal-parser.js                # Natural-language intent & constraint extractor
+│   │       ├── task-planner.js               # Multi-step task planner
+│   │       ├── interactive-element-registry.js# Dynamic DOM perception & abstract IDs (el_1, el_2)
+│   │       ├── context-analyzer.js           # Semantic role & necessity analysis
+│   │       ├── policy-engine.js              # Authoritative 4-way decision framework
+│   │       ├── privacy-vault.js              # In-memory isolated local vault
+│   │       ├── dom-redactor.js               # DOM text masking & token injection
+│   │       ├── image-redactor.js             # Visual bounding box blackout engine
+│   │       ├── sanitized-context-builder.js  # Outbound payload builder
+│   │       ├── telemetry-sanitizer.js        # Logging & audit stream scrubber
+│   │       └── browser-action-engine.js      # Authoritative local execution engine
+│   └── shared-types/          # Contracts, schemas, and necessity/role enums
 ├── services/
-│   └── reasoning-backend/     Sanitized remote reasoning adapter & payload validation
-├── models/                    SIH 2026 on-device ML training pipeline (YOLOv8 + ViT + ONNX)
-├── datasets/webpii_yolo/      44,865 image WebPII dataset in YOLO format
-├── scripts/                   Build tools, live log server, dataset verifiers, and demo scripts
-│   ├── build-extension.mjs    Extension bundler (ESBuild)
-│   ├── extension-log-server.mjs Observability backend & SSE dashboard on port 8765
-│   ├── run-sih-demo.mjs       Automated 3-scenario SIH demonstration runner
-│   ├── verify_dataset.py      Dataset integrity checker
-│   ├── check_environment.py   Hardware & CUDA diagnostic tool
-│   ├── train_yolo.py          GPU training runner
-│   └── evaluate_yolo.py       Full test-split metric evaluator
-└── tests/                     328+ automated privacy, security, and DOM action test suites
+│   └── reasoning-backend/     # Remote reasoning adapter and payload firewall
+├── models/
+│   └── sih_training_pipeline.py # 5-stage ML training pipeline (YOLOv8 + ViT + ONNX)
+├── scripts/
+│   ├── build-extension.mjs    # ESBuild extension bundler
+│   ├── extension-log-server.mjs # Observability backend & SSE dashboard on port 8765
+│   └── run-sih-demo.mjs       # Automated 3-scenario demo runner
+├── tests/
+│   ├── fixtures/
+│   │   └── controlled-privacy-demo.html # Generic mixed-content test fixture
+│   └── *.test.mjs             # 14 automated test suites (570 tests)
+└── docs/                      # Architectural documentation and guides
+    ├── architecture.md        # Detailed trust boundary and component map
+    ├── privacy-model.md       # Decision framework, semantic roles, and necessity levels
+    ├── data-flow.md           # End-to-end data lifecycle across representations
+    ├── reviewer-demo.md       # Step-by-step evaluator guide & presentation script
+    ├── testing.md             # Test organization and verified test execution output
+    └── limitations.md         # Documented engineering boundaries
 ```
 
 ---
 
-## 📖 Key Documentation
+## 6. Installation & Setup
 
-- **[`AGENTS.md`](AGENTS.md)** — Master guide, architectural invariants, and mandatory reading order.
-- **[`to-do.md`](to-do.md)** — Active roadmap and completion status.
-- **[`progress.md`](progress.md)** — Detailed historical changelog.
-- **[`DEMO_WALKTHROUGH.md`](DEMO_WALKTHROUGH.md)** — Step-by-step verification flows and demonstration scripts.
-- **[`DEPLOYMENT.md`](DEPLOYMENT.md)** — Setup and deployment manual.
+### Prerequisites
+- **Node.js**: `v20.0.0` or higher
+- **Google Chrome**: Version 118+ (Manifest V3 support)
+
+### Installation
+Clone the repository and install root dependencies:
+```bash
+npm install
+```
+
+### Build Chrome Extension
+Bundle the extension scripts into `apps/extension/dist/`:
+```bash
+node scripts/build-extension.mjs
+```
+
+---
+
+## 7. Running & Testing
+
+### 1. Load Extension in Google Chrome
+1. Open Google Chrome and navigate to `chrome://extensions`.
+2. Toggle **Developer mode** ON (top right).
+3. Click **Load unpacked** and select the folder:
+   `apps/extension`
+4. Pin the extension to your Chrome toolbar.
+5. To reload after making changes, click the built-in **`🔄 Reload`** button in the popup header.
+
+### 2. Run Automated Regression Test Suite
+Run all automated test suites:
+```bash
+node --test tests/*.test.mjs
+```
+
+**Verified Test Status**:
+```text
+# tests: 570
+# suites: 14
+# pass:  570
+# fail:  0
+# duration: ~6.7s
+```
+
+### 3. Launch Live Observability Dashboard (Optional)
+```bash
+node scripts/extension-log-server.mjs
+```
+- Dashboard UI: `http://127.0.0.1:8765`
+- Real-time SSE Stream: `http://127.0.0.1:8765/api/events/stream`
+
+---
+
+## 8. Reviewer Demonstration Walkthrough
+
+For evaluating judges and technical reviewers:
+
+1. **Open Controlled Fixture**: Open [`tests/fixtures/controlled-privacy-demo.html`](tests/fixtures/controlled-privacy-demo.html) in a Chrome tab. This is a generic test portal containing public product info, personal email/phone, and account credentials.
+2. **Scan Page Locally**: Open the extension popup and click **"🔍 Scan page locally for PII"**.
+3. **Inspect Privacy Decisions**:
+   - Product title and price receive `🟢 ALLOW`.
+   - Recipient email receives `🔴 TOKENIZE`.
+   - Incidental customer phone receives `⚫ REDACT`.
+   - Account password and 2FA OTP receive `🔒 LOCAL_ONLY`.
+4. **Inspect Redacted DOM**: Click **"View Redacted DOM"** to verify that credentials are protected (`[LOCAL_ONLY_PROTECTED]`) and elements have opaque IDs (`el_1`, `el_2`, ...).
+5. **Run Agent Task**: Enter `change the email to alex@gmail.com and click on confirm Order` and run the agent to observe local form update and safe click execution.
+
+*For complete evaluation scripts and guidelines, consult [`docs/reviewer-demo.md`](docs/reviewer-demo.md).*
+
+---
+
+## 9. Security & Boundary Model
+
+- **Local Execution Authority**: Only the local extension runtime has authority to execute DOM changes.
+- **Remote Reasoning Boundary**: Remote LLMs act as advisory planning agents receiving only sanitized context.
+- **Privacy Vault**: Ephemeral in-memory storage with zero remote egress APIs.
+- **Telemetry Boundary**: Audited and scrubbed of raw user tasks and secrets.
+
+*(The tested telemetry and boundary paths were audited and protected against evaluated raw-value leakage cases. As with any software system, security is maintained through defense-in-depth rather than claims of absolute impossibility).*
+
+---
+
+## 10. Known Limitations
+
+1. **Generic Natural-Language Action Planning**: Highly ambiguous or non-standard conversational phrasing without standard prepositional cues (`to`, `with`, `as`) may occasionally require manual form completion, though privacy boundaries remain strictly enforced.
+2. **High-Entropy Unstructured Secrets**: Arbitrary random secret strings appearing as plain unstructured text in generic containers without standard semantic attributes or prefixes may not be classified as secrets.
+3. **Active Tab Focus**: Certain keyboard and focus-dependent DOM events require the browser tab to remain focused during execution.
+
+*For full engineering details, see [`docs/limitations.md`](docs/limitations.md).*
+
+---
+
+## 11. Future Enhancements
+
+- **Direct In-Extension ONNX Model Packaging**: Package quantized `yolo_pii.onnx` and `vit_context.onnx` directly inside the extension bundle for offline visual neural inference.
+- **Multi-Tab Orchestration**: Extend planner coordination across concurrent browser tabs.
+- **Voice Agent Interface**: Integrate Web Speech API for voice-driven task initiation.
