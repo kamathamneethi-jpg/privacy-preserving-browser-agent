@@ -260,4 +260,14 @@ export {
   assertCrossRepresentationConsistency
 } from "./reviewer-transparency-engine.js";
 
+export {
+  createAgentState,
+  updateAgentStateFromVlm,
+  recordAgentAction,
+  detectExecutionLoop
+} from "./vlm-agent-state.js";
 
+export {
+  validateVlmAction,
+  SUPPORTED_VLM_ACTION_TYPES
+} from "./vlm-action-validator.js";

@@ -1,743 +1,1295 @@
-Modify the existing browser agent so that it operates as a **goal-driven, multi-step browser agent** instead of converting the user's entire request into a single search query.
+# Implement Qwen VLM–Driven Agent Execution Architecture
 
-The system must work for arbitrary browser tasks, not just shopping.
+## Objective
 
-## Core requirement
+Refactor the existing Privacy-Preserving Browser Agent so that **all natural-language understanding, task decomposition, task sequencing, UI reasoning, and next-action selection are performed by the Qwen VLM agent**.
 
-A complex user request must be decomposed into smaller executable tasks.
+Remove the existing deterministic/local planning pipeline from the execution path.
 
-The agent must repeatedly:
+The extension should become the agent's **working memory, privacy layer, action validator, and browser executor**, while Qwen becomes the **reasoning and planning engine**.
+
+Do NOT create another regex-based planner, deterministic GoalPlanner, TaskPlanner, keyword parser, or hardcoded workflow engine to replace the existing planners.
+
+---
+
+# 1. Remove the Existing Deterministic Planning Pipeline
+
+Find and remove/disable the execution dependency on:
+
+* `GoalParser`
+* `TaskPlanner`
+* deterministic goal decomposition
+* regex-based task generation
+* hardcoded task sequences
+* domain-specific workflow planners
+* hardcoded assumptions such as:
+
+```text
+navigate → search → filter → select → submit
+```
+
+The browser workflow must NOT be predetermined by local code.
+
+The extension must not attempt to infer:
+
+```text
+task_1
+task_2
+task_3
+...
+```
+
+from the user's sentence.
+
+Instead:
+
+```text
+User request
++
+DOM
++
+Screenshot
++
+existing agent state
+        ↓
+      Qwen
+        ↓
+Task plan + current task + next action
+```
+
+Qwen is responsible for understanding the request and determining the workflow.
+
+---
+
+# 2. Qwen Is the Planner and UI Reasoning Agent
+
+Qwen must receive the original user request directly.
+
+Do not preprocess the request into a deterministic task list.
+
+For example, if the user says:
+
+> Open Amazon, search for 1TB SSD and add WD Black into the cart.
+
+Qwen should receive the original request:
+
+```text
+USER GOAL:
+Open Amazon, search for 1TB SSD and add WD Black into the cart.
+```
+
+along with:
+
+```text
+CURRENT DOM
+CURRENT SCREENSHOT
+AGENT STATE
+RECENT ACTION HISTORY
+```
+
+Qwen should independently determine:
+
+1. What the user wants.
+2. What the overall task should be.
+3. What subtasks are required.
+4. Which task should currently be performed.
+5. What browser action should be performed next.
+6. Whether the current task has completed.
+7. Whether the plan needs to be modified because the webpage differs from expectations.
+
+---
+
+# 3. Extension Agent State
+
+Create a persistent state object owned by the extension.
+
+The extension is the source of truth for execution state.
+
+Use a structure similar to:
+
+```javascript
+{
+  sessionId: "...",
+
+  goal: {
+    userRequest: "Open Amazon, search for 1TB SSD and add WD Black into the cart.",
+    status: "in_progress"
+  },
+
+  tasks: [
+    {
+      id: "task_1",
+      description: "Open Amazon",
+      status: "completed"
+    },
+    {
+      id: "task_2",
+      description: "Search for 1TB SSD",
+      status: "in_progress"
+    },
+    {
+      id: "task_3",
+      description: "Find the WD Black 1TB SSD",
+      status: "pending"
+    },
+    {
+      id: "task_4",
+      description: "Add the selected WD Black 1TB SSD to the cart",
+      status: "pending"
+    }
+  ],
+
+  currentTaskId: "task_2",
+
+  completedTasks: [
+    "task_1"
+  ],
+
+  pendingTasks: [
+    "task_3",
+    "task_4"
+  ],
+
+  actionHistory: [],
+
+  lastAction: null,
+
+  status: "running",
+
+  iteration: 0
+}
+```
+
+Do not hardcode the tasks.
+
+The tasks above are only an example.
+
+Qwen must generate them dynamically.
+
+---
+
+# 4. Initial Agent Invocation
+
+When the user submits a request:
+
+1. Store the raw user request locally.
+2. Capture the current browser DOM.
+3. Capture the current screenshot.
+4. Run the existing privacy/redaction pipeline.
+5. Construct the Qwen request.
+6. Send the original user request + sanitized DOM + redacted screenshot + initial agent state to Qwen.
+
+Initial state can be:
+
+```javascript
+{
+  goal: {
+    userRequest: "...",
+    status: "in_progress"
+  },
+
+  tasks: [],
+
+  currentTaskId: null,
+
+  completedTasks: [],
+
+  pendingTasks: [],
+
+  actionHistory: [],
+
+  lastAction: null,
+
+  status: "planning",
+  iteration: 0
+}
+```
+
+Qwen is then responsible for creating the initial plan.
+
+---
+
+# 5. Qwen Input Contract
+
+Every Qwen execution request should contain the following conceptual information:
+
+```text
+SYSTEM INSTRUCTIONS
 
 USER GOAL
-→ GOAL DECOMPOSITION
-→ TASK PLAN
-→ EXECUTE ONE TASK
-→ CAPTURE NEW DOM
-→ CAPTURE NEW SCREENSHOT
-→ SEND DOM + SCREENSHOT + TASK STATE TO AI AGENT
-→ AI DECIDES NEXT ACTION
-→ EXECUTE
-→ OBSERVE AGAIN
-→ REPLAN IF NECESSARY
-→ GOAL CHECK
-→ CONTINUE UNTIL GOAL IS SATISFIED
 
-Do NOT implement this as a fixed sequence.
+CURRENT AGENT STATE
 
-The agent must dynamically determine the next task based on the current browser state.
+TASK PLAN
+
+CURRENT TASK
+
+COMPLETED TASKS
+
+PENDING TASKS
+
+RECENT ACTION HISTORY
+
+CURRENT PAGE URL
+
+CURRENT PAGE TITLE
+
+SANITIZED DOM
+
+REDACTED SCREENSHOT
+```
+
+Do not send unnecessary raw browser information.
+
+The privacy layer must run before transmission.
 
 ---
 
-# 1. Goal Understanding
+# 6. Example Qwen Context
 
-When the user provides a request, first convert it into a structured goal.
+The model should receive something conceptually similar to:
 
-Example:
+```text
+You are the browser automation reasoning agent.
 
-"Find me a white Nike shoe under ₹7,000 and compare a few options"
+USER GOAL:
+Open Amazon, search for 1TB SSD and add WD Black into the cart.
 
-should become something conceptually similar to:
+AGENT STATE:
+Status: planning
+Iteration: 0
 
+CURRENT TASK:
+None
+
+TASK PLAN:
+No tasks have been created yet.
+
+COMPLETED TASKS:
+None
+
+RECENT ACTION HISTORY:
+None
+
+CURRENT PAGE:
+https://example.com
+
+PAGE TITLE:
+Example
+
+SANITIZED DOM:
+<interactive DOM representation>
+
+REDACTED SCREENSHOT:
+<image>
+```
+
+Qwen should then produce a structured plan and the first action.
+
+---
+
+# 7. Qwen Output Contract
+
+Require strict JSON output.
+
+Use a schema similar to:
+
+```json
 {
-"goal": "Find and compare suitable Nike shoes",
-"constraints": [
-{
-"attribute": "brand",
-"operator": "equals",
-"value": "Nike"
-},
-{
-"attribute": "color",
-"operator": "equals",
-"value": "white"
-},
-{
-"attribute": "price",
-"operator": "less_than_or_equal",
-"value": 7000,
-"currency": "INR"
+  "goal": {
+    "description": "string",
+    "status": "in_progress | completed | blocked"
+  },
+
+  "tasks": [
+    {
+      "id": "task_1",
+      "description": "string",
+      "status": "pending | in_progress | completed | blocked"
+    }
+  ],
+
+  "currentTaskId": "task_1",
+
+  "taskUpdate": {
+    "completedTaskIds": [],
+    "newTaskIds": []
+  },
+
+  "action": {
+    "type": "CLICK | TYPE | SELECT | SCROLL | PRESS_KEY | NAVIGATE | WAIT | BACK | HOVER | DONE",
+    "target": "element ID or null",
+    "value": "string or null",
+    "direction": "up | down | left | right | null",
+    "amount": "number or null"
+  },
+
+  "replan": false,
+
+  "reason": "short explanation"
 }
-],
-"required_operations": [
-"search",
-"inspect",
-"filter",
-"compare"
-]
-}
+```
 
-However, this is ONLY an example.
-
-The same architecture must work for requests such as:
-
-* Find a product and compare options.
-* Search for information across multiple websites.
-* Fill out a form.
-* Book something.
-* Navigate a website and retrieve information.
-* Find an item, inspect its details, and perform an action.
-* Read a dashboard and summarize specific information.
-* Complete a multi-page workflow.
-* Find information hidden behind menus, tabs, pagination, or dynamically loaded content.
-
-Do not hardcode domain-specific task types.
+Do not allow free-form browser instructions to be executed directly.
 
 ---
 
-# 2. Task Decomposition
+# 8. Important: Qwen Generates the Plan, But Execution Is Iterative
 
-The planner must convert the high-level goal into smaller tasks.
+Do NOT execute the entire task list at once.
 
-Example:
+If Qwen returns:
 
-GOAL:
-Find a suitable product satisfying several constraints.
+```text
+task_1
+task_2
+task_3
+task_4
+```
 
-TASKS:
+only execute the action associated with the current task.
 
-1. Identify where to search.
-2. Open/search the relevant website.
-3. Inspect the current page.
-4. Extract candidate information.
-5. Apply constraints.
-6. Inspect additional candidates if required.
-7. Compare valid candidates.
-8. Determine whether the goal has been satisfied.
-9. Perform any final requested action.
-10. Return the result.
+For example:
 
-Another request may produce a completely different task sequence.
+```text
+Qwen:
+Task 1 = Open Amazon
+Current task = task_1
+Action = NAVIGATE
+```
 
-Therefore:
+Execute only:
 
-DO NOT hardcode:
+```text
+NAVIGATE
+```
 
-task1 → task2 → task3 → task4
-
-Instead implement:
-
-goal
-→ planner
-→ current task
-→ observation
-→ next task
-→ observation
-→ next task
-→ ...
-
-The planner must be able to add, remove, reorder, or repeat tasks based on what happens in the browser.
+Then stop and observe the browser again.
 
 ---
 
-# 3. Browser Observation MUST Happen After Every Meaningful State Change
+# 9. Observation → Reasoning → Action Loop
 
-This is critical.
+Implement the core execution loop:
 
-After every browser action that can change the page state, capture:
+```text
+OBSERVE
+   ↓
+BUILD CONTEXT
+   ↓
+SEND TO QWEN
+   ↓
+RECEIVE PLAN + ACTION
+   ↓
+VALIDATE ACTION
+   ↓
+EXECUTE ACTION
+   ↓
+WAIT FOR PAGE STABILITY
+   ↓
+CAPTURE NEW DOM
+   ↓
+CAPTURE NEW SCREENSHOT
+   ↓
+UPDATE AGENT STATE
+   ↓
+SEND NEW STATE TO QWEN
+   ↓
+REPEAT
+```
 
-1. Current DOM
-2. Current screenshot
-3. Current URL
-4. Current browser state
-5. Current task
-6. Previous action
-7. Relevant execution history
+Never assume that the webpage behaved as expected.
 
-Examples of state-changing actions:
-
-* navigation
-* clicking
-* typing
-* submitting
-* scrolling
-* opening a dropdown
-* opening a modal
-* switching tabs
-* changing filters
-* pagination
-* expanding an element
-* selecting an option
-* loading dynamic content
-
-After such an action:
-
-ACTION
-↓
-WAIT FOR PAGE STATE TO STABILIZE
-↓
-CAPTURE DOM
-↓
-CAPTURE SCREENSHOT
-↓
-SEND BOTH TO AI AGENT
-↓
-DECIDE NEXT ACTION
-
-Do not allow the agent to continue blindly after an action.
+The new browser state must determine what happens next.
 
 ---
 
-# 4. DOM + Screenshot Must Be Sent Together
+# 10. Dynamic Task Completion
 
-The AI agent must receive both representations of the browser state.
+Qwen should determine when a task is completed based on the new DOM and screenshot.
 
-Conceptually:
+For example:
 
+Initial:
+
+```text
+CURRENT TASK:
+Search for 1TB SSD
+```
+
+Qwen performs:
+
+```text
+TYPE "1TB SSD"
+PRESS ENTER
+```
+
+After the page changes, the extension captures the new state.
+
+Qwen sees:
+
+```text
+Search results for 1TB SSD
+```
+
+It can return:
+
+```json
 {
-"task": "...",
-"url": "...",
-"previousAction": "...",
-"dom": "...",
-"screenshot": "<image>",
-"history": "...",
-"goal": "...",
-"constraints": "..."
+  "currentTaskId": "task_2",
+  "taskUpdate": {
+    "completedTaskIds": ["task_2"]
+  },
+  "action": {
+    "type": "CLICK",
+    "target": "el_42"
+  }
 }
+```
+
+The extension updates the state.
+
+---
+
+# 11. Allow Dynamic Replanning
+
+The task list must NOT be immutable.
+
+Websites are unpredictable.
+
+Qwen should be able to return:
+
+```json
+{
+  "replan": true,
+  "reason": "A login dialog is blocking the intended workflow.",
+  "tasks": [
+    {
+      "id": "task_1",
+      "description": "Close the login dialog",
+      "status": "in_progress"
+    },
+    {
+      "id": "task_2",
+      "description": "Continue searching for the requested product",
+      "status": "pending"
+    }
+  ]
+}
+```
+
+The extension should replace/update its task state accordingly.
+
+Do not implement a local hardcoded rule such as:
+
+```javascript
+if (loginPopup) {
+    closePopup();
+}
+```
+
+Qwen should reason about unexpected UI states.
+
+---
+
+# 12. DOM + Screenshot Must Be Sent Together
+
+For every meaningful observation, provide both:
+
+```text
+SANITIZED DOM
++
+REDACTED SCREENSHOT
+```
 
 The DOM provides:
 
-* semantic information
+* element IDs
+* roles
+* labels
 * text
-* attributes
-* links
-* buttons
-* inputs
-* element relationships
+* input information
 * accessibility information
+* interactability
 
 The screenshot provides:
 
 * visual layout
 * visual hierarchy
-* elements missing from useful DOM extraction
-* rendered text
-* images
-* icons
+* actual rendered state
+* buttons/icons
+* cards
 * popups
-* overlays
-* visual state
-* whether an element is actually visible
-* spatial relationships
-* page structure
+* elements that may be poorly represented by HTML
 
-The AI must use BOTH.
-
-Do not convert the screenshot into a textual description before sending it if the selected model supports native image input.
-
-Send the actual screenshot as an image input to the multimodal model.
+Qwen should use both sources when deciding actions.
 
 ---
 
-# 5. Vision Model
+# 13. Screenshot Must Be Re-captured After Page Changes
 
-Use a multimodal vision-language model as the browser-state reasoning model.
+After each meaningful browser action:
+
+```text
+execute action
+      ↓
+wait for DOM/page stability
+      ↓
+capture screenshot
+      ↓
+capture DOM
+      ↓
+apply privacy redaction
+      ↓
+send to Qwen
+```
+
+Do not reuse stale screenshots.
+
+---
+
+# 14. DOM Changes
+
+Use the existing DOM observation mechanisms where possible.
 
 Use:
 
-Qwen3-VL
+* `MutationObserver`
+* URL changes
+* navigation events
+* DOM hash/signature
+* loading-state detection
+* configurable stabilization delay
 
-or another currently available vision-language model with native image input.
+to determine when the page has changed.
 
-For the prototype, configure a vision-capable Qwen model as the agent's vision/reasoning model.
+Avoid continuously sending requests while the DOM is rapidly mutating.
 
-The model must be capable of receiving:
-
-TEXT + IMAGE
-
-in the same inference request.
-
-Do NOT use a text-only model and pretend that it has seen the screenshot.
-
-If the primary reasoning model is text-only, implement a dedicated vision model path.
-
-The vision model should analyze the screenshot and return structured observations/action decisions.
-
-Qwen's tooling supports multimodal image input and explicitly exposes vision-capable model configuration, so the implementation should use the model's native image-input capability rather than OCR-only conversion.
+Debounce observation and wait for a stable state.
 
 ---
 
-# 6. AI Agent Output
+# 15. Action Validator
 
-Do not allow the model to return arbitrary prose as the browser action.
+Qwen must NEVER directly execute browser APIs.
 
-Require structured output.
+Architecture:
+
+```text
+Qwen
+ ↓
+Structured Action
+ ↓
+Action Validator
+ ↓
+Browser Executor
+```
+
+The validator should verify:
+
+### CLICK
+
+* target exists
+* target is currently interactable
+* target belongs to the current DOM snapshot
+* element ID is valid
+
+### TYPE
+
+* target exists
+* target is an input/contenteditable/selectable field
+* value is allowed by the privacy policy
+* sensitive values are resolved locally when necessary
+
+### SELECT
+
+* target exists
+* target supports selection
+
+### NAVIGATE
+
+* URL is valid
+* navigation is permitted
+
+### SCROLL
+
+* direction and amount are within safe bounds
+
+Reject invalid actions.
+
+Never blindly execute arbitrary JavaScript generated by Qwen.
+
+---
+
+# 16. Preserve the Existing Privacy Architecture
+
+Do not remove the working redaction pipeline.
+
+The pipeline must remain:
+
+```text
+Browser DOM
+     ↓
+DOM PII detection
+     ↓
+Policy Engine
+     ↓
+Sanitized DOM
+```
+
+and:
+
+```text
+Browser Screenshot
+     ↓
+Local OCR / PII detection
+     ↓
+Redaction
+     ↓
+Redacted Screenshot
+```
+
+Only the sanitized/redacted representations should be provided to remote Qwen.
+
+---
+
+# 17. Sensitive User Input
+
+Do not expose sensitive values unnecessarily to Qwen.
+
+For example, if the user says:
+
+```text
+Change my email to alex@gmail.com
+```
+
+the agent can reason about:
+
+```text
+EMAIL_VALUE
+```
+
+while the actual value remains in the local token/secret vault when the privacy policy requires it.
+
+The browser executor can resolve the protected value locally.
+
+Conceptually:
+
+```text
+Qwen:
+TYPE el_14 <EMAIL_VALUE>
+
+       ↓
+
+Action Validator
+
+       ↓
+
+Local Token Vault
+
+       ↓
+
+alex@gmail.com
+
+       ↓
+
+Browser
+```
+
+Do not send raw secrets to Qwen unless the active privacy policy explicitly permits it.
+
+---
+
+# 18. Action History
+
+Maintain a bounded action history.
 
 Example:
 
-{
-"observation": {
-"page_type": "search_results",
-"visible_elements": [
-"search box",
-"product cards",
-"pagination"
+```javascript
+[
+  {
+    iteration: 1,
+    action: "NAVIGATE",
+    target: "amazon.in",
+    result: "success"
+  },
+  {
+    iteration: 2,
+    action: "TYPE",
+    target: "el_12",
+    value: "1TB SSD",
+    result: "success"
+  }
 ]
-},
+```
 
-"goal_progress": {
-"completed": false,
-"reason": "More candidates need to be inspected"
-},
+Use the recent history when constructing the Qwen context.
 
-"next_task": {
-"type": "inspect_products",
-"description": "Inspect visible product cards"
-},
+Do not send an unlimited conversation/history log.
 
-"action": {
-"type": "click",
-"target": "product_card_3"
-}
-}
+Keep enough history for Qwen to understand:
 
-The exact schema can be adapted to the existing browser-action system.
+* what was attempted
+* whether it succeeded
+* what changed
+* whether an action is repeating
 
 ---
 
-# 7. Action Selection
+# 19. Prevent Infinite Loops
 
-The AI should choose from the browser agent's existing supported actions.
-
-Examples:
-
-* navigate
-* click
-* type
-* select
-* scroll
-* hover
-* press_key
-* go_back
-* open_tab
-* close_tab
-* wait
-* extract
-* finish
-
-The AI should NOT invent unsupported actions.
-
-Every action must reference a valid DOM element or a valid visual target.
-
-For DOM-based actions, prefer stable element identifiers generated by the DOM analyzer.
-
-For visually identified elements that cannot be reliably mapped through the DOM, use the screenshot coordinates or the existing visual-action mechanism.
-
----
-
-# 8. Screenshot Should Be Used for Decision Making
-
-The current problem is:
-
-SCREENSHOT
-↓
-captured
-↓
-ignored by agent
-
-Fix this.
-
-The screenshot must be included in the model request whenever a new browser state is observed.
-
-The model should explicitly reason from the screenshot for:
-
-* visual-only elements
-* layout
-* visibility
-* overlays
-* modal dialogs
-* images
-* icons
-* visual product properties
-* buttons whose semantic DOM information is insufficient
-* page structure
-* state that is apparent visually but not represented cleanly in extracted DOM
-
-Do not rely exclusively on DOM text.
-
----
-
-# 9. Dynamic Replanning
-
-The planner must not assume that the original plan remains valid.
-
-Example:
-
-PLAN:
-Search → inspect → filter → compare
-
-But after searching:
-
-OBSERVATION:
-The website requires selecting a category first.
-
-The agent should modify the plan:
-
-Search
-→ select category
-→ apply filters
-→ inspect results
-→ compare
-
-Another example:
-
-OBSERVATION:
-No results satisfy the constraints.
-
-The agent should determine the next valid strategy according to the user's goal rather than simply stopping.
-
-Possible next tasks could include:
-
-* inspect more pages
-* change search query
-* try another website
-* remove a non-required constraint
-* ask the user for clarification if necessary
-
-The agent must NEVER silently relax an explicit user constraint.
-
----
-
-# 10. State Machine
-
-Maintain explicit execution state.
-
-Example:
-
-{
-"goal": {},
-"constraints": [],
-"plan": [],
-"currentTask": {},
-"completedTasks": [],
-"observations": [],
-"browserState": {},
-"domSnapshot": {},
-"screenshot": {},
-"candidateData": [],
-"actionHistory": [],
-"failedActions": [],
-"replanRequired": false,
-"goalCompleted": false
-}
-
-Every browser action updates this state.
-
----
-
-# 11. Goal Completion
-
-Do not consider the task complete merely because:
-
-* a search was performed
-* a page was opened
-* results appeared
-* one action succeeded
-
-The agent must evaluate whether the ORIGINAL USER GOAL has actually been satisfied.
-
-Implement a goal checker:
-
-CURRENT STATE
-+
-USER GOAL
-+
-CONSTRAINTS
-↓
-GOAL SATISFIED?
-
-YES → finish
-
-NO → generate next task
-
-The goal checker should explicitly identify unmet requirements.
-
-Example:
-
-{
-"completed": false,
-"missingRequirements": [
-"Need to inspect additional candidates",
-"Need to verify price constraint"
-]
-}
-
----
-
-# 12. Prevent Infinite Loops
-
-Implement safeguards.
+Implement local safety mechanisms.
 
 Track:
 
-* repeated actions
-* repeated URLs
-* repeated screenshots/page states
-* repeated failed actions
-* number of attempts per task
-* number of replans
-
-If the agent repeatedly performs the same unsuccessful action, force replanning.
-
-If the goal cannot be completed with available information, stop and explain what is missing instead of looping indefinitely.
-
----
-
-# 13. Observation Pipeline
-
-Implement this pipeline:
-
-USER REQUEST
-↓
-GOAL PARSER
-↓
-TASK PLANNER
-↓
-BROWSER EXECUTOR
-↓
-PAGE STATE CHANGE
-↓
-DOM CAPTURE
-+
-SCREENSHOT CAPTURE
-↓
-MULTIMODAL AI AGENT
-↓
-STATE ANALYSIS
-↓
-ACTION DECISION
-↓
-GOAL CHECK
-↓
-┌───────────────┐
-│ Goal complete?│
-└───────┬───────┘
-│
-NO   │   YES
-↓         ↓
-REPLAN     FINISH
-↓
-NEXT TASK
-↓
-BROWSER EXECUTOR
-
----
-
-# 14. Important Performance Rule
-
-Do not unnecessarily send enormous DOM snapshots and full-resolution screenshots on every request.
-
-Create an observation pipeline that:
-
-- extracts relevant DOM information
-- removes irrelevant nodes
-- preserves element identifiers
-- captures the current viewport screenshot
-- optionally captures additional screenshots only when needed
-- maintains a compact execution history
-
-However, correctness is more important than premature optimization for the prototype.
-
----
-
-# 15. Privacy Integration
-
-This browser agent already contains a privacy boundary.
-
-Do NOT bypass it.
-
-The DOM and screenshot must pass through the existing privacy pipeline before being sent to any external model.
-
-The flow should therefore be:
-
-BROWSER
-↓
-DOM + SCREENSHOT
-↓
-LOCAL PRIVACY / PII DETECTION
-↓
-REDACTION / POLICY ENGINE
-↓
-SANITIZED DOM + SANITIZED SCREENSHOT
-↓
-VISION LANGUAGE MODEL
-↓
-ACTION DECISION
-↓
-ACTION VALIDATOR
-↓
-BROWSER
-
-The model must never receive information that the existing privacy policy says should be blocked.
-
----
-
-# 16. Implementation Constraints
-
-Reuse the existing:
-
-- DOM analyzer
-- screenshot capture
-- privacy policy engine
-- PII detector
-- redaction pipeline
-- browser action executor
-- action validator
-- local privacy vault
-- existing model/API infrastructure
-
-Do not create parallel implementations of these systems.
-
-The main change should be the introduction/improvement of:
-
-1. Goal Parser
-2. Task Planner
-3. Observation Manager
-4. Multimodal Vision Agent
-5. Dynamic Replanner
-6. Goal Completion Checker
-7. Execution State Manager
-
----
-
-# 17. Acceptance Criteria
-
-The implementation is complete only when all of these are true:
-
-### Multi-step execution
-
-A complex user request results in multiple browser actions rather than one search query.
-
-### Task decomposition
-
-The high-level request is converted into smaller tasks dynamically.
-
-### DOM observation
-
-After meaningful browser state changes, the latest DOM is captured.
-
-### Screenshot observation
-
-After meaningful browser state changes, the latest screenshot is captured.
-
-### Vision usage
-
-The screenshot is actually passed to a multimodal model and influences the agent's decision.
-
-### Combined reasoning
-
-The model receives both DOM information and visual information.
-
-### Dynamic planning
-
-The next task depends on the current browser state.
-
-### Replanning
-
-Unexpected page states cause the agent to modify its plan.
-
-### Goal validation
-
-The agent does not stop simply because a browser action succeeded.
-
-### Privacy
-
-DOM and screenshot data pass through the existing privacy boundary before external model inference.
-
-### Generalization
-
-The implementation must work for arbitrary multi-step browser tasks and must NOT contain logic specifically hardcoded for Nike, shoes, ₹7,000, shopping, or any other single example.
-
-Use the Nike example only as a test case demonstrating the generalized architecture.
-
-### One important correction to your architecture
-
-Don't do:
-
 ```text
-DOM changed
-    ↓
-send DOM + screenshot
-    ↓
-LLM
+iteration count
+same action repeated
+same DOM state repeated
+same screenshot state repeated
+same task repeated
 ```
 
-for **literally every tiny DOM mutation**.
-
-Modern sites can cause dozens/hundreds of DOM mutations from one action. That will destroy latency and API cost.
-
-Do:
+If Qwen performs the same action repeatedly without state change:
 
 ```text
-Browser action
-      ↓
-wait for meaningful state stabilization
-      ↓
-capture DOM + viewport screenshot
-      ↓
-privacy pipeline
-      ↓
-VLM
-      ↓
-next action
+CLICK el_42
+CLICK el_42
+CLICK el_42
 ```
 
-So your trigger should be **“meaningful browser state change after an agent action”**, not a raw `MutationObserver` event.
-
-For the vision model specifically, Qwen's current documentation supports multimodal image input and configurable vision models, including a dedicated `visionModel` path.
-
-The architecture you actually want is therefore:
+stop automatic execution and ask Qwen to reconsider with a failure signal:
 
 ```text
-                  USER GOAL
+The previous action produced no meaningful state change.
+Re-evaluate the current UI and choose a different action.
+```
+
+Also enforce a configurable maximum iteration count.
+
+---
+
+# 20. Goal Completion
+
+Qwen must explicitly indicate completion.
+
+Example:
+
+```json
+{
+  "goal": {
+    "description": "Add WD Black 1TB SSD to the Amazon cart",
+    "status": "completed"
+  },
+
+  "currentTaskId": "task_4",
+
+  "action": {
+    "type": "DONE"
+  }
+}
+```
+
+The extension should then:
+
+```text
+status = completed
+stop agent loop
+```
+
+Do not assume that the goal is complete merely because the final predefined task was reached.
+
+The final browser state should support Qwen's completion decision.
+
+---
+
+# 21. Agent State Should Be the Working Memory
+
+The extension should maintain:
+
+```text
+┌──────────────────────────────┐
+│       AGENT STATE            │
+├──────────────────────────────┤
+│ User Goal                    │
+│ Overall Task List             │
+│ Current Task                 │
+│ Completed Tasks              │
+│ Pending Tasks                │
+│ Recent Actions               │
+│ Current URL                  │
+│ Current iteration            │
+│ Agent status                 │
+└──────────────────────────────┘
+```
+
+Qwen does NOT need persistent internal memory.
+
+Each request gives Qwen the state necessary to reason about the current step.
+
+This makes the system robust even if every Qwen API request is stateless.
+
+---
+
+# 22. Context Construction
+
+Create one centralized function:
+
+```javascript
+buildAgentContext()
+```
+
+It should construct:
+
+```javascript
+{
+  userGoal,
+  agentState,
+  currentTask,
+  completedTasks,
+  pendingTasks,
+  recentActions,
+  currentUrl,
+  pageTitle,
+  sanitizedDom,
+  redactedScreenshot
+}
+```
+
+Every Qwen invocation should use this function.
+
+Do not construct different incomplete contexts in different parts of the extension.
+
+---
+
+# 23. Recommended Agent Loop API
+
+Create a central function conceptually similar to:
+
+```javascript
+async function runAgentIteration() {
+    const state = await getAgentState();
+
+    const dom = await captureSanitizedDOM();
+    const screenshot = await captureRedactedScreenshot();
+
+    const context = buildAgentContext({
+        state,
+        dom,
+        screenshot
+    });
+
+    const result = await callQwen(context);
+
+    const validatedAction = validateAgentResult(result, state, dom);
+
+    if (!validatedAction.valid) {
+        return handleInvalidAction(validatedAction);
+    }
+
+    updateAgentStateFromQwen(result);
+
+    if (result.goal.status === "completed") {
+        return finishAgent();
+    }
+
+    await executeBrowserAction(validatedAction.action);
+
+    await waitForPageStability();
+
+    return runAgentIteration();
+}
+```
+
+Adapt this to the existing architecture rather than blindly copying it.
+
+---
+
+# 24. Do Not Put Browser Logic Into Qwen
+
+Qwen should return abstract actions:
+
+```text
+CLICK
+TYPE
+SELECT
+SCROLL
+NAVIGATE
+WAIT
+BACK
+DONE
+```
+
+The extension maps those actions to actual Chrome APIs.
+
+For example:
+
+```text
+Qwen:
+CLICK el_42
+
+       ↓
+
+Extension:
+document element registry
+
+       ↓
+
+actual DOM element
+
+       ↓
+
+element.click()
+```
+
+Qwen should never return:
+
+```javascript
+document.querySelector(...).click()
+```
+
+or arbitrary JavaScript.
+
+---
+
+# 25. Task IDs
+
+Task IDs must be generated and maintained consistently.
+
+The model can propose:
+
+```text
+task_1
+task_2
+task_3
+```
+
+but the extension should validate the structure before committing it.
+
+When replanning:
+
+* preserve completed tasks where appropriate
+* preserve the original goal
+* update pending/current tasks
+* prevent accidental loss of execution history
+
+---
+
+# 26. Do Not Assume Fixed Task Types
+
+Do not implement:
+
+```javascript
+TASK_TYPES = [
+    "navigate",
+    "search",
+    "filter",
+    "fill_form",
+    "submit"
+];
+```
+
+as a required planning framework.
+
+Qwen should be able to create arbitrary task descriptions.
+
+For example:
+
+```text
+Dismiss cookie consent
+Open product comparison
+Expand technical specifications
+Check compatibility
+Return to results
+Select the second matching product
+```
+
+The extension only needs to understand the final browser action.
+
+---
+
+# 27. Qwen Should Reason From the Actual UI
+
+Do not instruct Qwen:
+
+```text
+If ecommerce → search → filter → select
+```
+
+Instead instruct:
+
+```text
+Determine what action is appropriate from the
+actual DOM and screenshot.
+
+Do not assume a website's layout.
+
+Do not assume that an expected element exists.
+
+If the expected element is absent, inspect the current UI
+and choose an alternative action or replan.
+```
+
+This is critical for generalized browser automation.
+
+---
+
+# 28. Example Full Execution
+
+User:
+
+```text
+Open Amazon, search for 1TB SSD and add WD Black into the cart.
+```
+
+### Qwen call #1
+
+```text
+Goal:
+...
+
+DOM:
+current page
+
+Screenshot:
+current page
+
+Tasks:
+none
+```
+
+Qwen:
+
+```text
+Plan:
+1. Open Amazon
+2. Search for 1TB SSD
+3. Find WD Black 1TB SSD
+4. Add it to cart
+
+Current task:
+1
+
+Action:
+NAVIGATE amazon.in
+```
+
+Extension stores plan and executes navigation.
+
+---
+
+### Qwen call #2
+
+```text
+Goal:
+...
+
+Tasks:
+✓ Open Amazon? / current status
+→ Search for 1TB SSD
+○ Find WD Black
+○ Add to cart
+
+Current page:
+Amazon
+
+DOM:
+new DOM
+
+Screenshot:
+new screenshot
+
+Last action:
+NAVIGATE → success
+```
+
+Qwen:
+
+```text
+Action:
+TYPE "1TB SSD" into el_12
+```
+
+Extension executes.
+
+---
+
+### Qwen call #3
+
+New DOM + screenshot.
+
+Qwen:
+
+```text
+Action:
+PRESS ENTER
+```
+
+---
+
+### Qwen call #4
+
+Search results.
+
+Qwen:
+
+```text
+Current task:
+Find WD Black 1TB SSD
+
+Action:
+CLICK el_83
+```
+
+---
+
+### Qwen call #5
+
+Product page.
+
+Qwen:
+
+```text
+Current task:
+Add WD Black 1TB SSD to cart
+
+Action:
+CLICK el_29
+```
+
+---
+
+### Qwen call #6
+
+New screenshot shows:
+
+```text
+Added to cart
+```
+
+Qwen:
+
+```json
+{
+  "goal": {
+    "status": "completed"
+  },
+  "action": {
+    "type": "DONE"
+  }
+}
+```
+
+Extension stops.
+
+---
+
+# 29. Remove Old Code Cleanly
+
+Search the codebase for all references to:
+
+```text
+GoalParser
+TaskPlanner
+generateInitialPlan
+extractOperations
+extractConstraints
+detectDomain
+TASK_DOMAINS
+BROWSER_OPERATIONS
+deriveGeneralizedFallbackAction
+```
+
+Determine which are exclusively part of deterministic planning.
+
+Remove them from the active execution path.
+
+Do not delete shared utilities blindly if they are still required by unrelated functionality.
+
+The final execution path must NOT depend on the old planners.
+
+---
+
+# 30. Final Architecture
+
+The target architecture is:
+
+```text
+                     USER
                       │
                       ▼
-              ┌──────────────┐
-              │ Goal Parser  │
-              └──────┬───────┘
-                     ▼
-              ┌──────────────┐
-              │ Task Planner │
-              └──────┬───────┘
-                     ▼
-              ┌──────────────┐
-              │Task Executor │
-              └──────┬───────┘
-                     ▼
-                BROWSER ACTION
+             Original user request
+                      │
+                      ▼
+        ┌──────────────────────────┐
+        │       EXTENSION          │
+        │                          │
+        │ Agent State / Memory     │
+        │                          │
+        │ Goal                     │
+        │ Tasks                    │
+        │ Current Task             │
+        │ Completed Tasks          │
+        │ Pending Tasks            │
+        │ Action History           │
+        └────────────┬─────────────┘
                      │
                      ▼
-             PAGE STATE CHANGES
-                     │
-             ┌───────┴────────┐
-             ▼                ▼
-          DOM CAPTURE    SCREENSHOT
-             │                │
-             └───────┬────────┘
-                     ▼
-             PRIVACY PIPELINE
-                     │
-                     ▼
-              ┌──────────────┐
-              │ Qwen3-VL /   │
-              │ Vision Agent │
-              └──────┬───────┘
-                     │
-          ┌──────────┴──────────┐
-          ▼                     ▼
-     OBSERVATION            NEXT ACTION
-          │                     │
-          └──────────┬──────────┘
-                     ▼
-                GOAL CHECK
+          Capture current browser state
                      │
               ┌──────┴──────┐
-              │             │
-             NO            YES
+              ▼             ▼
+             DOM      Screenshot
               │             │
               ▼             ▼
-           REPLAN         FINISH
-              │
-              └──────→ EXECUTE
+        DOM Sanitizer   PII Redactor
+              │             │
+              └──────┬──────┘
+                     ▼
+                QWEN VLM
+                     │
+        ┌────────────┼─────────────┐
+        │            │             │
+        ▼            ▼             ▼
+     Goal         Task Plan    Next Action
+   reasoning     generation    selection
+                     │
+                     ▼
+              Extension State
+                     │
+                     ▼
+              Action Validator
+                     │
+                     ▼
+              Browser Executor
+                     │
+                     ▼
+                 Browser
+                     │
+                     ▼
+              Page State Change
+                     │
+                     ▼
+            DOM + Screenshot
+                     │
+                     └──────────────► QWEN
 ```
 
-That is the generalized **agent loop** you're looking for, rather than a specialized “shopping planner.”
+## Core principle
+
+**Qwen owns intelligence.**
+
+**The extension owns state, privacy, validation, and execution.**
+
+Do not add another deterministic planner between the user and Qwen.
+
+The extension should not decide:
+
+> "This sentence means navigate → search → filter → select."
+
+Instead, it should say:
+
+> "Here is exactly what the user asked, here is the current sanitized browser state, and here is what happened on previous iterations. Qwen, decide what the goal requires and what action should happen next."
+
+This should be the new execution architecture.

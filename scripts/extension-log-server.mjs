@@ -1428,23 +1428,311 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 // Autonomous Agent Reasoning Engine (Zero Remote Key Local Agent)
 export function computeAutonomousAgentDecision({
   goal = {},
+  userGoal = null,
+  agentState = null,
   currentTask = null,
+  tasks = [],
+  completedTasks = [],
+  pendingTasks = [],
   executionState = {},
   interactiveElements = [],
   screenshotBase64 = null,
   sanitizedDomContext = "",
+  currentUrl = "",
+  pageTitle = "",
   actionHistory = []
 }) {
-  const taskType = currentTask?.type || "general_action";
-  const goalSummary = goal.summary || goal.originalGoal || "Execute user browser task";
-  const constraints = goal.constraints || [];
-  const targetEntity = goal.targetEntity || "";
+  function computeRawDecision() {
+    const taskType = currentTask?.type || "general_action";
+    const goalSummary = userGoal || goal.summary || goal.originalGoal || "Execute user browser task";
+    const constraints = goal.constraints || [];
+    const targetEntity = goal.targetEntity || "";
 
-  // 1. Check if already satisfied or completed
-  if (taskType === "complete" || executionState.isGoalSatisfied) {
+    // 1. Check if already satisfied or completed
+    if (taskType === "complete" || executionState.isGoalSatisfied) {
+      return {
+        ok: true,
+        observation: "Goal satisfied based on previous execution steps.",
+        goal_progress: { isSatisfied: true, remainingTasks: [] },
+        next_task: null,
+        action: {
+          actionType: "COMPLETE",
+          target: "page_root",
+          parameters: {},
+          thenPressEnter: false,
+          reasoningSummary: "All goal objectives and constraints satisfied."
+        }
+      };
+    }
+
+    // 2. Search Task: find search input field
+    if (taskType === "search" || (!actionHistory.some(a => a.includes("search") || a.includes("TYPE")) && !executionState.hasSearched)) {
+      const searchInput = interactiveElements.find(el => {
+        const tag = (el.tag || "").toLowerCase();
+        const type = (el.type || "").toLowerCase();
+        const name = (el.name || "").toLowerCase();
+        const placeholder = (el.placeholder || "").toLowerCase();
+        const aria = (el.ariaLabel || "").toLowerCase();
+        if (tag === "input" || tag === "textarea") {
+          if (type === "search" || name === "q" || name === "field-keywords" || placeholder.includes("search") || aria.includes("search")) {
+            return true;
+          }
+        }
+        return false;
+      }) || interactiveElements.find(el => (el.tag === "input" || el.tag === "textarea") && (el.type === "text" || !el.type));
+
+      if (searchInput) {
+        let searchQuery = targetEntity || goalSummary;
+        for (const c of constraints) {
+          if (c.value && !searchQuery.toLowerCase().includes(String(c.value).toLowerCase())) {
+            searchQuery += ` ${c.value}`;
+          }
+        }
+
+        return {
+          ok: true,
+          observation: `Identified search input [${searchInput.elementId || searchInput.id}]. Dispatching query: "${searchQuery.trim()}".`,
+          goal_progress: { isSatisfied: false, remainingTasks: ["filter", "select_item"] },
+          next_task: "filter",
+          action: {
+            actionType: "TYPE",
+            target: searchInput.elementId || searchInput.id,
+            parameters: { text: searchQuery.trim() },
+            thenPressEnter: true,
+            reasoningSummary: `Type search query "${searchQuery.trim()}" into search bar and press Enter.`
+          }
+        };
+      }
+    }
+
+    // 3. Filter Task: handle price or facet filters
+    if (taskType === "filter") {
+      const priceConstraint = constraints.find(c => c.type === "PRICE_MAX" || c.type === "PRICE_RANGE");
+      if (priceConstraint) {
+        const maxPrice = priceConstraint.value || priceConstraint.max;
+        const maxPriceInput = interactiveElements.find(el => {
+          const text = ((el.placeholder || "") + " " + (el.ariaLabel || "") + " " + (el.text || "")).toLowerCase();
+          return (el.tag === "input" || el.isFilter) && (text.includes("high-price") || text.includes("max") || text.includes("upper") || text.includes("to"));
+        });
+        if (maxPriceInput) {
+          return {
+            ok: true,
+            observation: `Found max price input [${maxPriceInput.elementId || maxPriceInput.id}]. Setting price limit to ${maxPrice}.`,
+            goal_progress: { isSatisfied: false, remainingTasks: ["select_item"] },
+            next_task: "select_item",
+            action: {
+              actionType: "TYPE",
+              target: maxPriceInput.elementId || maxPriceInput.id,
+              parameters: { text: String(maxPrice) },
+              thenPressEnter: true,
+              isFilter: true,
+              filterName: "price_max",
+              filterValue: String(maxPrice),
+              reasoningSummary: `Enter upper price limit ${maxPrice} into price filter.`
+            }
+          };
+        }
+      }
+
+      for (const c of constraints) {
+        const val = String(c.value || "").toLowerCase();
+        if (!val) continue;
+        const facet = interactiveElements.find(el => {
+          if (el.isSponsored) return false;
+          const text = ((el.text || "") + " " + (el.ariaLabel || "")).toLowerCase();
+          return (el.isFilter || el.type === "checkbox" || el.tag === "a" || el.tag === "button") && text.includes(val);
+        });
+        if (facet) {
+          return {
+            ok: true,
+            observation: `Found filter facet [${facet.elementId || facet.id}] for constraint "${val}".`,
+            goal_progress: { isSatisfied: false, remainingTasks: ["select_item"] },
+            next_task: "select_item",
+            action: {
+              actionType: "CLICK",
+              target: facet.elementId || facet.id,
+              parameters: {},
+              thenPressEnter: false,
+              isFilter: true,
+              filterName: c.type || "facet",
+              filterValue: val,
+              reasoningSummary: `Apply filter facet for "${val}".`
+            }
+          };
+        }
+      }
+    }
+
+    // 4. Select Candidate / Item: find genuine product or search result (skip sponsored ads)
+    if (taskType === "select_candidate" || taskType === "select_item" || taskType === "inspect" || taskType === "inspect_candidate" || taskType === "navigate" || taskType === "general_action") {
+      const productItem = interactiveElements.find(el => {
+        if (el.isSponsored || el.isAd) return false;
+        if (el.isFilter) return false;
+        if (el.tag === "button" && ((el.text || "").toLowerCase().includes("search") || (el.text || "").toLowerCase().includes("go"))) return false;
+        if (el.isProductResult) return true;
+        const text = (el.text || el.ariaLabel || "").toLowerCase();
+        return (el.tag === "a" || el.tag === "div" || el.tag === "li" || el.tag === "h3" || el.tag === "h2") &&
+          text.length > 10 &&
+          !/\b(sign in|login|register|cart|basket|home|help|privacy|terms|menu)\b/i.test(text);
+      });
+
+      if (productItem) {
+        const isCartNext = /add to cart|add to bag|add to basket/i.test(goalSummary);
+        const isPerformActionNext = Boolean(goal.actionIntent || currentTask?.actionIntent || taskType === "perform_action");
+        const nextTask = isCartNext ? "add_to_cart" : (isPerformActionNext ? "perform_action" : "submit");
+        return {
+          ok: true,
+          observation: `Identified authentic candidate item [${productItem.elementId || productItem.id}]: "${(productItem.text || productItem.ariaLabel || '').slice(0, 50)}...".`,
+          goal_progress: { isSatisfied: false, remainingTasks: [nextTask] },
+          next_task: nextTask,
+          action: {
+            actionType: "CLICK",
+            target: productItem.elementId || productItem.id,
+            parameters: {},
+            thenPressEnter: false,
+            reasoningSummary: `Click on matching authentic candidate result "${(productItem.text || productItem.ariaLabel || '').slice(0, 50)}".`
+          }
+        };
+      }
+    }
+
+    // 5. Add to Cart: strictly matches Add to Cart / Add to Bag / Add to Basket (preserves user intent)
+    if (taskType === "add_to_cart" || (/add to cart|add to bag|add to basket/i.test(goalSummary) && !actionHistory.some(a => /add to cart|cart|bag/i.test(a)))) {
+      const cartBtn = interactiveElements.find(el => {
+        if (el.isSponsored || el.isAd) return false;
+        const text = ((el.text || "") + " " + (el.value || "") + " " + (el.ariaLabel || "") + " " + (el.title || "")).toLowerCase();
+        return /^(?:add to (?:cart|bag|basket)|add item to cart)\b/i.test(text) ||
+               (/\b(?:add to cart|add to bag|add to basket)\b/i.test(text) && !/\b(?:buy now|checkout|place order)\b/i.test(text));
+      }) || interactiveElements.find(el => {
+        if (el.isSponsored || el.isAd) return false;
+        const text = ((el.text || "") + " " + (el.value || "") + " " + (el.ariaLabel || "")).toLowerCase();
+        return (el.tag === "button" || el.tag === "input" || el.type === "submit") && (text.includes("cart") || text.includes("bag"));
+      });
+
+      if (cartBtn) {
+        return {
+          ok: true,
+          observation: `Found primary Add to Cart button [${cartBtn.elementId || cartBtn.id}]. Satisfying intent to add selected item.`,
+          goal_progress: { isSatisfied: true, remainingTasks: [] },
+          next_task: null,
+          action: {
+            actionType: "CLICK",
+            target: cartBtn.elementId || cartBtn.id,
+            parameters: {},
+            thenPressEnter: false,
+            actionIntent: "add_to_cart",
+            reasoningSummary: "Click Add to Cart button to complete user intent."
+          }
+        };
+      }
+    }
+
+    // 5b. Generic UI Action Task (e.g., subscribe, follow, star, like, bookmark, download, share, pin, play, favorite, join)
+    const actionIntent = currentTask?.actionIntent || goal?.actionIntent;
+    if (taskType === "perform_action" || (actionIntent && !actionHistory.some(a => String(a).toLowerCase().includes(String(actionIntent).toLowerCase())))) {
+      const intentVerb = String(actionIntent || "").toLowerCase().trim();
+      if (intentVerb) {
+        const intentRegex = new RegExp(`\\b${intentVerb}\\b`, "i");
+        const targetBtn = interactiveElements.find(el => {
+          if (el.isSponsored || el.isAd) return false;
+          const text = `${el.text || ""} ${el.ariaLabel || ""} ${el.title || ""} ${el.value || ""}`.toLowerCase();
+          return intentRegex.test(text);
+        }) || interactiveElements.find(el => {
+          if (el.isSponsored || el.isAd) return false;
+          const text = `${el.text || ""} ${el.ariaLabel || ""}`.toLowerCase();
+          return text.includes(intentVerb);
+        });
+
+        if (targetBtn) {
+          return {
+            ok: true,
+            observation: `Found target element for requested action "${intentVerb}" [${targetBtn.elementId || targetBtn.id}].`,
+            goal_progress: { isSatisfied: true, remainingTasks: [] },
+            next_task: null,
+            action: {
+              actionType: "CLICK",
+              target: targetBtn.elementId || targetBtn.id,
+              parameters: {},
+              actionIntent: intentVerb,
+              thenPressEnter: false,
+              reasoningSummary: `Click "${targetBtn.text || targetBtn.ariaLabel || intentVerb}" to perform requested ${intentVerb} action.`
+            }
+          };
+        }
+      }
+    }
+
+    // 6. Generic Form Field Filling: fill inputs from goal constraints
+    const unfilledInput = interactiveElements.find(el => {
+      if (el.tag !== "input" && el.tag !== "textarea") return false;
+      const type = (el.type || "").toLowerCase();
+      return type !== "submit" && type !== "button" && type !== "hidden" && !el.value;
+    });
+    if (unfilledInput && constraints.length > 0) {
+      const constraint = constraints.find(c => c.value);
+      if (constraint) {
+        return {
+          ok: true,
+          observation: `Populating form field [${unfilledInput.elementId || unfilledInput.id}] with constraint "${constraint.value}".`,
+          goal_progress: { isSatisfied: false, remainingTasks: ["submit"] },
+          next_task: "submit",
+          action: {
+            actionType: "TYPE",
+            target: unfilledInput.elementId || unfilledInput.id,
+            parameters: { text: String(constraint.value) },
+            thenPressEnter: false,
+            reasoningSummary: `Fill form field with ${constraint.value}.`
+          }
+        };
+      }
+    }
+
+    // 7. Submit Button
+    if (taskType === "submit" || taskType === "confirm" || /confirm|submit|place order/i.test(goalSummary)) {
+      const submitBtn = interactiveElements.find(el => {
+        if (el.isSponsored || el.isAd) return false;
+        const text = ((el.text || "") + " " + (el.value || "") + " " + (el.ariaLabel || "")).toLowerCase();
+        return (el.tag === "button" || el.type === "submit" || el.tag === "a") &&
+          /^(confirm|submit|place order|complete|continue)\b/i.test(text);
+      });
+      if (submitBtn) {
+        return {
+          ok: true,
+          observation: `Found Submit button [${submitBtn.elementId || submitBtn.id}].`,
+          goal_progress: { isSatisfied: true, remainingTasks: [] },
+          next_task: null,
+          action: {
+            actionType: "CLICK",
+            target: submitBtn.elementId || submitBtn.id,
+            parameters: {},
+            thenPressEnter: false,
+            reasoningSummary: "Click Submit button to complete form action."
+          }
+        };
+      }
+    }
+
+    // 8. Generic first actionable element
+    const firstActionable = interactiveElements.find(el => !el.isSponsored && !el.isAd && (el.tag === "button" || el.tag === "a" || el.tag === "input"));
+    if (firstActionable) {
+      return {
+        ok: true,
+        observation: `Progressing goal with actionable element [${firstActionable.elementId || firstActionable.id}].`,
+        goal_progress: { isSatisfied: false, remainingTasks: [] },
+        next_task: "advance",
+        action: {
+          actionType: firstActionable.tag === "input" ? "TYPE" : "CLICK",
+          target: firstActionable.elementId || firstActionable.id,
+          parameters: firstActionable.tag === "input" ? { text: goalSummary } : {},
+          thenPressEnter: false,
+          reasoningSummary: `Advance interaction with [${firstActionable.elementId || firstActionable.id}].`
+        }
+      };
+    }
+
     return {
       ok: true,
-      observation: "Goal satisfied based on previous execution steps.",
+      observation: "No further DOM interactions required. Goal completed.",
       goal_progress: { isSatisfied: true, remainingTasks: [] },
       next_task: null,
       action: {
@@ -1452,295 +1740,48 @@ export function computeAutonomousAgentDecision({
         target: "page_root",
         parameters: {},
         thenPressEnter: false,
-        reasoningSummary: "All goal objectives and constraints satisfied."
+        reasoningSummary: "Execution completed."
       }
     };
   }
 
-  // 2. Search Task: find search input field
-  if (taskType === "search" || (!actionHistory.some(a => a.includes("search") || a.includes("TYPE")) && !executionState.hasSearched)) {
-    const searchInput = interactiveElements.find(el => {
-      const tag = (el.tag || "").toLowerCase();
-      const type = (el.type || "").toLowerCase();
-      const name = (el.name || "").toLowerCase();
-      const placeholder = (el.placeholder || "").toLowerCase();
-      const aria = (el.ariaLabel || "").toLowerCase();
-      if (tag === "input" || tag === "textarea") {
-        if (type === "search" || name === "q" || name === "field-keywords" || placeholder.includes("search") || aria.includes("search")) {
-          return true;
-        }
-      }
-      return false;
-    }) || interactiveElements.find(el => (el.tag === "input" || el.tag === "textarea") && (el.type === "text" || !el.type));
-
-    if (searchInput) {
-      let searchQuery = targetEntity || goalSummary;
-      for (const c of constraints) {
-        if (c.value && !searchQuery.toLowerCase().includes(String(c.value).toLowerCase())) {
-          searchQuery += ` ${c.value}`;
-        }
-      }
-
-      return {
-        ok: true,
-        observation: `Identified search input [${searchInput.elementId || searchInput.id}]. Dispatching query: "${searchQuery.trim()}".`,
-        goal_progress: { isSatisfied: false, remainingTasks: ["filter", "select_item"] },
-        next_task: "filter",
-        action: {
-          actionType: "TYPE",
-          target: searchInput.elementId || searchInput.id,
-          parameters: { text: searchQuery.trim() },
-          thenPressEnter: true,
-          reasoningSummary: `Type search query "${searchQuery.trim()}" into search bar and press Enter.`
-        }
-      };
-    }
-  }
-
-  // 3. Filter Task: handle price or facet filters
-  if (taskType === "filter") {
-    const priceConstraint = constraints.find(c => c.type === "PRICE_MAX" || c.type === "PRICE_RANGE");
-    if (priceConstraint) {
-      const maxPrice = priceConstraint.value || priceConstraint.max;
-      const maxPriceInput = interactiveElements.find(el => {
-        const text = ((el.placeholder || "") + " " + (el.ariaLabel || "") + " " + (el.text || "")).toLowerCase();
-        return (el.tag === "input" || el.isFilter) && (text.includes("high-price") || text.includes("max") || text.includes("upper") || text.includes("to"));
-      });
-      if (maxPriceInput) {
-        return {
-          ok: true,
-          observation: `Found max price input [${maxPriceInput.elementId || maxPriceInput.id}]. Setting price limit to ${maxPrice}.`,
-          goal_progress: { isSatisfied: false, remainingTasks: ["select_item"] },
-          next_task: "select_item",
-          action: {
-            actionType: "TYPE",
-            target: maxPriceInput.elementId || maxPriceInput.id,
-            parameters: { text: String(maxPrice) },
-            thenPressEnter: true,
-            isFilter: true,
-            filterName: "price_max",
-            filterValue: String(maxPrice),
-            reasoningSummary: `Enter upper price limit ${maxPrice} into price filter.`
-          }
-        };
-      }
-    }
-
-    for (const c of constraints) {
-      const val = String(c.value || "").toLowerCase();
-      if (!val) continue;
-      const facet = interactiveElements.find(el => {
-        if (el.isSponsored) return false;
-        const text = ((el.text || "") + " " + (el.ariaLabel || "")).toLowerCase();
-        return (el.isFilter || el.type === "checkbox" || el.tag === "a" || el.tag === "button") && text.includes(val);
-      });
-      if (facet) {
-        return {
-          ok: true,
-          observation: `Found filter facet [${facet.elementId || facet.id}] for constraint "${val}".`,
-          goal_progress: { isSatisfied: false, remainingTasks: ["select_item"] },
-          next_task: "select_item",
-          action: {
-            actionType: "CLICK",
-            target: facet.elementId || facet.id,
-            parameters: {},
-            thenPressEnter: false,
-            isFilter: true,
-            filterName: c.type || "facet",
-            filterValue: val,
-            reasoningSummary: `Apply filter facet for "${val}".`
-          }
-        };
-      }
-    }
-  }
-
-  // 4. Select Candidate / Item: find genuine product or search result (skip sponsored ads)
-  if (taskType === "select_candidate" || taskType === "select_item" || taskType === "inspect" || taskType === "inspect_candidate" || taskType === "navigate" || taskType === "general_action") {
-    const productItem = interactiveElements.find(el => {
-      if (el.isSponsored || el.isAd) return false;
-      if (el.isFilter) return false;
-      if (el.tag === "button" && ((el.text || "").toLowerCase().includes("search") || (el.text || "").toLowerCase().includes("go"))) return false;
-      if (el.isProductResult) return true;
-      const text = (el.text || el.ariaLabel || "").toLowerCase();
-      return (el.tag === "a" || el.tag === "div" || el.tag === "li" || el.tag === "h3" || el.tag === "h2") &&
-        text.length > 10 &&
-        !/\b(sign in|login|register|cart|basket|home|help|privacy|terms|menu)\b/i.test(text);
-    });
-
-    if (productItem) {
-      const isCartNext = /add to cart|add to bag|add to basket/i.test(goalSummary);
-      const isPerformActionNext = Boolean(goal.actionIntent || currentTask?.actionIntent || taskType === "perform_action");
-      const nextTask = isCartNext ? "add_to_cart" : (isPerformActionNext ? "perform_action" : "submit");
-      return {
-        ok: true,
-        observation: `Identified authentic candidate item [${productItem.elementId || productItem.id}]: "${(productItem.text || productItem.ariaLabel || '').slice(0, 50)}...".`,
-        goal_progress: { isSatisfied: false, remainingTasks: [nextTask] },
-        next_task: nextTask,
-        action: {
-          actionType: "CLICK",
-          target: productItem.elementId || productItem.id,
-          parameters: {},
-          thenPressEnter: false,
-          reasoningSummary: `Click on matching authentic candidate result "${(productItem.text || productItem.ariaLabel || '').slice(0, 50)}".`
-        }
-      };
-    }
-  }
-
-  // 5. Add to Cart: strictly matches Add to Cart / Add to Bag / Add to Basket (preserves user intent)
-  if (taskType === "add_to_cart" || (/add to cart|add to bag|add to basket/i.test(goalSummary) && !actionHistory.some(a => /add to cart|cart|bag/i.test(a)))) {
-    const cartBtn = interactiveElements.find(el => {
-      if (el.isSponsored || el.isAd) return false;
-      const text = ((el.text || "") + " " + (el.value || "") + " " + (el.ariaLabel || "") + " " + (el.title || "")).toLowerCase();
-      return /^(?:add to (?:cart|bag|basket)|add item to cart)\b/i.test(text) ||
-             (/\b(?:add to cart|add to bag|add to basket)\b/i.test(text) && !/\b(?:buy now|checkout|place order)\b/i.test(text));
-    }) || interactiveElements.find(el => {
-      if (el.isSponsored || el.isAd) return false;
-      const text = ((el.text || "") + " " + (el.value || "") + " " + (el.ariaLabel || "")).toLowerCase();
-      return (el.tag === "button" || el.tag === "input" || el.role === "button") && /\b(?:cart|bag|basket)\b/i.test(text) && !/\b(?:view|go to)\b/i.test(text);
-    });
-
-    if (cartBtn) {
-      return {
-        ok: true,
-        observation: `Found Add to Cart button [${cartBtn.elementId || cartBtn.id}].`,
-        goal_progress: { isSatisfied: true, remainingTasks: [] },
-        next_task: null,
-        action: {
-          actionType: "CLICK",
-          target: cartBtn.elementId || cartBtn.id,
-          parameters: {},
-          thenPressEnter: false,
-          reasoningSummary: "Click Add to Cart button to complete goal."
-        }
-      };
-    }
-  }
-
-  // 5b. Generic UI Action Task (e.g., subscribe, follow, star, like, bookmark, download, share, pin, play, favorite, join)
-  const actionIntent = currentTask?.actionIntent || goal?.actionIntent;
-  if (taskType === "perform_action" || (actionIntent && !actionHistory.some(a => String(a).toLowerCase().includes(String(actionIntent).toLowerCase())))) {
-    const intentVerb = String(actionIntent || "").toLowerCase().trim();
-    if (intentVerb) {
-      const intentRegex = new RegExp(`\\b${intentVerb}\\b`, "i");
-      const targetBtn = interactiveElements.find(el => {
-        if (el.isSponsored || el.isAd) return false;
-        const text = `${el.text || ""} ${el.ariaLabel || ""} ${el.title || ""} ${el.value || ""}`.toLowerCase();
-        return intentRegex.test(text);
-      }) || interactiveElements.find(el => {
-        if (el.isSponsored || el.isAd) return false;
-        const text = `${el.text || ""} ${el.ariaLabel || ""}`.toLowerCase();
-        return text.includes(intentVerb);
-      });
-
-      if (targetBtn) {
-        return {
-          ok: true,
-          observation: `Found target element for requested action "${intentVerb}" [${targetBtn.elementId || targetBtn.id}].`,
-          goal_progress: { isSatisfied: true, remainingTasks: [] },
-          next_task: null,
-          action: {
-            actionType: "CLICK",
-            target: targetBtn.elementId || targetBtn.id,
-            parameters: {},
-            actionIntent: intentVerb,
-            thenPressEnter: false,
-            reasoningSummary: `Click "${targetBtn.text || targetBtn.ariaLabel || intentVerb}" to perform requested ${intentVerb} action.`
-          }
-        };
-      }
-    }
-  }
-
-  // 6. Form Filling
-  if (taskType === "fill_form") {
-    const emptyField = interactiveElements.find(el => {
-      if (el.isSponsored || el.isAd) return false;
-      if (el.tag !== "input" && el.tag !== "textarea") return false;
-      const type = (el.type || "").toLowerCase();
-      if (type === "hidden" || type === "submit" || type === "button" || type === "reset") return false;
-      return !el.value || String(el.value).trim().length === 0;
-    });
-
-    if (emptyField) {
-      const semType = emptyField.semanticType || (emptyField.type || "").toLowerCase();
-      const fieldId = `${emptyField.name || ""} ${emptyField.placeholder || ""} ${emptyField.ariaLabel || ""}`.toLowerCase();
-      let fillVal = "user@example.com";
-      if (semType === "phone" || /phone|mobile|tel/i.test(fieldId)) fillVal = "9876543210";
-      else if (semType === "name" || /name/i.test(fieldId)) fillVal = "John Doe";
-      else if (semType === "message" || emptyField.tag === "textarea") fillVal = "Hello, requesting information.";
-
-      return {
-        ok: true,
-        observation: `Populating form field [${emptyField.elementId || emptyField.id}].`,
-        goal_progress: { isSatisfied: false, remainingTasks: ["submit_form"] },
-        next_task: "submit_form",
-        action: {
-          actionType: "TYPE",
-          target: emptyField.elementId || emptyField.id,
-          parameters: { text: fillVal },
-          thenPressEnter: false,
-          reasoningSummary: `Fill form field with "${fillVal}".`
-        }
-      };
-    }
-  }
-
-  // 7. Submit Form
-  if (taskType === "submit_form" || taskType === "submit") {
-    const submitBtn = interactiveElements.find(el => {
-      if (el.isSponsored || el.isAd) return false;
-      const t = `${el.text || ""} ${el.value || ""} ${el.ariaLabel || ""}`.toLowerCase();
-      return /^(?:submit|send|register|sign up|book now|save|confirm)\b/i.test(t);
-    }) || interactiveElements.find(el => (el.tag === "button" || el.tag === "input") && (el.type === "submit" || /submit|send/i.test(el.text || "")));
-
-    if (submitBtn) {
-      return {
-        ok: true,
-        observation: `Found Submit button [${submitBtn.elementId || submitBtn.id}].`,
-        goal_progress: { isSatisfied: true, remainingTasks: [] },
-        next_task: null,
-        action: {
-          actionType: "CLICK",
-          target: submitBtn.elementId || submitBtn.id,
-          parameters: {},
-          thenPressEnter: false,
-          reasoningSummary: "Click Submit button to complete form action."
-        }
-      };
-    }
-  }
-
-  // 8. Generic first actionable element
-  const firstActionable = interactiveElements.find(el => !el.isSponsored && !el.isAd && (el.tag === "button" || el.tag === "a" || el.tag === "input"));
-  if (firstActionable) {
-    return {
-      ok: true,
-      observation: `Progressing goal with actionable element [${firstActionable.elementId || firstActionable.id}].`,
-      goal_progress: { isSatisfied: false, remainingTasks: [] },
-      next_task: "advance",
-      action: {
-        actionType: firstActionable.tag === "input" ? "TYPE" : "CLICK",
-        target: firstActionable.elementId || firstActionable.id,
-        parameters: firstActionable.tag === "input" ? { text: goalSummary } : {},
-        thenPressEnter: false,
-        reasoningSummary: `Advance interaction with [${firstActionable.elementId || firstActionable.id}].`
-      }
-    };
-  }
+  const rawDec = computeRawDecision();
+  const goalDesc = userGoal || goal.summary || goal.description || goal.originalGoal || "Execute user browser task";
+  const actionType = String(rawDec?.action?.actionType || rawDec?.action?.type || "CLICK").toUpperCase();
+  const isComplete = Boolean(
+    rawDec?.goal_progress?.isSatisfied ||
+    actionType === "COMPLETE" ||
+    actionType === "DONE"
+  );
+  const target = rawDec?.action?.target || (isComplete ? "page_root" : null);
+  const val = rawDec?.action?.parameters?.text ?? rawDec?.action?.parameters?.value ?? rawDec?.action?.value ?? null;
+  const currentTaskId = rawDec?.next_task || (isComplete ? "task_complete" : "task_step");
 
   return {
-    ok: true,
-    observation: "No further DOM interactions required. Goal completed.",
-    goal_progress: { isSatisfied: true, remainingTasks: [] },
-    next_task: null,
+    ...rawDec,
+    goal: {
+      description: goalDesc,
+      status: isComplete ? "completed" : "in_progress"
+    },
+    tasks: Array.isArray(tasks) && tasks.length > 0 ? tasks : [
+      { id: "task_1", description: goalDesc, status: isComplete ? "completed" : "in_progress" }
+    ],
+    currentTaskId,
+    taskUpdate: {
+      completedTaskIds: isComplete ? ["task_1"] : [],
+      newTaskIds: []
+    },
+    replan: false,
+    reason: rawDec?.action?.reasoningSummary || rawDec?.observation || "Model planned action",
     action: {
-      actionType: "COMPLETE",
-      target: "page_root",
-      parameters: {},
-      thenPressEnter: false,
-      reasoningSummary: "Execution completed."
+      ...rawDec?.action,
+      type: actionType,
+      actionType,
+      target,
+      value: val,
+      parameters: rawDec?.action?.parameters || (val !== null ? { text: String(val) } : {}),
+      thenPressEnter: Boolean(rawDec?.action?.thenPressEnter),
+      reasoningSummary: rawDec?.action?.reasoningSummary || rawDec?.observation || "Model planned action"
     }
   };
 }
@@ -1801,11 +1842,18 @@ export function createObservabilityServer(port = PORT, host = HOST) {
           const payload = JSON.parse(body);
           const {
             goal = {},
+            userGoal = null,
+            agentState = null,
             currentTask = null,
+            tasks = [],
+            completedTasks = [],
+            pendingTasks = [],
             executionState = {},
             interactiveElements = [],
             screenshotBase64 = null,
             sanitizedDomContext = "",
+            currentUrl = "",
+            pageTitle = "",
             actionHistory = []
           } = payload;
 
@@ -1815,7 +1863,7 @@ export function createObservabilityServer(port = PORT, host = HOST) {
             event: "REDACTED_SS_AND_DOM_RECEIVED",
             level: "info",
             data: {
-              goalSummary: goal.summary || goal.originalGoal || "Execute user browser task",
+              goalSummary: userGoal || goal.summary || goal.originalGoal || "Execute user browser task",
               currentTask: currentTask?.type || "general_action",
               elementCount: interactiveElements.length,
               hasRedactedScreenshot: Boolean(screenshotBase64),
@@ -1828,11 +1876,18 @@ export function createObservabilityServer(port = PORT, host = HOST) {
           // Autonomous decision
           const decision = computeAutonomousAgentDecision({
             goal,
+            userGoal,
+            agentState,
             currentTask,
+            tasks,
+            completedTasks,
+            pendingTasks,
             executionState,
             interactiveElements,
             screenshotBase64,
             sanitizedDomContext,
+            currentUrl,
+            pageTitle,
             actionHistory
           });
 

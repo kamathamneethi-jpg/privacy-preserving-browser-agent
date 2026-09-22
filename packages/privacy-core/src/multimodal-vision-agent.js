@@ -29,49 +29,66 @@ export class MultimodalVisionAgent {
    */
   static buildSystemPrompt() {
     return [
-      "You are an autonomous multimodal Vision-Language Browser Agent.",
+      "You are an autonomous Vision-Language Browser Agent (Qwen VLM).",
+      "You are the central planner and decision maker for browser automation.",
       "You receive BOTH:",
       "1. A rendered screenshot of the current browser tab (sanitized on-device).",
       "2. A sanitized structural list of interactive DOM elements with element IDs (e.g. el_1, el_2, ...).",
       "",
-      "YOUR OBJECTIVE: Reason across visual appearance (layout, dialogs, banners, icons, visual prices/colors) AND interactive DOM elements to select the next optimal action toward satisfying the user's goal.",
+      "YOUR RESPONSIBILITIES:",
+      "1. High-Level Goal Decomposition: Convert the user's natural language goal into dynamic sub-tasks.",
+      "2. Dynamic Task Planning: Track which task is current, which tasks are completed, and what remains.",
+      "3. UI Reasoning: Reason across visual layout (screenshots) AND interactive DOM structure to select the next optimal action.",
+      "4. Dynamic Replanning: If unexpected modals, popups, category selectors, or page states occur, adjust the tasks dynamically.",
+      "5. Goal Verification: Determine when the user's overall goal is fully satisfied.",
       "",
       "SUPPORTED BROWSER ACTIONS:",
-      "- CLICK: Click an interactive element by elementId (e.g. { \"actionType\": \"CLICK\", \"target\": \"el_1\" })",
-      "- TYPE: Enter text into an input field (e.g. { \"actionType\": \"TYPE\", \"target\": \"el_2\", \"parameters\": { \"text\": \"query\" }, \"thenPressEnter\": true })",
-      "- CLEAR: Clear an input field",
-      "- SELECT: Choose dropdown option (e.g. { \"actionType\": \"SELECT\", \"target\": \"el_3\", \"parameters\": { \"value\": \"Option\" } })",
-      "- CHECK / UNCHECK: Toggle checkbox or radio button",
-      "- PRESS_KEY: Press keyboard key (e.g. { \"actionType\": \"PRESS_KEY\", \"target\": \"el_2\", \"parameters\": { \"key\": \"Enter\" } })",
-      "- SCROLL: Scroll page (e.g. { \"actionType\": \"SCROLL\", \"parameters\": { \"direction\": \"down\", \"amount\": 500 } })",
-      "- GO_BACK: Return to previous page",
-      "- WAIT: Pause execution for dynamic content to load",
-      "- COMPLETE: Complete task when goal and constraints are fully satisfied",
+      "- CLICK: Click an element by elementId (e.g. { \"type\": \"CLICK\", \"target\": \"el_1\" })",
+      "- TYPE: Enter text into an input field (e.g. { \"type\": \"TYPE\", \"target\": \"el_2\", \"value\": \"query\" })",
+      "- SELECT: Choose a dropdown option (e.g. { \"type\": \"SELECT\", \"target\": \"el_3\", \"value\": \"Option\" })",
+      "- SCROLL: Scroll page (e.g. { \"type\": \"SCROLL\", \"direction\": \"down\", \"amount\": 500 })",
+      "- PRESS_KEY: Press keyboard key (e.g. { \"type\": \"PRESS_KEY\", \"target\": \"el_2\", \"key\": \"Enter\" })",
+      "- NAVIGATE: Navigate to URL (e.g. { \"type\": \"NAVIGATE\", \"url\": \"https://example.com\" })",
+      "- WAIT: Pause for dynamic content to load",
+      "- BACK: Return to previous page",
+      "- HOVER: Hover over element (e.g. { \"type\": \"HOVER\", \"target\": \"el_4\" })",
+      "- DONE: Conclude execution when the goal is fully satisfied",
       "",
       "STRICT OUTPUT REQUIREMENT:",
       "You MUST respond ONLY with a valid JSON object adhering precisely to this schema:",
       "{",
-      '  "observation": "Summary of visual and DOM state",',
-      '  "goal_progress": {',
-      '    "isSatisfied": false,',
-      '    "remainingTasks": ["search", "add_to_cart"]',
-      "  },",
-      '  "next_task": "Description of immediate task",',
+      '  "goal": {',
+      '    "description": "Short description of overall goal",',
+      '    "status": "in_progress | completed | blocked"',
+      '  },',
+      '  "tasks": [',
+      '    { "id": "task_1", "description": "Description of sub-task 1", "status": "pending | in_progress | completed | blocked" },',
+      '    { "id": "task_2", "description": "Description of sub-task 2", "status": "pending | in_progress | completed | blocked" }',
+      '  ],',
+      '  "currentTaskId": "task_1",',
+      '  "taskUpdate": {',
+      '    "completedTaskIds": [],',
+      '    "newTaskIds": []',
+      '  },',
       '  "action": {',
-      '    "actionType": "CLICK",',
+      '    "type": "CLICK",',
       '    "target": "el_1",',
-      '    "parameters": {},',
-      '    "thenPressEnter": false,',
-      '    "reasoningSummary": "Short explanation of this action"',
-      "  }",
+      '    "value": null,',
+      '    "direction": null,',
+      '    "amount": null,',
+      '    "key": null,',
+      '    "url": null',
+      '  },',
+      '  "replan": false,',
+      '  "reason": "Clear explanation of what was observed on the page and why this action was chosen"',
       "}",
       "",
       "CRITICAL RULES:",
-      "1. Target elements ONLY by their elementId (e.g. 'el_1'). Never output arbitrary code or CSS selectors.",
-      "2. Never relax or ignore explicit user constraints (e.g. price limits, brand, color).",
-      "3. Use the visual screenshot to confirm whether items match color, visually verify modal dialogs, and locate elements.",
-      "4. NEVER click on sponsored ads, promotional carousels, or third-party advertisements (labeled 'Sponsored', 'Ad', 'Featured'). Target authentic product items and genuine sidebar filters.",
-      "5. When the current task is 'filter', prioritize applying price range filters (typing into max price input or selecting price bracket) and facet checkboxes. NEVER click a product card when the task is to filter."
+      "1. Target elements ONLY by valid elementId (e.g. 'el_1'). Never output arbitrary javascript or CSS selectors.",
+      "2. When typing into fields, use the 'value' property in the action object.",
+      "3. Use the screenshot to visually confirm element positions, overlays, popups, and visual attributes (colors, banners).",
+      "4. Never click on sponsored ads or promotional third-party banners (labeled 'Sponsored', 'Ad', 'Featured'). Target authentic controls.",
+      "5. When the goal is completely finished, set action.type to 'DONE' and goal.status to 'completed'."
     ].join("\n");
   }
 
@@ -82,12 +99,19 @@ export class MultimodalVisionAgent {
    */
   static buildMultimodalMessages({
     goal = {},
+    userGoal = null,
+    agentState = null,
     currentTask = null,
+    tasks = [],
+    completedTasks = [],
+    pendingTasks = [],
     executionState = {},
     interactiveElements = [],
     screenshotBase64 = null,
     actionHistory = [],
     sanitizedDomContext = "",
+    currentUrl = "",
+    pageTitle = "",
     rawPiiValues = []
   }) {
     const systemPrompt = MultimodalVisionAgent.buildSystemPrompt();
@@ -121,20 +145,34 @@ export class MultimodalVisionAgent {
       };
     });
 
+    const goalDesc = userGoal || goal.summary || goal.description || goal.originalGoal || goal.userRequest || "Execute user browser task";
+
     const textPayload = JSON.stringify({
+      userGoal: goalDesc,
       goal: {
-        summary: goal.summary || goal.originalGoal || "Execute user browser task",
+        summary: goalDesc,
         constraints: goal.constraints || [],
         targetEntity: goal.targetEntity || null
       },
-      currentTask: currentTask || { type: "general_action", description: "Advance goal" },
+      agentState: {
+        iteration: agentState?.iteration ?? executionState?.stepCount ?? actionHistory.length,
+        status: agentState?.status || "running",
+        replanCount: agentState?.replanCount || 0
+      },
+      taskPlan: agentState?.tasks?.length ? agentState.tasks : (tasks?.length ? tasks : (currentTask ? [currentTask] : [])),
+      currentTask: currentTask || agentState?.currentTaskId || { type: "general_action", description: "Advance goal" },
+      completedTasks: agentState?.completedTasks || completedTasks || [],
+      pendingTasks: agentState?.pendingTasks || pendingTasks || [],
+      currentUrl: currentUrl || executionState?.url || "",
+      pageTitle: pageTitle || executionState?.title || "",
+      recentActionHistory: (actionHistory || []).slice(-6),
       executionState: {
-        stepCount: executionState.stepCount || actionHistory.length,
-        inspectedCandidates: executionState.inspectedCount || (executionState.candidatesInspected || []).length,
-        appliedFilters: executionState.appliedFilters || []
+        stepCount: executionState?.stepCount || actionHistory.length,
+        inspectedCandidates: executionState?.inspectedCount || (executionState?.candidatesInspected || []).length,
+        appliedFilters: executionState?.appliedFilters || []
       },
       actionHistory: (actionHistory || []).slice(-6),
-      sanitizedDomContext: (sanitizedDomContext || "").slice(0, 800),
+      sanitizedDomContext: (sanitizedDomContext || "").slice(0, 1000),
       interactiveElements: sanitizedElements
     }, null, 2);
 
@@ -179,22 +217,51 @@ export class MultimodalVisionAgent {
       const parsed = JSON.parse(cleaned);
 
       const actionObj = parsed.action || parsed.recommendedAction || parsed;
-      const actionType = actionObj.actionType || actionObj.action || actionObj.type || "CLICK";
-      const target = actionObj.target || actionObj.elementId || actionObj.targetId || "page_root";
-      const parameters = actionObj.parameters || (actionObj.text ? { text: actionObj.text } : {});
-      const thenPressEnter = Boolean(actionObj.thenPressEnter);
-      const reasoningSummary = actionObj.reasoningSummary || parsed.observation || "Model planned action";
+      const rawActionType = actionObj.type || actionObj.actionType || actionObj.action || "CLICK";
+      const actionType = String(rawActionType).toUpperCase().trim();
+      const target = actionObj.target || actionObj.elementId || actionObj.targetId || (actionType === "DONE" || actionType === "COMPLETE" ? "page_root" : null);
+      const value = actionObj.value !== undefined ? actionObj.value : (actionObj.parameters?.text ?? actionObj.parameters?.value ?? null);
+      const parameters = actionObj.parameters || (value !== null && value !== undefined ? { text: String(value), value: String(value) } : {});
+      if (actionObj.key && !parameters.key) parameters.key = actionObj.key;
+      if (actionObj.direction && !parameters.direction) parameters.direction = actionObj.direction;
+      if (actionObj.amount && !parameters.amount) parameters.amount = actionObj.amount;
+      if (actionObj.url && !parameters.url) parameters.url = actionObj.url;
+
+      const thenPressEnter = Boolean(actionObj.thenPressEnter || actionObj.key === "Enter" || parameters.key === "Enter");
+      const reasoningSummary = parsed.reason || actionObj.reasoningSummary || parsed.observation || "Model planned action";
+      const isComplete = Boolean(
+        parsed.goal?.status === "completed" ||
+        parsed.goal_progress?.isSatisfied ||
+        parsed.isComplete ||
+        actionType === "COMPLETE" ||
+        actionType === "DONE"
+      );
 
       return {
-        observation: typeof parsed.observation === "string" ? parsed.observation : JSON.stringify(parsed.observation || {}),
-        goal_progress: parsed.goal_progress || { isSatisfied: Boolean(parsed.isComplete || actionType === "COMPLETE") },
-        next_task: parsed.next_task || null,
+        goal: parsed.goal || {
+          description: typeof parsed.next_task === "string" ? parsed.next_task : (parsed.goal?.description || "Execute user goal"),
+          status: isComplete ? "completed" : "in_progress"
+        },
+        tasks: Array.isArray(parsed.tasks) ? parsed.tasks : (Array.isArray(parsed.taskPlan) ? parsed.taskPlan : []),
+        currentTaskId: parsed.currentTaskId || parsed.current_task_id || (Array.isArray(parsed.tasks) && parsed.tasks[0]?.id) || null,
+        taskUpdate: parsed.taskUpdate || parsed.task_update || { completedTaskIds: [], newTaskIds: [] },
+        replan: Boolean(parsed.replan || parsed.replanRequired),
+        reason: reasoningSummary,
+        observation: typeof parsed.observation === "string" ? parsed.observation : (reasoningSummary || JSON.stringify(parsed.observation || {})),
+        goal_progress: parsed.goal_progress || { isSatisfied: isComplete },
+        next_task: parsed.next_task || parsed.currentTaskId || null,
         action: {
-          actionType: String(actionType).toUpperCase(),
-          target,
+          type: actionType,
+          actionType,
+          target: target || "page_root",
+          value,
           parameters,
           thenPressEnter,
-          reasoningSummary
+          reasoningSummary,
+          direction: actionObj.direction || parameters.direction || null,
+          amount: actionObj.amount || parameters.amount || null,
+          key: actionObj.key || parameters.key || null,
+          url: actionObj.url || parameters.url || null
         },
         raw: parsed
       };
@@ -202,6 +269,7 @@ export class MultimodalVisionAgent {
       return null;
     }
   }
+
 
   /**
    * Static entrypoint to perform multimodal vision reasoning.
@@ -211,12 +279,19 @@ export class MultimodalVisionAgent {
     model = DEFAULT_MULTIMODAL_MODEL,
     provider = "openrouter",
     goal = {},
+    userGoal = null,
+    agentState = null,
     currentTask = null,
+    tasks = [],
+    completedTasks = [],
+    pendingTasks = [],
     executionState = {},
     interactiveElements = [],
     screenshotBase64 = null,
     actionHistory = [],
     sanitizedDomContext = "",
+    currentUrl = "",
+    pageTitle = "",
     rawPiiValues = [],
     fetchClient = globalThis.fetch,
     onTelemetry = null,
@@ -231,11 +306,18 @@ export class MultimodalVisionAgent {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             goal,
+            userGoal,
+            agentState,
             currentTask,
+            tasks,
+            completedTasks,
+            pendingTasks,
             executionState,
             interactiveElements,
             screenshotBase64,
             sanitizedDomContext,
+            currentUrl,
+            pageTitle,
             actionHistory
           })
         });
@@ -249,7 +331,7 @@ export class MultimodalVisionAgent {
                 provider: "local",
                 model: "Local-Heuristic-Agent-8765",
                 latencyMs,
-                actionType: decision?.action?.actionType || "CLICK",
+                actionType: decision?.action?.actionType || decision?.action?.type || "CLICK",
                 target: decision?.action?.target || null,
                 observation: decision?.observation || null
               });
@@ -269,12 +351,19 @@ export class MultimodalVisionAgent {
 
     const messages = MultimodalVisionAgent.buildMultimodalMessages({
       goal,
+      userGoal,
+      agentState,
       currentTask,
+      tasks,
+      completedTasks,
+      pendingTasks,
       executionState,
       interactiveElements,
       screenshotBase64,
       actionHistory,
       sanitizedDomContext,
+      currentUrl,
+      pageTitle,
       rawPiiValues
     });
 
@@ -370,11 +459,18 @@ export class MultimodalVisionAgent {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               goal,
+              userGoal,
+              agentState,
               currentTask,
+              tasks,
+              completedTasks,
+              pendingTasks,
               executionState,
               interactiveElements,
               screenshotBase64,
               sanitizedDomContext,
+              currentUrl,
+              pageTitle,
               actionHistory
             })
           });
@@ -414,11 +510,18 @@ export class MultimodalVisionAgent {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             goal,
+            userGoal,
+            agentState,
             currentTask,
+            tasks,
+            completedTasks,
+            pendingTasks,
             executionState,
             interactiveElements,
             screenshotBase64,
             sanitizedDomContext,
+            currentUrl,
+            pageTitle,
             actionHistory
           })
         });
