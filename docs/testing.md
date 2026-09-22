@@ -18,6 +18,7 @@ tests/
 ├── phase6-end-to-end-privacy-demo.test.mjs # 7-class mixed content verification matrix
 ├── phase7-runtime-transparency.test.mjs    # Extension transparency UI & runtime integration
 ├── phase7-generic-form-execution.test.mjs  # Form mutation, confirmation clicks, overwrite rules
+├── qwen-vlm-agent-architecture.test.mjs    # Working memory, dynamic replan, action validator, loops
 ├── generic-agent-architecture.test.mjs     # Element discovery, stale-target recovery, CSP checks
 ├── compound-intent-resolution.test.mjs     # Compound tasks & generic UI action verbs
 ├── generalized-intent-architecture.test.mjs# Candidate roles, ordinals, entity constraints
@@ -45,6 +46,7 @@ node --test tests/*.test.mjs
 ✔ Phase 6: End-to-End Privacy Demo & Transparency Badges (12 tests)
 ✔ Phase 7: Runtime Privacy Transparency (10 tests)
 ✔ Phase 7: Generic Form Modification & Confirmation Execution (8 tests)
+✔ Qwen VLM Agent Architecture & Host Gatekeeper (13 tests)
 ✔ Generic Agent Architecture & Stale Target Recovery (25 tests)
 ✔ Compound Intent Resolution (9 tests)
 ✔ Generalized Intent & Prepositional Roles (28 tests)
@@ -53,13 +55,13 @@ node --test tests/*.test.mjs
 ✔ YOLO Visual Bounding Box Redaction (4 tests)
 
 --------------------------------------------------------------------------------
-# tests: 570
+# tests: 583
 # suites: 14
-# pass:  570
+# pass:  583
 # fail:  0
 # cancelled: 0
 # skipped: 0
-# duration: ~6.7s
+# duration: ~6.8s
 --------------------------------------------------------------------------------
 ```
 
@@ -85,3 +87,12 @@ node --test tests/*.test.mjs
   - Zero hardcoded website domains (e.g. Amazon, Google, Flipkart) in action decision branches.
   - Zero exact demo-task prompt string matching.
   - Zero selector-specific hardcoded mappings (`#btn-submit-order`, `#recipient-email`).
+
+### E. VLM Agent Architecture & Host Security Gatekeeping
+- Tests in [`tests/qwen-vlm-agent-architecture.test.mjs`](../tests/qwen-vlm-agent-architecture.test.mjs) verify:
+  1. Extension working memory (`AgentState`) initialization, task updates, and dynamic replanning (`replan: true`).
+  2. Action validator rejects unapproved action types, non-existent DOM target elements, and dangerous navigation schemes (`javascript:`, `file:`).
+  3. Safe on-device resolution of `PrivacyVault` tokens during `TYPE` actions.
+  4. 3x repeated action stagnation loop detection (`detectExecutionLoop`).
+  5. Strict on-device security assertion throwing exceptions if any raw secret is present in outbound VLM message strings.
+  6. Compliance of autonomous decision server payloads with Qwen VLM response schemas.

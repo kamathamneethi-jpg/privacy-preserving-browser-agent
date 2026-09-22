@@ -70,11 +70,13 @@ The generic fixture ([`tests/fixtures/controlled-privacy-demo.html`](../tests/fi
    ```text
    change the email to alex@gmail.com and click on confirm Order
    ```
-2. Click **"🚀 Run Agent"** (or use Local Heuristic / Model reasoning).
+2. Click **"🚀 Run Agent"** (powered by Qwen VLM or Local Reasoning Server on port 8765).
 3. **Observe**:
-   - The agent updates the recipient email field locally to `alex@gmail.com`.
-   - The agent clicks the `Confirm Order` button using `safeClick`.
-   - The password and OTP values remain strictly on-device throughout the entire execution loop.
+   - **Multimodal Transmission Preview**: The popup renders the live transmission card showing the on-device redacted screenshot, sanitized DOM snippet, and abstract element count.
+   - **Dynamic VLM Task Plan**: The Qwen VLM dynamically decomposes the task into sequential subtasks without any hardcoded website regex or deterministic scripts.
+   - **Local Action Validation & Token Resolution**: The `VlmActionValidator` verifies target element existence in the live DOM snapshot, resolves any tokenized values via `PrivacyVault`, and dispatches the action to `ActionRuntime`.
+   - **CSP-Safe Mutation**: The agent updates the email field and clicks `Confirm Order` via `safeClick`.
+   - **Zero Secret Egress**: The password and OTP values remain strictly on-device in `PrivacyVault` throughout the entire multi-step loop.
 
 ---
 
@@ -82,7 +84,7 @@ The generic fixture ([`tests/fixtures/controlled-privacy-demo.html`](../tests/fi
 
 > **Presenter**: *"Hello judges. Autonomous AI browser agents are powerful, but today's commercial agents have a critical privacy flaw: they send raw screenshots, unmasked DOM trees, and sensitive user credentials directly to remote cloud LLMs.*
 >
-> *Our project solves this with a **100% on-device privacy filter**.*
+> *Our project solves this with a **100% on-device privacy filter** coupled with an autonomous **Qwen VLM reasoning architecture**.*
 >
 > *Here we have a realistic web portal containing public product information, personal contact details, and account credentials.*
 >
@@ -92,8 +94,10 @@ The generic fixture ([`tests/fixtures/controlled-privacy-demo.html`](../tests/fi
 > 1. *Public product data receives **ALLOW**—it remains unmasked because the AI needs it to understand the page.*
 > 2. *Task-relevant identifiers receive **TOKENIZE**—the AI receives only an abstract token like `{{EMAIL_1}}`, while the real value stays in our in-memory Local Privacy Vault.*
 > 3. *Unnecessary personal data receives **REDACT**—it is masked with solid blackouts in visual screenshots and replaced with `[REDACTED]` in text.*
-> 4. *Critical credentials like passwords and 2FA OTPs receive **LOCAL_ONLY**—they are completely excluded from remote payloads. The remote model only provides abstract navigation guidance, while our local **BrowserActionEngine** executes the authorized actions locally.*
+> 4. *Critical credentials like passwords and 2FA OTPs receive **LOCAL_ONLY**—they are completely excluded from remote payloads.
 >
-> *Notice that our privacy decisions are completely website-independent: we do not hardcode selectors for Amazon, Google, or any specific site. Everything is determined dynamically by semantic roles and task necessity.*
+> *When we run an autonomous task, the extension packages the on-device redacted screenshot, sanitized DOM with abstract element IDs (`el_1`, `el_2`), and extension working memory (`AgentState`), sending it to the Qwen VLM.*
 >
-> *All 570 automated test suites pass with zero failures, proving strict enforcement across DOM text, visual screenshots, remote payloads, and telemetry streams."*
+> *The model dynamically plans subtasks and proposes abstract actions. Our local **VlmActionValidator** verifies element existence, resolves tokens from the vault locally, and our **ActionRuntime** executes the actions with CSP-safe clicks.*
+>
+> *All 583 automated tests across 14+ suites pass with zero failures, proving strict enforcement across DOM text, visual screenshots, remote payloads, and telemetry streams."*

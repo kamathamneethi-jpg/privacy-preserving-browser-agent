@@ -54,6 +54,39 @@
         <button type="submit" id="btn-submit">Submit</button>
       </form>
     </section>
+
+    <section id="ai-chat-demo-section">
+      <h2>AI Chat Features</h2>
+      <div class="ai-chat-container" aria-live="polite">
+        <div class="chat-message ai-message">Hi! I'm your AI assistant. How can I help you?</div>
+        <div class="chat-message user-message">I'm looking for discounts.</div>
+        <div class="chat-message ai-message">Check out our deals section!</div>
+        <button class="ai-action-button" data-action="search-deals" aria-label="Search for deals on laptops and accessories">Search for deals on laptops and accessories</button>
+        <input type="text" class="chat-input" placeholder="Type a message..." aria-label="Chat input field">
+        <button class="chat-send-button" aria-label="Send message">Send</button>
+      </div>
+    </section>
+
+    <section id="login-form-section">
+      <h2>Secure Login</h2>
+      <form id="login-form">
+        <label for="username-login">Username:</label>
+        <input type="text" id="username-login" name="username" placeholder="Enter your username" />
+
+        <label for="password-field">Password:</label>
+        <input type="password" id="password-field" name="password" placeholder="Enter your password" />
+
+        <label for="security-question-select">Security Question:</label>
+        <select id="security-question-select" name="securityQuestion">
+          <option value="">-- Select Security Question --</option>
+          <option value="mother_maiden">What is your mother's maiden name?</option>
+          <option value="city_born">In which city were you born?</option>
+          <option value="first_pet">What was the name of your first pet?</option>
+        </select>
+
+        <button type="submit" id="btn-login">Login</button>
+      </form>
+    </section>
   </main>
 </body>
 </html>

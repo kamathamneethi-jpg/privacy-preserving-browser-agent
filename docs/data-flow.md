@@ -12,7 +12,7 @@ Information within the extension traverses a deterministic, stage-gated pipeline
 1. RAW BROWSER CONTEXT
    • Live webpage DOM tree (inputs, buttons, links, text nodes)
    • Visual page viewport screenshot (bitmap)
-   • User natural language task instruction
+   • User natural language task instruction (unaltered prompt)
                 │
                 ▼
 2. LOCAL PERCEPTION & DETECTION
@@ -21,36 +21,44 @@ Information within the extension traverses a deterministic, stage-gated pipeline
    • Spatial localization (bounding boxes: [x, y, width, height])
                 │
                 ▼
-3. CONTEXT ANALYSIS
-   • Goal parsing & domain identification (GoalParser: constraints, candidate roles)
-   • Semantic role classification (ACCOUNT_IDENTIFIER, RECIPIENT, AUTH_SECRET, ...)
-   • Task relevance & operational necessity determination (ContextAnalyzer)
-                │
-                ▼
-4. AUTHORITATIVE POLICY EVALUATION
+3. CONTEXT ANALYSIS & AUTHORITATIVE POLICY EVALUATION
+   • ContextAnalyzer determines semantic role, task relevance, and operational necessity
    • PolicyEngine evaluates contextual signals against sensitivity policies
    • Emits a single, authoritative PolicyDecision per entity:
      [ ALLOW | TOKENIZE | REDACT | LOCAL_ONLY ]
                 │
                 ▼
-5. UNIFIED SANITIZATION ENFORCEMENT
+4. UNIFIED SANITIZATION ENFORCEMENT
    ┌───────────────────┬───────────────────┬───────────────────┬───────────────────┬───────────────────┐
-   │ 5A. DOM Redactor  │ 5B. ImageRedactor │ 5C. Remote Context│ 5D. Telemetry     │ 5E. Reviewer UI   │
+   │ 4A. DOM Redactor  │ 4B. ImageRedactor │ 4C. Remote Context│ 4D. Telemetry     │ 4E. Reviewer UI   │
    │ Text sanitized or │ Solid visual bbox │ Payload builder   │ Logging stream    │ Live transparency │
    │ tokenized in DOM  │ blackout on-device│ excludes secrets; │ scrubbed of raw   │ panel renders     │
-   │ tree              │ before export     │ replaces tokens   │ inputs & tokens   │ color badge state │
+   │ tree ({{TOKEN}})  │ before export     │ replaces tokens   │ inputs & tokens   │ color badge state │
    └───────────────────┴───────────────────┴───────────────────┴───────────────────┴───────────────────┘
                 │
                 ▼
-6. REMOTE MODEL REASONING (Secure Egress)
-   • External reasoning model receives ONLY sanitized structural DOM + redacted screenshot
-   • Emits abstract proposed action (e.g. `CLICK el_5` or `TYPE el_1 "{{EMAIL_1}}"`)
+5. DUAL-MODALITY PACKAGING & EXTENSION WORKING MEMORY
+   • Extension initializes/updates AgentState (goal, tasks, currentTaskId, history, iteration)
+   • MultimodalVisionAgent packages: Redacted Screenshot + Sanitized Structural DOM + AgentState
+   • Strict on-device security assertion verifies zero raw secrets in outbound message strings
                 │
                 ▼
-7. LOCAL ACTION EXECUTION (BrowserActionEngine)
-   • Resolves token `{{EMAIL_1}}` to actual value via local PrivacyVault
-   • Disarms pseudo-protocols via safeClick
-   • Mutates target DOM element locally
+6. MULTIMODAL VLM REASONING (Secure Egress)
+   • Qwen VLM reasoning engine processes multimodal perception and agent state
+   • Performs natural-language understanding, dynamic task breakdown, and UI reasoning
+   • Emits structured plan: tasks list, currentTaskId, replan flag, and proposed action (e.g. TYPE el_1 "{{EMAIL_1}}")
+                │
+                ▼
+7. LOCAL ACTION VALIDATION & TOKEN RESOLUTION (VlmActionValidator)
+   • Verifies target element existence in current interactive DOM snapshot
+   • Blocks dangerous protocols (javascript:, file:, data:) for NAVIGATE actions
+   • Resolves token {{EMAIL_1}} securely to real secret via local in-memory PrivacyVault
+                │
+                ▼
+8. LOCAL ACTION EXECUTION & LOOP DEFENSE (ActionRuntime)
+   • safeClick: Temporarily disarms javascript: pseudo-protocols to prevent MV3 CSP errors
+   • Executes authoritative browser mutations: CLICK, TYPE, CHECK, SELECT, PRESS_KEY
+   • AgentState records action, updates task completion, and flags 3x repeated action stagnation
 ```
 
 ---

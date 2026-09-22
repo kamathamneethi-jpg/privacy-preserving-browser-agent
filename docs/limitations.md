@@ -4,20 +4,22 @@
 
 ---
 
-## 1. Distinction: Action Planning vs. Privacy Architecture
+## 1. Distinction: Agent Planning & VLM Reasoning vs. Privacy Architecture
 
 It is critical to distinguish between **agent action planning capabilities** and the **core privacy architecture**:
-- The **Privacy Architecture** (detection, context analysis, `PolicyEngine` 4-way evaluation, unified sanitization, vault isolation, and telemetry scrubbing) is robust and enforced by 570 passing regression tests.
-- The **Browser Agent Action Planner** (natural-language interpretation, dynamic heuristics, multi-step Re-Act loops) is an evolving autonomous system operating over unconstrained real-world websites.
+- The **Privacy Architecture** (detection, context analysis, `PolicyEngine` 4-way evaluation, unified sanitization, vault isolation, and telemetry scrubbing) is robust and enforced by 583 passing regression tests across the codebase.
+- The **VLM-Driven Agent Planner** (Qwen VLM multimodal reasoning, dynamic task decomposition, extension working memory `AgentState`, and `VlmActionValidator`) operates autonomously across unconstrained real-world websites.
 
 ---
 
 ## 2. Identified Engineering Limitations
 
-### 1. Generic Natural-Language Action & Form Mutation Planning
-- **Context**: The `GoalParser` and `TaskPlanner` use linguistic patterns, candidate roles, and semantic element matching to interpret user goals without site-specific hardcoding.
-- **Limitation**: While common patterns such as `"change the email to X"`, `"update OTP to Y"`, or `"click on confirm Order"` are supported, highly ambiguous or non-standard linguistic constructions (e.g. conversational multi-sentence instructions without standard prepositional markers like `to`, `with`, `as`) may fail to correctly trigger form mutation planning or confirmation clicks.
-- **Impact**: In such edge cases, the agent may default to general form filling or search heuristics. The privacy boundary remains fully protected, but the UI action may require user intervention.
+### 1. Multimodal VLM Reasoning Latency & Token Boundaries
+- **Context**: The system has transitioned from rigid regex-based task planning to dynamic multimodal reasoning powered by Qwen VLM. The raw user instruction, sanitized structural DOM (`el_1`, `el_2`), on-device redacted screenshot, and extension working memory (`AgentState`) are evaluated holistically by the model to determine the next task and action.
+- **Operational Boundaries**:
+  - **Inference Latency**: Processing high-resolution redacted screenshots combined with serialized DOM contexts introduces network transport and multimodal model latency (typically 1.5–4.5s per step on remote providers) compared to instantaneous local heuristics.
+  - **Dynamic Replanning on Unexpected Modals**: When websites render dynamic popups or cookie consent overlays, Qwen VLM can signal dynamic replanning (`replan: true`). If the model hallucinates an invalid element ID, the local `VlmActionValidator` immediately rejects the action, and 3x repeated action stagnation triggers loop detection.
+  - **Canvas-Only UI Elements**: Web applications that render interactive controls strictly inside HTML5 `<canvas>` elements without accessible DOM nodes cannot be indexed with abstract element IDs (`el_1`, `el_2`), requiring visual coordinate fallbacks.
 
 ### 2. High-Entropy Arbitrary Secret Detection
 - **Context**: On-device PII perception detects sensitive data using structured patterns (email, phone, credit cards, dates), semantic DOM attributes (`type="password"`, `autocomplete`, ARIA labels), OCR, YOLO visual bounding boxes, and GLiNER NER.

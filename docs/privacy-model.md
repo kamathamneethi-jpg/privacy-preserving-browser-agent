@@ -90,12 +90,12 @@ The `PolicyEngine` evaluates decisions using structured contextual dimensions pr
 
 ---
 
-## 4. Critical Security Secrets (`LOCAL_ONLY`)
+## 4. Critical Security Secrets (`LOCAL_ONLY`) & Token Resolution
 
-Critical secrets receive special architectural isolation:
-1. **Zero Remote Transmission**: Passwords, OTP codes, and payment credentials are never sent across the network under any policy, prompt, or configuration.
-2. **Local Privacy Vault Isolation**: When an authorized local action requires entering a secret, the secret is fetched from the local temporary `PrivacyVault` directly inside the browser extension runtime.
-3. **Local Action Authorization**: Execution authorization for a local action (e.g. typing a password into `#login-password`) is distinct from remote disclosure authorization. The remote reasoning engine sees only that an action on `el_X` was proposed.
+Critical secrets and tokenized values receive special architectural isolation:
+1. **Zero Remote Transmission**: Passwords, OTP codes, and payment credentials are never sent across the network under any policy, prompt, or configuration. Outbound messages from `MultimodalVisionAgent` run strict security assertions that throw exceptions if any raw secret appears in the payload.
+2. **Local Privacy Vault Isolation**: Real values for sensitive fields are stored exclusively in the in-memory `PrivacyVault` (`packages/privacy-core/src/privacy-vault.js`) with isolated access purposes (`LOCAL_ACTION`).
+3. **Local Action Authorization & Token Resolution**: When the Qwen VLM agent proposes an action like `TYPE el_1 "{{EMAIL_1}}"`, the local `VlmActionValidator` (`validateVlmAction`) intercepts the proposal, verifies element existence, and resolves `{{EMAIL_1}}` back to the real secret from `PrivacyVault` immediately prior to DOM mutation. The remote reasoning engine never receives the secret value or the mapping table.
 
 ---
 
