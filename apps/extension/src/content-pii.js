@@ -460,12 +460,28 @@
           });
           if (text) textLines.push(`[${path}]: ${text}`);
         } else if (tag === "button") {
-          const btnText = (n.textContent || "").trim();
+          let btnText = (n.textContent || "").trim();
+          let isSanitized = false;
+          for (const item of deduplicatedRawItems) {
+            if (item?.value && item.value.length >= 2) {
+              const esc = item.value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+              const re = new RegExp(esc, "gi");
+              if (re.test(btnText)) {
+                btnText = btnText.replace(re, "[REDACTED]");
+                isSanitized = true;
+              }
+            }
+          }
+          const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/gi;
+          if (emailRegex.test(btnText)) {
+            btnText = btnText.replace(emailRegex, "[EMAIL_REDACTED]");
+            isSanitized = true;
+          }
           sanitizedNodes.push({
             nodeId: n.id || `btn_${nodeIndex++}`,
             elementPath: path,
             text: btnText,
-            isSanitized: false,
+            isSanitized,
             source: "button"
           });
           if (btnText) textLines.push(`[Button: ${btnText}]`);
@@ -485,7 +501,19 @@
       }
     }
 
-    const sanitizedDomText = textLines.join("\n");
+    let sanitizedDomText = textLines.join("\n");
+    for (const item of deduplicatedRawItems) {
+      if (item?.value && item.value.length >= 2) {
+        const esc = item.value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        sanitizedDomText = sanitizedDomText.replace(new RegExp(esc, "gi"), "[REDACTED]");
+      }
+    }
+    sanitizedDomText = sanitizedDomText
+      .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/gi, "[EMAIL_REDACTED]")
+      .replace(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g, "[PHONE_REDACTED]")
+      .replace(/\b(?:\d[ -]*){13,19}\b/g, (match) => passesLuhn(match) ? "[CARD_REDACTED]" : match)
+      .replace(/\b\d{3}-\d{2}-\d{4}\b/g, "[ID_REDACTED]");
+
     return {
       sanitizedDomText,
       sanitizedDomNodes: sanitizedNodes,

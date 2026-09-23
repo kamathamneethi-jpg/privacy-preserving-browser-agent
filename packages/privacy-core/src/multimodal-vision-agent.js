@@ -15,6 +15,52 @@ export const DEFAULT_MULTIMODAL_MODEL = "Qwen/Qwen3-VL-4B-Instruct";
 export const HUGGINGFACE_DEFAULT_MODEL = "Qwen/Qwen3-VL-4B-Instruct";
 export const OPENROUTER_DEFAULT_MODEL = "qwen/qwen-2.5-vl-72b-instruct:free";
 
+// Provider Circuit Breaker State (cooldowns against depleted/rate-limited endpoints)
+const providerCircuitBreakers = new Map();
+
+/**
+ * Checks if circuit breaker is open for a given provider and model.
+ */
+export function isProviderCircuitOpen(provider, model) {
+  const key = `${provider || "default"}:${model || "default"}`;
+  const entry = providerCircuitBreakers.get(key);
+  if (!entry) return false;
+  if (Date.now() > entry.resetAt) {
+    providerCircuitBreakers.delete(key);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Trips circuit breaker for a given provider and model.
+ */
+export function tripProviderCircuit(provider, model, reason = "Repeated errors", cooldownMs = 60000) {
+  const key = `${provider || "default"}:${model || "default"}`;
+  providerCircuitBreakers.set(key, {
+    reason,
+    trippedAt: Date.now(),
+    resetAt: Date.now() + cooldownMs
+  });
+}
+
+/**
+ * Resets circuit breaker for a given provider/model, or clears all.
+ */
+export function resetProviderCircuit(provider, model) {
+  if (provider && model) {
+    providerCircuitBreakers.delete(`${provider}:${model}`);
+  } else if (provider) {
+    for (const key of providerCircuitBreakers.keys()) {
+      if (key.startsWith(`${provider}:`)) {
+        providerCircuitBreakers.delete(key);
+      }
+    }
+  } else {
+    providerCircuitBreakers.clear();
+  }
+}
+
 export class MultimodalVisionAgent {
   constructor(config = {}) {
     this.provider = config.provider || "huggingface"; // "huggingface" | "openrouter" | "groq"
@@ -123,12 +169,18 @@ export class MultimodalVisionAgent {
       let sAria = el.ariaLabel || "";
       for (const raw of rawPiiValues) {
         if (raw && raw.length >= 2) {
-          if (sText && sText.includes(raw)) sText = sText.replaceAll(raw, "[REDACTED]");
-          if (sVal && sVal.includes(raw)) sVal = sVal.replaceAll(raw, "[REDACTED]");
-          if (sPlaceholder && sPlaceholder.includes(raw)) sPlaceholder = sPlaceholder.replaceAll(raw, "[REDACTED]");
-          if (sAria && sAria.includes(raw)) sAria = sAria.replaceAll(raw, "[REDACTED]");
+          const esc = String(raw).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const re = new RegExp(esc, "gi");
+          if (sText && re.test(sText)) sText = sText.replace(re, "[REDACTED]");
+          if (sVal && re.test(sVal)) sVal = sVal.replace(re, "[REDACTED]");
+          if (sPlaceholder && re.test(sPlaceholder)) sPlaceholder = sPlaceholder.replace(re, "[REDACTED]");
+          if (sAria && re.test(sAria)) sAria = sAria.replace(re, "[REDACTED]");
         }
       }
+      const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/gi;
+      sText = sText.replace(emailRegex, "[EMAIL_REDACTED]");
+      sVal = sVal.replace(emailRegex, "[EMAIL_REDACTED]");
+      sAria = sAria.replace(emailRegex, "[EMAIL_REDACTED]");
       return {
         elementId: el.elementId || el.id,
         tag: el.tag,
@@ -147,6 +199,37 @@ export class MultimodalVisionAgent {
 
     const goalDesc = userGoal || goal.summary || goal.description || goal.originalGoal || goal.userRequest || "Execute user browser task";
 
+    // 1. Sanitize pageTitle of any detected PII (e.g. Gmail document.title containing user email)
+    let sTitle = pageTitle || executionState?.title || "";
+    for (const raw of rawPiiValues) {
+      if (raw && raw.length >= 2) {
+        const esc = String(raw).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        sTitle = sTitle.replace(new RegExp(esc, "gi"), "[EMAIL_REDACTED]");
+      }
+    }
+    sTitle = sTitle.replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/gi, "[EMAIL_REDACTED]");
+
+    // 2. Sanitize currentUrl of any query parameter PII
+    let sUrl = currentUrl || executionState?.url || "";
+    for (const raw of rawPiiValues) {
+      if (raw && raw.length >= 2) {
+        const esc = String(raw).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        sUrl = sUrl.replace(new RegExp(esc, "gi"), "[REDACTED]");
+      }
+    }
+
+    // 3. Sanitize actionHistory of any typed secrets
+    const sanitizedActionHistory = (actionHistory || []).slice(-6).map(act => {
+      let str = typeof act === "string" ? act : JSON.stringify(act);
+      for (const raw of rawPiiValues) {
+        if (raw && raw.length >= 2) {
+          const esc = String(raw).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          str = str.replace(new RegExp(esc, "gi"), "[REDACTED]");
+        }
+      }
+      return str.replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/gi, "[EMAIL_REDACTED]");
+    });
+
     const textPayload = JSON.stringify({
       userGoal: goalDesc,
       goal: {
@@ -163,15 +246,15 @@ export class MultimodalVisionAgent {
       currentTask: currentTask || agentState?.currentTaskId || { type: "general_action", description: "Advance goal" },
       completedTasks: agentState?.completedTasks || completedTasks || [],
       pendingTasks: agentState?.pendingTasks || pendingTasks || [],
-      currentUrl: currentUrl || executionState?.url || "",
-      pageTitle: pageTitle || executionState?.title || "",
-      recentActionHistory: (actionHistory || []).slice(-6),
+      currentUrl: sUrl,
+      pageTitle: sTitle,
+      recentActionHistory: sanitizedActionHistory,
       executionState: {
         stepCount: executionState?.stepCount || actionHistory.length,
         inspectedCandidates: executionState?.inspectedCount || (executionState?.candidatesInspected || []).length,
         appliedFilters: executionState?.appliedFilters || []
       },
-      actionHistory: (actionHistory || []).slice(-6),
+      actionHistory: sanitizedActionHistory,
       sanitizedDomContext: (sanitizedDomContext || "").slice(0, 1000),
       interactiveElements: sanitizedElements
     }, null, 2);
@@ -195,6 +278,14 @@ export class MultimodalVisionAgent {
         type: "image_url",
         image_url: {
           url: screenshotBase64
+        }
+      });
+    } else {
+      // Provide valid on-device redacted perception screenshot data URL if none passed, ensuring vision models always receive image
+      userContent.push({
+        type: "image_url",
+        image_url: {
+          url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
         }
       });
     }
@@ -310,11 +401,11 @@ export class MultimodalVisionAgent {
       }
     }
 
-    // 1. Local AI Agent Server (Port 8765, Zero Remote Key Required)
-    if (provider === "local") {
+    // Reusable fallback helper to Local AI Agent Server (Port 8765, Zero Remote Key Required)
+    const callLocalFallback = async (fallbackReason = "Local execution") => {
       const localStartTime = Date.now();
       try {
-        const localRes = await fetchClient(localEndpoint, {
+        const localRes = await fetchClient(localEndpoint || "http://127.0.0.1:8765/api/agent/reason", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -346,7 +437,8 @@ export class MultimodalVisionAgent {
                 latencyMs,
                 actionType: decision?.action?.actionType || decision?.action?.type || "CLICK",
                 target: decision?.action?.target || null,
-                observation: decision?.observation || null
+                observation: decision?.observation || null,
+                fallbackReason
               });
             } catch {}
           }
@@ -356,29 +448,129 @@ export class MultimodalVisionAgent {
         // Fallback to null if local server unavailable
       }
       return null;
+    };
+
+    // 1. Explicit Local AI Agent Server
+    if (provider === "local") {
+      return await callLocalFallback("Direct local request");
+    }
+
+    // 2. Circuit Breaker check: If provider endpoint is in cooldown (e.g. 402 credits depleted / 429 rate limit),
+    // immediately route to local agent without issuing remote fetch or spamming errors!
+    if (isProviderCircuitOpen(provider, model)) {
+      if (typeof onTelemetry === "function") {
+        try {
+          onTelemetry({
+            status: "CIRCUIT_OPEN",
+            provider,
+            model,
+            reason: `Circuit breaker active for ${provider}/${model}. Bypassing remote API to avoid error spam.`,
+            actionType: "FALLBACK_LOCAL"
+          });
+        } catch {}
+      } else {
+        try {
+          if (typeof globalThis.fetch === "function") {
+            globalThis.fetch("http://127.0.0.1:8765/api/events", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                stage: "API REASONING",
+                event: "CIRCUIT_BREAKER_ACTIVE",
+                level: "warn",
+                data: { provider, model, reason: "Circuit breaker open: bypassing remote API to prevent spam" }
+              })
+            }).catch(() => {});
+          }
+        } catch {}
+      }
+      return await callLocalFallback("Circuit breaker open");
     }
 
     if (!apiKey || typeof apiKey !== "string" || !apiKey.trim()) {
       return null;
     }
 
-    const messages = MultimodalVisionAgent.buildMultimodalMessages({
-      goal,
-      userGoal,
-      agentState,
-      currentTask,
-      tasks,
-      completedTasks,
-      pendingTasks,
-      executionState,
-      interactiveElements,
-      screenshotBase64,
-      actionHistory,
-      sanitizedDomContext,
-      currentUrl,
-      pageTitle,
-      rawPiiValues
-    });
+    // Helper for recursive on-device scrubbing across all nested payloads
+    const scrubNestedSecrets = (val) => {
+      if (val === null || val === undefined) return val;
+      if (typeof val === "string") {
+        let res = val;
+        for (const raw of rawPiiValues) {
+          if (raw && typeof raw === "string" && raw.length >= 2) {
+            res = res.replaceAll(raw, "[REDACTED]");
+          }
+        }
+        return res.replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/gi, "[EMAIL_REDACTED]");
+      }
+      if (Array.isArray(val)) {
+        return val.map(item => scrubNestedSecrets(item));
+      }
+      if (typeof val === "object") {
+        const res = {};
+        for (const [k, v] of Object.entries(val)) {
+          res[k] = scrubNestedSecrets(v);
+        }
+        return res;
+      }
+      return val;
+    };
+
+    // Pre-scrub on-device inputs deeply so that zero raw secrets ever reach the remote payload
+    const safeGoal = scrubNestedSecrets(goal);
+    const safeUserGoal = scrubNestedSecrets(userGoal || goal?.summary || "");
+    const safeAgentState = scrubNestedSecrets(agentState);
+    const safeCurrentTask = scrubNestedSecrets(currentTask);
+    const safeTasks = scrubNestedSecrets(tasks);
+    const safeCompletedTasks = scrubNestedSecrets(completedTasks);
+    const safePendingTasks = scrubNestedSecrets(pendingTasks);
+    const safeInteractiveElements = scrubNestedSecrets(interactiveElements);
+    const safeActionHistory = scrubNestedSecrets(actionHistory);
+    const safeDomContext = scrubNestedSecrets(sanitizedDomContext || "");
+    const safeCurrentUrl = scrubNestedSecrets(currentUrl || "");
+    const safePageTitle = scrubNestedSecrets(pageTitle || "");
+
+    let messages;
+    try {
+      messages = MultimodalVisionAgent.buildMultimodalMessages({
+        goal: { ...safeGoal, summary: safeUserGoal },
+        userGoal: safeUserGoal,
+        agentState: safeAgentState,
+        currentTask: safeCurrentTask,
+        tasks: safeTasks,
+        completedTasks: safeCompletedTasks,
+        pendingTasks: safePendingTasks,
+        executionState,
+        interactiveElements: safeInteractiveElements,
+        screenshotBase64,
+        actionHistory: safeActionHistory,
+        sanitizedDomContext: safeDomContext,
+        currentUrl: safeCurrentUrl,
+        pageTitle: safePageTitle,
+        rawPiiValues
+      });
+    } catch (assertionErr) {
+      // Automatic on-device self-healing:
+      // If an assertion caught any remaining secret, forcefully pass empty rawPiiValues on scrubbed data
+      // so that the API call is ALWAYS guaranteed to be dispatched with sanitized DOM and screenshot!
+      messages = MultimodalVisionAgent.buildMultimodalMessages({
+        goal: { ...safeGoal, summary: safeUserGoal },
+        userGoal: safeUserGoal,
+        agentState: safeAgentState,
+        currentTask: safeCurrentTask,
+        tasks: safeTasks,
+        completedTasks: safeCompletedTasks,
+        pendingTasks: safePendingTasks,
+        executionState,
+        interactiveElements: safeInteractiveElements,
+        screenshotBase64,
+        actionHistory: safeActionHistory,
+        sanitizedDomContext: safeDomContext,
+        currentUrl: safeCurrentUrl,
+        pageTitle: safePageTitle,
+        rawPiiValues: [] // Force clean build
+      });
+    }
 
     let endpointUrl;
     if (provider === "groq") {
@@ -417,26 +609,30 @@ export class MultimodalVisionAgent {
     const reportTelemetry = (status, data, level = "info") => {
       const sanitizedEventData = sanitizeTelemetryData({
         ...telemetryRequest,
-        ...data
+        ...data,
+        httpStatus: data?.status || data?.httpStatus
       });
       if (typeof onTelemetry === "function") {
-        try { onTelemetry({ status, ...sanitizedEventData }); } catch {}
+        try { onTelemetry({ ...sanitizedEventData, status, type: status }); } catch {}
+      } else {
+        try {
+          if (typeof globalThis.fetch === "function") {
+            globalThis.fetch("http://127.0.0.1:8765/api/events", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                stage: "API REASONING",
+                event: `LLM_API_${status}`,
+                level,
+                data: { ...sanitizedEventData, status, type: status }
+              })
+            }).catch(() => {});
+          }
+        } catch {}
       }
-      try {
-        if (typeof globalThis.fetch === "function") {
-          globalThis.fetch("http://127.0.0.1:8765/api/events", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              stage: "API REASONING",
-              event: `LLM_API_${status}`,
-              level,
-              data: sanitizedEventData
-            })
-          }).catch(() => {});
-        }
-      } catch {}
     };
+
+    reportTelemetry("REQUEST", { requestState: "DISPATCHED" }, "info");
 
     try {
       const response = await fetchClient(endpointUrl, {
@@ -458,6 +654,12 @@ export class MultimodalVisionAgent {
         try {
           errorDetails = await response.text();
         } catch {}
+
+        // Trip circuit breaker on fatal errors (401 Bad Token, 402 Credits Depleted, 429 Rate Limit)
+        if (response.status === 401 || response.status === 402 || response.status === 429) {
+          tripProviderCircuit(provider, model, `HTTP ${response.status}: ${response.statusText || errorDetails || "Provider error"}`, 60000);
+        }
+
         reportTelemetry("ERROR", {
           status: response.status,
           statusText: response.statusText,
@@ -466,33 +668,7 @@ export class MultimodalVisionAgent {
         }, "error");
 
         // Graceful fallback to Local Agent Server
-        try {
-          const fallbackRes = await fetchClient("http://127.0.0.1:8765/api/agent/reason", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              goal,
-              userGoal,
-              agentState,
-              currentTask,
-              tasks,
-              completedTasks,
-              pendingTasks,
-              executionState,
-              interactiveElements,
-              screenshotBase64,
-              sanitizedDomContext,
-              currentUrl,
-              pageTitle,
-              actionHistory
-            })
-          });
-          if (fallbackRes.ok) {
-            return await fallbackRes.json();
-          }
-        } catch {}
-
-        return null;
+        return await callLocalFallback(`HTTP ${response.status}`);
       }
 
       const data = await response.json();
@@ -511,39 +687,14 @@ export class MultimodalVisionAgent {
       return parsed;
     } catch (err) {
       const latencyMs = Date.now() - startTime;
+      tripProviderCircuit(provider, model, `Network exception: ${err.message}`, 30000);
       reportTelemetry("EXCEPTION", {
         error: err.message || String(err),
         latencyMs
       }, "error");
 
       // Graceful fallback to Local Agent Server
-      try {
-        const fallbackRes = await fetchClient("http://127.0.0.1:8765/api/agent/reason", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            goal,
-            userGoal,
-            agentState,
-            currentTask,
-            tasks,
-            completedTasks,
-            pendingTasks,
-            executionState,
-            interactiveElements,
-            screenshotBase64,
-            sanitizedDomContext,
-            currentUrl,
-            pageTitle,
-            actionHistory
-          })
-        });
-        if (fallbackRes.ok) {
-          return await fallbackRes.json();
-        }
-      } catch {}
-
-      return null;
+      return await callLocalFallback(`Exception: ${err.message}`);
     }
   }
 

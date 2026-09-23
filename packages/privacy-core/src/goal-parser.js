@@ -176,28 +176,27 @@ export class GoalParser {
       };
     }
 
-    // 4. "open <platform> and <action>" where <platform> is the direct object of open and not an item
-    // e.g. "open youtube and search...", "open amazon and buy..."
-    const openAndMatch = lower.match(/^open\s+([a-z0-9.-]+)\s+(?:and|then|to)\s+/i);
-    if (openAndMatch) {
-      const candidate = openAndMatch[1].toLowerCase();
-      const nonDestinations = ["first", "second", "third", "latest", "newest", "last", "top", "the", "a", "an", "this", "my", "all", "mail", "email", "message", "tab", "link", "page", "file", "document", "chat", "post", "ticket", "issue"];
-      if (!nonDestinations.includes(candidate)) {
-        return {
-          isExplicit: true,
-          requiresExplicitNavigation: true,
-          destinationKeyword: candidate,
-          targetUrl: null
-        };
-      }
-    }
-
-    // 5. Standalone explicit site open command, e.g. "open youtube", "open amazon"
-    const openSiteMatch = lower.match(/^open\s+([a-z0-9-]+)$/i);
+    // 4. "open <platform> ..." where <platform> is followed by an action, separator, or end of string
+    // e.g. "open youtube and search...", "open amazon search for...", "open amazon, search...", "open amazon"
+    const openSiteMatch = lower.match(/^open\s+([a-z0-9.-]+)(?:,|\s+(?:and|then|to|search|find|for)|\s+|$)/i);
     if (openSiteMatch) {
       const candidate = openSiteMatch[1].toLowerCase();
-      const nonDestinations = ["mail", "email", "message", "tab", "link", "file", "document", "chat", "post", "ticket", "issue", "cart"];
+      const nonDestinations = ["first", "second", "third", "latest", "newest", "last", "top", "the", "a", "an", "this", "my", "all", "mail", "email", "message", "tab", "link", "page", "file", "document", "chat", "post", "ticket", "issue", "cart"];
       if (!nonDestinations.includes(candidate)) {
+        const KNOWN_PLATFORMS = new Set([
+          "google", "wikipedia", "youtube", "github", "reddit", "flipkart", "ebay", "walmart",
+          "amazon", "myntra", "twitter", "x", "linkedin", "stackoverflow", "bing", "duckduckgo",
+          "facebook", "instagram", "gmail", "netflix", "spotify", "yahoo", "outlook", "apple", "chatgpt"
+        ]);
+        const ITEM_NOUNS = /\b(?:mail|email|message|ticket|issue|file|document|doc|paper|order|receipt|invoice|tab|link|post|video|song|track)\b/i;
+        if (ITEM_NOUNS.test(lower) && !KNOWN_PLATFORMS.has(candidate) && !candidate.includes(".")) {
+          return {
+            isExplicit: false,
+            requiresExplicitNavigation: false,
+            destinationKeyword: null,
+            targetUrl: null
+          };
+        }
         return {
           isExplicit: true,
           requiresExplicitNavigation: true,
@@ -694,6 +693,7 @@ export class GoalParser {
     const searchMatch = cleaned.match(/(?:search\s+(?:on|in)\s+[a-z0-9.-]+\s+for|search\s+[a-z0-9.-]+\s+for|search\s+for|look\s+up|find\s+information\s+(?:on|about)|read\s+about|learn\s+about)\s+(.+?)(?:\s+(?:and\s+.*|under\s+.*|below\s+.*|with\s+.*))?$/i);
     if (searchMatch) {
       let entity = searchMatch[1].trim();
+      entity = entity.replace(/,?\s*(?:and\s+|then\s+)?(?:add\s+.*|buy\s+.*|filter\s+.*|select\s+.*)$/i, "").trim();
       if (actionIntent) {
         const intentPattern = new RegExp(`\\s+(?:and|then|to)?\\s*${actionIntent}\\b.*$`, "i");
         entity = entity.replace(intentPattern, "").trim();

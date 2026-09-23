@@ -241,7 +241,10 @@ export {
   MultimodalVisionAgent,
   DEFAULT_MULTIMODAL_MODEL,
   HUGGINGFACE_DEFAULT_MODEL,
-  OPENROUTER_DEFAULT_MODEL
+  OPENROUTER_DEFAULT_MODEL,
+  isProviderCircuitOpen,
+  tripProviderCircuit,
+  resetProviderCircuit
 } from "./multimodal-vision-agent.js";
 
 export {

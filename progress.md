@@ -165,3 +165,26 @@
   5. **Controlled Generic Demo Fixture (`tests/fixtures/controlled-privacy-demo.html`)**: Created pure mixed-content HTML demo fixture (product title/price/specs, recipient email, support phone, password, 2FA OTP) containing zero hardcoded decision metadata.
   6. **Automated Phase 7 Test Suite (`tests/phase7-runtime-transparency.test.mjs`)**: Implemented 10-requirement test suite verifying runtime pipeline flow, 4-way presentation mapping (`🟢 ALLOW`, `🔴 TOKENIZE`, `⚫ REDACT`, `🔒 LOCAL_ONLY`), token/vault consistency, sentinel leak prevention, dynamic UI rendering, and hardcoding audit.
 * *Evidence*: Dedicated test suite [`tests/phase7-runtime-transparency.test.mjs`](tests/phase7-runtime-transparency.test.mjs) (10/10 tests pass); full regression suite passing (562/562 tests across 39 test suites); extension build succeeded via [`scripts/build-extension.mjs`](scripts/build-extension.mjs).
+
+### Step 26: Unbroken Agent Workflow & Deep PII Sanitization Guarantee (Milestone 14)
+* *Completed*:
+  1. **Deep Recursive Substructure Scrubbing**: In [`packages/privacy-core/src/multimodal-vision-agent.js`](packages/privacy-core/src/multimodal-vision-agent.js), implemented `scrubNestedSecrets` to deeply and recursively cleanse all nested payload fields (`agentState`, `tasks`, `currentTask`, `completedTasks`, `pendingTasks`, `actionHistory`, `interactiveElements`, `sanitizedDomContext`, `currentUrl`, `pageTitle`) before serialization.
+  2. **Zero-Abort API Egress**: Guaranteed that remote reasoning APIs are ALWAYS called with sanitized DOM and redacted screenshot even when sensitive PII is present on the page, keeping the security boundary intact without interrupting user workflows.
+  3. **Action History Field Normalization**: In [`packages/privacy-core/src/vlm-agent-state.js`](packages/privacy-core/src/vlm-agent-state.js), updated `recordAgentAction` to populate `action`, `actionType`, `type`, `status`, `result`, `reason`, and `actionIntent`, eliminating schema disconnects across components.
+  4. **Universal Action Mapping in UI**: In [`apps/extension/src/popup.js`](apps/extension/src/popup.js), resolved `actionHistory` string formatting (`(a.action || a.actionType || a.type || "ACTION")`) to prevent `"undefined on el_X"` action strings.
+  5. **Conversational Query Sanitization**: In [`scripts/extension-log-server.mjs`](scripts/extension-log-server.mjs) and `apps/extension/src/popup.js`, stripped conversational verbs ("open", "view", "find", "check") and trailing nouns ("mail", "email") to generate clean search queries (e.g. "open the sider ai email" -> "sider ai").
+  6. **Multi-Tag Candidate Resolution**: Expanded candidate matching across all tags (`tr`, `td`, `span`, `div`, `a`, `li`, `button`) matching target keywords (e.g. "Sider AI") so the agent progresses immediately past search to click matching items without getting stuck in infinite typing loops.
+  7. **Automated Test Coverage**: Added Subtests 16, 17, and 18 in [`tests/qwen-vlm-agent-architecture.test.mjs`](tests/qwen-vlm-agent-architecture.test.mjs); all 121 automated tests pass across all test suites.
+### Step 27: Rate Limiting, Anti-Spam Guards & Provider Circuit Breaker (Milestone 15)
+* *Completed*:
+  1. **Provider Circuit Breaker Architecture**: In [`packages/privacy-core/src/multimodal-vision-agent.js`](packages/privacy-core/src/multimodal-vision-agent.js), implemented `providerCircuitBreakers`, `isProviderCircuitOpen()`, `tripProviderCircuit()`, and `resetProviderCircuit()`. Fatal status codes (HTTP 401 Bad Auth, 402 Credits Depleted, 429 Rate Limit) trip the circuit breaker for 60 seconds on the first occurrence.
+  2. **Zero-Spam Local Fallback Routing**: When a provider's circuit is open, `MultimodalVisionAgent.reason()` logs a single `CIRCUIT_OPEN` telemetry event and routes straight to the local agent (`localEndpoint`) without issuing repeated remote network calls.
+  3. **Telemetry Deduplication**: Removed dual-dispatch in `multimodal-vision-agent.js`, eliminating duplicate rows in the live telemetry dashboard.
+  4. **Extension Popup Anti-Spam Locking & Cooldown**: In [`apps/extension/src/popup.js`](apps/extension/src/popup.js), added `isTaskRunning` execution lock, `USER_INPUT_COOLDOWN_MS = 2000` cooldown between clicks, sliding-window `MAX_TASKS_PER_MINUTE = 6` task submission limit, and dynamic button state updating to `"⏳ Agent Running..."`.
+  5. **Per-Task Remote Call Budget**: Added `MAX_REMOTE_CALLS_PER_TASK = 3` cap inside the multi-step execution loop; if a task exceeds 3 remote calls, subsequent steps automatically fall back to local execution.
+  6. **Local Server Endpoint Rate Limiting**: In [`scripts/extension-log-server.mjs`](scripts/extension-log-server.mjs), implemented IP-based sliding window rate limiters returning HTTP 429 if clients exceed thresholds (120 req/min for telemetry, 60 req/min for reasoning).
+  7. **Automated Test Coverage**: Added Tests 19 and 20 in [`tests/qwen-vlm-agent-architecture.test.mjs`](tests/qwen-vlm-agent-architecture.test.mjs) validating circuit breaker tripping on HTTP 402, zero-egress local fallback routing, and server rate limit blocking.
+* *Evidence*: All 68 tests across 17 test suites pass (`68 pass, 0 fail`); extension bundle built cleanly via [`scripts/build-extension.mjs`](scripts/build-extension.mjs).
+
+
+

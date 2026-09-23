@@ -23,6 +23,31 @@ const COLORS = {
   bgRed: "\x1b[41m"
 };
 
+// In-Memory IP Rate Limiter
+const clientRateLimits = new Map(); // ip -> [timestamp, timestamp, ...]
+
+export function isClientRateLimited(ip = "127.0.0.1", maxRequests = 60, windowMs = 60000) {
+  const now = Date.now();
+  let timestamps = clientRateLimits.get(ip);
+  if (!timestamps) {
+    timestamps = [];
+    clientRateLimits.set(ip, timestamps);
+  }
+  const cutoff = now - windowMs;
+  timestamps = timestamps.filter(ts => ts > cutoff);
+  if (timestamps.length >= maxRequests) {
+    clientRateLimits.set(ip, timestamps);
+    return true;
+  }
+  timestamps.push(now);
+  clientRateLimits.set(ip, timestamps);
+  return false;
+}
+
+export function resetRateLimits() {
+  clientRateLimits.clear();
+}
+
 // In-Memory Telemetry Repository
 export const eventStore = {
   events: [],
@@ -1466,7 +1491,12 @@ export function computeAutonomousAgentDecision({
     }
 
     // 2. Search Task: find search input field
-    if (taskType === "search" || (!actionHistory.some(a => a.includes("search") || a.includes("TYPE")) && !executionState.hasSearched)) {
+    const hasPerformedSearch = actionHistory.some(a => {
+      const str = (typeof a === "string" ? a : JSON.stringify(a)).toLowerCase();
+      return str.includes("type") || str.includes("search") || str.includes("enter");
+    }) || Boolean(executionState?.hasSearched);
+
+    if (taskType === "search" || (!hasPerformedSearch && !executionState?.hasSearched)) {
       const searchInput = interactiveElements.find(el => {
         const tag = (el.tag || "").toLowerCase();
         const type = (el.type || "").toLowerCase();
@@ -1488,6 +1518,14 @@ export function computeAutonomousAgentDecision({
             searchQuery += ` ${c.value}`;
           }
         }
+
+        // Clean conversational prefixes & trailing words
+        searchQuery = searchQuery
+          .replace(/^(?:please\s+)?(?:open|view|find|check|search\s+for|search|go\s+to|navigate\s+to|look\s+up|locate)\s+(?:the\s+)?/i, "")
+          .replace(/\s+(?:emails?|mails?|messages?|inbox|website|site|page)$/i, "")
+          .replace(/^["']|["']$/g, "")
+          .trim();
+        if (!searchQuery) searchQuery = targetEntity || goalSummary;
 
         return {
           ok: true,
@@ -1561,18 +1599,39 @@ export function computeAutonomousAgentDecision({
           };
         }
       }
+      taskType = "select_item";
     }
 
     // 4. Select Candidate / Item: find genuine product or search result (skip sponsored ads)
-    if (taskType === "select_candidate" || taskType === "select_item" || taskType === "inspect" || taskType === "inspect_candidate" || taskType === "navigate" || taskType === "general_action") {
-      const productItem = interactiveElements.find(el => {
+    if (!/^(?:confirm|submit|place order)\b/i.test(goalSummary.trim()) && (taskType === "select_candidate" || taskType === "select_item" || taskType === "inspect" || taskType === "inspect_candidate" || taskType === "navigate" || taskType === "general_action")) {
+      // First: check direct keywords match from targetEntity or goal
+      const rawEntity = (targetEntity || goalSummary)
+        .replace(/^(?:please\s+)?(?:open|view|find|check|search\s+for|search|go\s+to|navigate\s+to|look\s+up|locate)\s+(?:the\s+)?/i, "")
+        .replace(/\s+(?:emails?|mails?|messages?|inbox|website|site|page)$/i, "")
+        .trim();
+      const entityKeywords = rawEntity.toLowerCase().split(/[\s_-]+/).filter(w => w.length > 1 && !["the", "and", "cart", "item", "product", "mail", "email", "open", "view", "find"].includes(w));
+
+      let directMatch = null;
+      if (entityKeywords.length > 0) {
+        directMatch = interactiveElements.find(el => {
+          if (el.isSponsored || el.isAd || el.isFilter) return false;
+          const tag = (el.tag || "").toLowerCase();
+          if (tag === "input" || tag === "textarea") return false;
+          if (tag === "button" && /^(?:confirm|submit|place order)\b/i.test(el.text || "")) return false;
+          const text = ((el.text || "") + " " + (el.ariaLabel || "") + " " + (el.title || "")).toLowerCase();
+          if (/\b(sign in|login|register|cart|basket|home|help|privacy|terms|menu)\b/i.test(text)) return false;
+          return entityKeywords.every(kw => text.includes(kw));
+        });
+      }
+
+      const productItem = directMatch || interactiveElements.find(el => {
         if (el.isSponsored || el.isAd) return false;
         if (el.isFilter) return false;
         if (el.tag === "button" && ((el.text || "").toLowerCase().includes("search") || (el.text || "").toLowerCase().includes("go"))) return false;
         if (el.isProductResult) return true;
         const text = (el.text || el.ariaLabel || "").toLowerCase();
-        return (el.tag === "a" || el.tag === "div" || el.tag === "li" || el.tag === "h3" || el.tag === "h2") &&
-          text.length > 10 &&
+        return (el.tag === "a" || el.tag === "div" || el.tag === "li" || el.tag === "h3" || el.tag === "h2" || el.tag === "span" || el.tag === "tr" || el.tag === "td") &&
+          text.length > 5 &&
           !/\b(sign in|login|register|cart|basket|home|help|privacy|terms|menu)\b/i.test(text);
       });
 
@@ -1805,6 +1864,12 @@ export function createObservabilityServer(port = PORT, host = HOST) {
 
     // 1. Ingest Telemetry: POST /api/events or legacy POST /log
     if (req.method === "POST" && (pathname === "/api/events" || pathname === "/log")) {
+      const clientIp = req.socket?.remoteAddress || "127.0.0.1";
+      if (isClientRateLimited(clientIp, 60, 60000)) {
+        res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "60" });
+        res.end(JSON.stringify({ ok: false, error: "Rate limit exceeded (60 requests/minute). Please slow down." }));
+        return;
+      }
       let body = "";
       req.on("data", chunk => {
         body += chunk;
@@ -1863,6 +1928,12 @@ export function createObservabilityServer(port = PORT, host = HOST) {
 
     // 2. AI Agent Autonomous Multimodal Reasoning: POST /api/agent/reason
     if (req.method === "POST" && pathname === "/api/agent/reason") {
+      const clientIp = req.socket?.remoteAddress || "127.0.0.1";
+      if (isClientRateLimited(clientIp, 40, 60000)) {
+        res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "40" });
+        res.end(JSON.stringify({ ok: false, error: "Agent reasoning rate limit exceeded (40 requests/minute). Please slow down." }));
+        return;
+      }
       let body = "";
       req.on("data", chunk => {
         body += chunk;

@@ -103,6 +103,31 @@ The **Privacy-Preserving Browser Agent** is fully functional end-to-end:
 - [x] **Dedicated Automated Test Suite**: 10-requirement validation suite in `tests/phase7-runtime-transparency.test.mjs` (10/10 tests pass).
 - [x] **Zero Hardcoding Invariant**: Source audit verified zero website-specific or decision-mapping branches introduced.
 
+### Milestone 12: On-Device PII Sanitization, API Egress Unblocking & Dual-Modality Transmission [COMPLETED]
+- [x] **Button & Element Text Redaction**: Extended `buildSanitizedDomRepresentation` in `apps/extension/src/content-pii.js` to sanitize button text and text nodes against all detected raw PII values (case-insensitively) and regex email patterns.
+- [x] **Full-Pass DOM & Attribute Sanitization**: In `apps/extension/src/popup.js`, sanitized `currentDomText`, `interactiveElements`, and metadata before dispatching to `ActiveMultimodalVisionAgent.reason()`.
+- [x] **Robust Firewall Transmission**: In `packages/privacy-core/src/multimodal-vision-agent.js`, updated `buildMultimodalMessages()` to sanitize attributes and titles case-insensitively, allowing valid remote API calls with redacted screenshots + sanitized DOM to execute cleanly on sensitive pages (Gmail, account dashboards).
+- [x] **Live API Telemetry Streaming**: Added `LLM_API_REQUEST` and live response telemetry dispatching into `http://127.0.0.1:8765/api/events` and terminal logs.
+- [x] **Automated Test Coverage**: Added Tests 13 and 14 in `tests/qwen-vlm-agent-architecture.test.mjs`; all 117 tests across 10 test suites pass (`117 pass, 0 fail`).
+
+### Milestone 14: Unbroken Agent Workflow & Deep PII Sanitization Guarantee [COMPLETED]
+- [x] **Deep Recursive Substructure Scrubbing**: In `packages/privacy-core/src/multimodal-vision-agent.js`, implemented `scrubNestedSecrets` to deeply and recursively cleanse all substructures (`agentState`, `tasks`, `currentTask`, `completedTasks`, `pendingTasks`, `actionHistory`, `interactiveElements`, `sanitizedDomContext`, `currentUrl`, `pageTitle`) before outbound serialization.
+- [x] **Zero-Abort API Egress**: Guaranteed that remote reasoning APIs are ALWAYS called with sanitized DOM and redacted screenshot even when sensitive PII is detected, enabling uninterrupted workflow on any page.
+- [x] **Action History Field Normalization**: In `packages/privacy-core/src/vlm-agent-state.js`, updated `recordAgentAction` to populate `action`, `actionType`, `type`, `status`, `result`, `reason`, and `actionIntent`, eliminating schema disconnects.
+- [x] **Universal Action Mapping**: In `apps/extension/src/popup.js`, resolved `actionHistory` string formatting (`(a.action || a.actionType || a.type || "ACTION")`) to prevent `"undefined on el_X"` action strings.
+- [x] **Conversational Query Sanitization**: In `scripts/extension-log-server.mjs` and `apps/extension/src/popup.js`, stripped conversational verbs ("open", "view", "find", "check") and trailing nouns ("mail", "email") to generate clean search queries (e.g. "open the sider ai email" -> "sider ai").
+- [x] **Multi-Tag Candidate Resolution**: Expanded candidate matching across all tags (`tr`, `td`, `span`, `div`, `a`, `li`, `button`) matching target keywords (e.g. "Sider AI") so the agent progresses immediately past search to click matching items.
+- [x] **Automated Test Coverage**: Added Subtests 16, 17, and 18 in `tests/qwen-vlm-agent-architecture.test.mjs`; all automated test suites pass cleanly.
+
+### Milestone 15: Input Rate Limiting, Anti-Spam Guards & Provider Circuit Breaker [COMPLETED]
+- [x] **Deduplicated Telemetry Reporting**: Removed double event dispatch in `packages/privacy-core/src/multimodal-vision-agent.js`, eliminating duplicate rows in the live telemetry dashboard.
+- [x] **Provider Circuit Breaker Architecture**: Added `providerCircuitBreakers`, `isProviderCircuitOpen()`, `tripProviderCircuit()`, and `resetProviderCircuit()`. Automatically trips on HTTP 401, 402 ("credits depleted"), or 429 ("rate limit") for 60 seconds, preventing repetitive error cascades across multi-step execution.
+- [x] **Auto-Routing to Local Reasoning Engine**: When a provider's circuit is open, `MultimodalVisionAgent.reason()` records a single `CIRCUIT_OPEN` telemetry event and routes directly to the local agent (`POST /api/agent/reason`) with ZERO remote network calls.
+- [x] **Popup Input Anti-Spam & Button Locks**: Implemented `isTaskRunning` parallel execution guard, `USER_INPUT_COOLDOWN_MS = 2000` cooldown between clicks, sliding-window `MAX_TASKS_PER_MINUTE = 6` task submission limit, and dynamic button state updating to `"⏳ Agent Running..."`.
+- [x] **Per-Task Remote Call Budget**: Added `MAX_REMOTE_CALLS_PER_TASK = 3` cap in the multi-step loop; if a task exceeds 3 remote calls, subsequent steps automatically fall back to local execution.
+- [x] **Local Server Endpoint Rate Limiting**: Implemented IP-based sliding window rate limiters in `scripts/extension-log-server.mjs` returning HTTP 429 if clients exceed thresholds (120 req/min for telemetry, 60 req/min for reasoning).
+- [x] **Automated Test Coverage**: Added Tests 19 and 20 in `tests/qwen-vlm-agent-architecture.test.mjs` validating circuit breaker behavior and server rate limiting; all 68 tests across 17 test suites pass cleanly.
+
 ---
 
 ## Next Enhancement Items
@@ -110,5 +135,6 @@ The **Privacy-Preserving Browser Agent** is fully functional end-to-end:
 - [ ] **Physical ONNX Model Binaries in Extension Package**: Package trained `yolo_pii.onnx` and `vit_context.onnx` directly into `apps/extension/` for local visual inference.
 - [ ] **Voice Input for Agent Tasks**: Add Web Speech API integration in extension popup.
 - [ ] **Multi-Tab Orchestration**: Extend planner to coordinate tasks across multiple browser tabs concurrently.
+
 
 

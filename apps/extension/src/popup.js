@@ -24,6 +24,9 @@ import {
   GoalCompletionChecker as CoreGoalCompletionChecker,
   MultimodalVisionAgent as CoreMultimodalVisionAgent,
   DEFAULT_MULTIMODAL_MODEL as CoreDefaultModel,
+  isProviderCircuitOpen as CoreIsProviderCircuitOpen,
+  tripProviderCircuit as CoreTripProviderCircuit,
+  resetProviderCircuit as CoreResetProviderCircuit,
   transformViewportToBitmap as CoreTransformViewportToBitmap,
   transformPageToBitmap as CoreTransformPageToBitmap,
   sanitizeTelemetryData as CoreSanitizeTelemetryData,
@@ -53,6 +56,9 @@ const ActiveDynamicReplanner = CoreDynamicReplanner || PC.DynamicReplanner;
 const ActiveGoalCompletionChecker = CoreGoalCompletionChecker || PC.GoalCompletionChecker;
 const ActiveMultimodalVisionAgent = CoreMultimodalVisionAgent || PC.MultimodalVisionAgent;
 const ActiveDefaultModel = CoreDefaultModel || PC.DEFAULT_MULTIMODAL_MODEL || "qwen/qwen-2.5-vl-72b-instruct";
+const ActiveIsProviderCircuitOpen = CoreIsProviderCircuitOpen || PC.isProviderCircuitOpen || (() => false);
+const ActiveTripProviderCircuit = CoreTripProviderCircuit || PC.tripProviderCircuit || (() => {});
+const ActiveResetProviderCircuit = CoreResetProviderCircuit || PC.resetProviderCircuit || (() => {});
 const ActiveTransformViewportToBitmap = CoreTransformViewportToBitmap || PC.transformViewportToBitmap;
 const ActiveTransformPageToBitmap = CoreTransformPageToBitmap || PC.transformPageToBitmap;
 const ActiveSanitizeTelemetryData = CoreSanitizeTelemetryData || PC.sanitizeTelemetryData || ((d) => d);
@@ -73,6 +79,14 @@ const ActiveValidateVlmAction = CoreValidateVlmAction || PC.validateVlmAction;
 const ActivePrivacyVault = CorePrivacyVault || PC.privacyVault;
 
 const doc = typeof document !== "undefined" ? document : { querySelector: () => null, querySelectorAll: () => [] };
+
+// Rate Limiting, Cooldown & Anti-Spam State
+let isTaskRunning = false;
+let lastTaskSubmissionTime = 0;
+const taskSubmissionTimestamps = [];
+const USER_INPUT_COOLDOWN_MS = 2000;      // Minimum 2 seconds between consecutive task requests
+const MAX_TASKS_PER_MINUTE = 6;            // Maximum 6 full tasks per minute sliding window
+const MAX_REMOTE_CALLS_PER_TASK = 3;       // Maximum 3 remote LLM calls per task (subsequent steps route to local agent)
 
 const captureButton = doc.querySelector("#capture");
 const scanButton = doc.querySelector("#scan");
@@ -904,7 +918,7 @@ async function syncEnvConfigFromLocalServer() {
         if (cfg.huggingface_model) {
           liveEnvHfModel = cfg.huggingface_model;
         }
-        if (apiKeyInput && (!apiKeyInput.value || apiKeyInput.value === "local-no-key-required" || apiKeyInput.value === ENV_HUGGINGFACE_KEY)) {
+        if (apiKeyInput) {
           apiKeyInput.value = serverKey;
         }
         if (providerSelect && (!providerSelect.value || providerSelect.value === "local")) {
@@ -1520,6 +1534,45 @@ function redactLocalDomNodes(domNodes) {
   };
 }
 
+export function generateFallbackSanitizedScreenshot(viewportPiiItems = []) {
+  try {
+    if (typeof document !== "undefined" && document.createElement) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 1280;
+      canvas.height = 800;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.fillStyle = "#0f172a";
+        ctx.fillRect(0, 0, 1280, 800);
+        ctx.fillStyle = "#1e293b";
+        ctx.fillRect(30, 30, 1220, 740);
+        ctx.fillStyle = "#38bdf8";
+        ctx.font = "bold 22px monospace";
+        ctx.fillText("Sanitized Tab Perception (On-Device Privacy Engine)", 60, 80);
+        ctx.fillStyle = "#94a3b8";
+        ctx.font = "14px monospace";
+        ctx.fillText("All PII sensitive regions masked with solid blackout rects before transmission.", 60, 115);
+
+        if (Array.isArray(viewportPiiItems) && viewportPiiItems.length > 0) {
+          for (let i = 0; i < Math.min(viewportPiiItems.length, 10); i++) {
+            const item = viewportPiiItems[i];
+            const b = item.viewportBbox || item.bbox || { x: 60, y: 150 + i * 55, width: 350, height: 40 };
+            ctx.fillStyle = "#000000";
+            ctx.fillRect(b.x, b.y, Math.max(b.width || 300, 200), Math.max(b.height || 40, 35));
+            ctx.strokeStyle = "#475569";
+            ctx.strokeRect(b.x, b.y, Math.max(b.width || 300, 200), Math.max(b.height || 40, 35));
+            ctx.fillStyle = "#ef4444";
+            ctx.font = "bold 13px monospace";
+            ctx.fillText(`[REDACTED ${item.type || item.category || "PII"}]`, b.x + 10, b.y + 24);
+          }
+        }
+        return canvas.toDataURL("image/png");
+      }
+    }
+  } catch {}
+  return "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='640' height='480'><rect width='100%' height='100%' fill='%230f172a'/><text x='20' y='40' fill='%2338bdf8' font-size='14' font-family='monospace'>Sanitized Tab Perception (On-Device Redacted)</text><rect x='20' y='60' width='300' height='40' fill='%23000000' stroke='%23334155'/><text x='30' y='85' fill='%2394a3b8' font-size='12' font-family='monospace'>[REDACTED PII BOX]</text></svg>";
+}
+
 /**
  * Captures visible tab screenshot and applies on-device pixel redaction
  * in Canonical Bitmap Coordinates over all detected PII bounding boxes before converting to base64.
@@ -1528,12 +1581,28 @@ function redactLocalDomNodes(domNodes) {
  */
 export async function captureSanitizedScreenshot(viewportPiiItems = [], tabContext = {}) {
   if (typeof chrome === "undefined" || !chrome.tabs?.captureVisibleTab) {
-    // Generate valid on-device sanitized fallback image data URL for headless/test environments
-    return "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='640' height='480'><rect width='100%' height='100%' fill='%230f172a'/><text x='20' y='40' fill='%2338bdf8' font-size='14' font-family='monospace'>Sanitized Tab Perception (On-Device Redacted)</text><rect x='20' y='60' width='300' height='40' fill='%23000000' stroke='%23334155'/><text x='30' y='85' fill='%2394a3b8' font-size='12' font-family='monospace'>[REDACTED PII BOX]</text></svg>";
+    return generateFallbackSanitizedScreenshot(viewportPiiItems);
   }
   try {
-    const rawDataUrl = await chrome.tabs.captureVisibleTab(null, { format: "png" });
-    if (!rawDataUrl) return null;
+    let rawDataUrl = null;
+    try {
+      rawDataUrl = await chrome.tabs.captureVisibleTab(null, { format: "png" });
+    } catch {
+      rawDataUrl = await new Promise((resolve) => {
+        try {
+          chrome.tabs.captureVisibleTab(null, { format: "png" }, (res) => {
+            if (chrome.runtime?.lastError || !res) resolve(null);
+            else resolve(res);
+          });
+        } catch {
+          resolve(null);
+        }
+      });
+    }
+
+    if (!rawDataUrl) {
+      return generateFallbackSanitizedScreenshot(viewportPiiItems);
+    }
 
     return new Promise((resolve) => {
       const img = new Image();
@@ -1632,12 +1701,12 @@ export async function captureSanitizedScreenshot(viewportPiiItems = [], tabConte
           resolve(rawDataUrl);
         }
       };
-      img.onerror = () => resolve(null);
+      img.onerror = () => resolve(generateFallbackSanitizedScreenshot(viewportPiiItems));
       img.src = rawDataUrl;
     });
   } catch (err) {
-    relayToTerminalLog("Screenshot Capture", `Failed: ${err.message}`, {});
-    return null;
+    relayToTerminalLog("Screenshot Capture", `Fallback used: ${err.message}`, {});
+    return generateFallbackSanitizedScreenshot(viewportPiiItems);
   }
 }
 
@@ -1712,6 +1781,12 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
       if (!query || query.toLowerCase() === "advance goal") {
         query = goal?.targetEntity || goal?.summary || goal?.rawRequest || "items";
       }
+
+      // Clean conversational verbs and trailing nouns
+      query = query
+        .replace(/^(?:please\s+)?(?:open|view|find|check|read|inspect)\s+(?:the\s+)?/i, "")
+        .replace(/\s+(?:emails?|mails?|messages?|inbox)$/i, "")
+        .trim();
 
       return {
         actionType: "TYPE",
@@ -1885,9 +1960,36 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
 
     // Option B: Specific target item matching from user prompt (e.g. wd_black sn7100) or organic candidate match
     const rawGoalText = `${goal?.rawRequest || ""} ${goal?.originalGoal || ""} ${goal?.summary || ""} ${currentTask?.description || ""}`;
-    const specificItemMatch = rawGoalText.match(/\b(?:select|choose|click\s+on|pick|find|add)\s+([a-zA-Z0-9_\s-]+?)(?:\s+(?:and|to\s+the\s+cart|to\s+cart|into\s+cart)|$)/i);
+    const specificItemMatch = rawGoalText.match(/\b(?:select|choose|click\s+on|pick|find|add|open|view|check)\s+([a-zA-Z0-9_\s-]+?)(?:\s+(?:and|to\s+the\s+cart|to\s+cart|into\s+cart|email|mail)|$)/i);
     const targetItemName = specificItemMatch ? specificItemMatch[1].trim() : (entity || goal?.targetEntity || "");
-    const targetWords = targetItemName.toLowerCase().split(/[\s_-]+/).filter(w => w.length > 1 && !["the", "and", "cart", "item", "product"].includes(w));
+    const targetWords = targetItemName.toLowerCase().split(/[\s_-]+/).filter(w => w.length > 1 && !["the", "and", "cart", "item", "product", "mail", "email"].includes(w));
+
+    // High-priority direct matching across ALL interactive elements (e.g., email subject rows, links, spans, buttons)
+    if (targetWords.length > 0) {
+      const directMatch = interactiveElements.find(el => {
+        if (el.isSponsored || el.isAd || el.isFilter) return false;
+        const tag = (el.tag || "").toLowerCase();
+        if (tag === "input" || tag === "textarea") return false;
+        const t = `${el.text || ""} ${el.ariaLabel || ""} ${el.title || ""}`.toLowerCase();
+        if (/\b(sign in|login|register|cart|basket|home|help|privacy|terms|menu)\b/i.test(t)) return false;
+        return targetWords.every(w => t.includes(w));
+      });
+      if (directMatch) {
+        if (typeof stateManager?.recordCandidate === "function") {
+          stateManager.recordCandidate({
+            title: directMatch.text || directMatch.ariaLabel || "Matching Result",
+            elementId: directMatch.elementId,
+            url: directMatch.href || null
+          });
+        }
+        return {
+          actionType: "CLICK",
+          target: directMatch.elementId,
+          parameters: {},
+          reasoningSummary: `Selected candidate result "${(directMatch.text || directMatch.ariaLabel || '').slice(0, 50)}" directly matching target keywords.`
+        };
+      }
+    }
 
     const candidateLinks = interactiveElements.filter(el => {
       if (el.isSponsored || el.isAd) return false;
@@ -2164,12 +2266,13 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
     !el.isSponsored && !el.isAd &&
     (el.tag === "button" || el.tag === "a") &&
     (el.text || el.ariaLabel || "").trim().length > 2 &&
-    !/\b(sign in|login|privacy|terms)\b/i.test(el.text || el.ariaLabel || "")
+    !/\b(sign in|login|privacy|terms|skip to content|skip navigation|skip to main)\b/i.test(el.text || el.ariaLabel || "") &&
+    !(typeof stateManager?.hasPerformedAction === "function" && (stateManager.hasPerformedAction(el.elementId) || stateManager.hasPerformedAction(el.id)))
   );
   if (generalAction) {
     return {
       actionType: "CLICK",
-      target: generalAction.elementId,
+      target: generalAction.elementId || generalAction.id,
       parameters: {},
       reasoningSummary: `Interacting with element "${(generalAction.text || generalAction.ariaLabel || '').slice(0, 30)}".`
     };
@@ -2218,7 +2321,7 @@ export function buildAgentContext({
     },
     interactiveElements,
     screenshotBase64: sanitizedScreenshot,
-    actionHistory: agentState?.actionHistory?.map(a => `${a.type || a.actionType} on ${a.target || a.targetId}: ${a.reason || a.status || ""}`) || [],
+    actionHistory: agentState?.actionHistory?.map(a => `${a.action || a.actionType || a.type || "ACTION"} on ${a.target || a.targetId || "page"}: ${a.reason || a.status || a.actionIntent || ""}`) || [],
     sanitizedDomContext: sanitizedDomText,
     currentUrl,
     pageTitle,
@@ -2252,11 +2355,44 @@ export function renderVlmTaskList(tasks = [], currentTaskId = null) {
 
 if (runTaskButton) {
   runTaskButton.addEventListener("click", async () => {
-    const userTask = (taskInput?.value || "").trim();
-    if (!userTask) {
-      status.textContent = "Please enter a task instruction.";
+    // 1. Anti-spam check: prevent parallel execution
+    if (isTaskRunning) {
+      if (status) status.textContent = "Agent is currently running. Please wait for the current task to finish.";
       return;
     }
+
+    // 2. Cooldown check (minimum 2 seconds between clicks)
+    const now = Date.now();
+    if (now - lastTaskSubmissionTime < USER_INPUT_COOLDOWN_MS) {
+      const waitSec = Math.ceil((USER_INPUT_COOLDOWN_MS - (now - lastTaskSubmissionTime)) / 1000);
+      if (status) status.textContent = `Please wait ${waitSec}s before submitting another task.`;
+      return;
+    }
+
+    // 3. Sliding-window rate limit (max 6 tasks per minute)
+    const oneMinAgo = now - 60000;
+    while (taskSubmissionTimestamps.length > 0 && taskSubmissionTimestamps[0] < oneMinAgo) {
+      taskSubmissionTimestamps.shift();
+    }
+    if (taskSubmissionTimestamps.length >= MAX_TASKS_PER_MINUTE) {
+      if (status) status.textContent = "Task rate limit reached (max 6 tasks/minute). Please wait a moment.";
+      return;
+    }
+
+    const userTask = (taskInput?.value || "").trim();
+    if (!userTask) {
+      if (status) status.textContent = "Please enter a task instruction.";
+      return;
+    }
+
+    // Lock runner and update UI
+    taskSubmissionTimestamps.push(now);
+    lastTaskSubmissionTime = now;
+    isTaskRunning = true;
+    const originalButtonText = runTaskButton.textContent;
+    runTaskButton.disabled = true;
+    runTaskButton.style.opacity = "0.7";
+    runTaskButton.textContent = "⏳ Agent Running...";
 
     status.textContent = "Initializing Qwen VLM working memory & observing page…";
     if (metadataList) metadataList.hidden = true;
@@ -2356,39 +2492,58 @@ if (runTaskButton) {
         }
       }
 
-      // 3. Obtain API settings
+      // 3. Obtain API settings: FIRST consider token from .env, then fallback to user input
       let provider = providerSelect?.value || DEFAULT_PROVIDER;
-      let userKey = (apiKeyInput?.value || "").trim();
       const currentHfKey = getEffectiveHfKey();
+      const currentGroqKey = (ENV_GROQ_KEY || "").trim();
+      const currentOpenRouterKey = (ENV_OPENROUTER_KEY || "").trim();
 
-      // If user hasn't given a token in the extension, use the token given in the .env (HUGGINGFACE_API_KEY or HF_TOKEN)
-      if (!userKey || userKey === "local-no-key-required") {
-        if (currentHfKey) {
-          provider = "huggingface";
-          userKey = currentHfKey;
-          if (apiKeyInput) apiKeyInput.value = currentHfKey;
-          if (providerSelect) providerSelect.value = "huggingface";
-          if (modelInput && (!modelInput.value || modelInput.value.includes("Local"))) {
-            modelInput.value = getDefaultModelForProvider("huggingface");
-          }
-          relayToTerminalLog("Token Configuration", "Using Hugging Face token from .env (HUGGINGFACE_API_KEY / HF_TOKEN)", {
-            provider: "huggingface",
-            model: getDefaultModelForProvider("huggingface"),
-            tokenSource: ".env (HUGGINGFACE_API_KEY / HF_TOKEN)"
-          });
-        }
-      } else if ((provider === "huggingface" || provider === "hf") && !userKey) {
-        userKey = currentHfKey;
+      let envKey = "";
+      if (provider === "huggingface" || provider === "hf") {
+        envKey = currentHfKey;
+      } else if (provider === "groq") {
+        envKey = currentGroqKey;
+      } else if (provider === "openrouter") {
+        envKey = currentOpenRouterKey;
       }
 
-      const apiKey = userKey || getDefaultKeyForProvider(provider) || currentHfKey;
+      // Priority 1: .env token (highest precedence)
+      let apiKey = "";
+      let tokenSource = "";
+      if (envKey) {
+        apiKey = envKey;
+        tokenSource = ".env file";
+        if (apiKeyInput) apiKeyInput.value = envKey;
+      } else if (currentHfKey && (provider === "huggingface" || provider === "hf" || !providerSelect?.value)) {
+        provider = "huggingface";
+        apiKey = currentHfKey;
+        tokenSource = ".env (HUGGINGFACE_API_KEY / HF_TOKEN)";
+        if (apiKeyInput) apiKeyInput.value = currentHfKey;
+        if (providerSelect) providerSelect.value = "huggingface";
+      } else if ((apiKeyInput?.value || "").trim() && (apiKeyInput?.value || "").trim() !== "local-no-key-required") {
+        // Priority 2: User input token (if .env is not present)
+        apiKey = (apiKeyInput?.value || "").trim();
+        tokenSource = "user input field";
+      } else {
+        apiKey = getDefaultKeyForProvider(provider) || currentHfKey || "";
+        tokenSource = "default provider configuration";
+      }
+
       const selectedModel = (modelInput?.value || "").trim() || getDefaultModelForProvider(provider);
+
+      relayToTerminalLog("Token Priority", `Using ${provider} token from ${tokenSource}`, {
+        provider,
+        model: selectedModel,
+        tokenSource,
+        hasKey: Boolean(apiKey)
+      });
 
       // 4. Multi-Step Iterative Qwen VLM Re-Act Execution Loop
       const actionHistory = [];
       const executedResults = [];
       let anyFailed = false;
       let finalSummary = "Multi-step goal execution finished.";
+      let remoteCallsThisTask = 0;
 
       for (let stepNum = 1; stepNum <= agentState.maxIterations; stepNum++) {
         // Pre-step check from agent working memory
@@ -2504,14 +2659,87 @@ if (runTaskButton) {
         const currentDomText = piiFindings.sanitizedDomText || lastRedactedDomText || "";
         const rawPiiVals = (piiFindings.localizedItems || []).map(i => i.value).filter(Boolean);
 
+        // 1. Sanitize currentDomText against detected raw values and patterns
+        let sanitizedDomContext = currentDomText;
+        if (!sanitizedDomContext && interactiveElements.length > 0) {
+          sanitizedDomContext = interactiveElements.slice(0, 50).map(el => `[${el.elementId}] <${el.tag}> ${(el.text || el.ariaLabel || el.placeholder || "").slice(0, 80)}`).join("\n");
+        }
+        for (const raw of rawPiiVals) {
+          if (raw && raw.length >= 2) {
+            const esc = String(raw).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            sanitizedDomContext = sanitizedDomContext.replace(new RegExp(esc, "gi"), "[REDACTED]");
+          }
+        }
+        sanitizedDomContext = sanitizedDomContext
+          .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/gi, "[EMAIL_REDACTED]")
+          .replace(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g, "[PHONE_REDACTED]")
+          .replace(/\b\d{3}-\d{2}-\d{4}\b/g, "[ID_REDACTED]");
+
+        // 2. Sanitize interactiveElements attributes against detected raw values and email pattern
+        const sanitizedInteractiveElements = interactiveElements.map(el => {
+          let sText = el.text || "";
+          let sVal = el.value || "";
+          let sPlaceholder = el.placeholder || "";
+          let sAria = el.ariaLabel || "";
+          let sTitle = el.title || "";
+          let sName = el.name || "";
+          for (const raw of rawPiiVals) {
+            if (raw && raw.length >= 2) {
+              const esc = String(raw).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+              const re = new RegExp(esc, "gi");
+              if (sText && re.test(sText)) sText = sText.replace(re, "[REDACTED]");
+              if (sVal && re.test(sVal)) sVal = sVal.replace(re, "[REDACTED]");
+              if (sPlaceholder && re.test(sPlaceholder)) sPlaceholder = sPlaceholder.replace(re, "[REDACTED]");
+              if (sAria && re.test(sAria)) sAria = sAria.replace(re, "[REDACTED]");
+              if (sTitle && re.test(sTitle)) sTitle = sTitle.replace(re, "[REDACTED]");
+              if (sName && re.test(sName)) sName = sName.replace(re, "[REDACTED]");
+            }
+          }
+          const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/gi;
+          sText = sText.replace(emailRegex, "[EMAIL_REDACTED]");
+          sVal = sVal.replace(emailRegex, "[EMAIL_REDACTED]");
+          sAria = sAria.replace(emailRegex, "[EMAIL_REDACTED]");
+          sTitle = sTitle.replace(emailRegex, "[EMAIL_REDACTED]");
+          return {
+            ...el,
+            text: sText || undefined,
+            value: sVal || undefined,
+            placeholder: sPlaceholder || undefined,
+            ariaLabel: sAria || undefined,
+            title: sTitle || undefined
+          };
+        });
+
+        // 3. Sanitize pageTitle and URL of any detected PII (e.g. Gmail document.title containing user email)
+        let sanitizedPageTitle = pageTitle;
+        let sanitizedPageUrl = pageUrl;
+        for (const raw of rawPiiVals) {
+          if (raw && raw.length >= 2) {
+            const esc = String(raw).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            sanitizedPageTitle = sanitizedPageTitle.replace(new RegExp(esc, "gi"), "[EMAIL_REDACTED]");
+            sanitizedPageUrl = sanitizedPageUrl.replace(new RegExp(esc, "gi"), "[REDACTED]");
+          }
+        }
+        sanitizedPageTitle = sanitizedPageTitle.replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/gi, "[EMAIL_REDACTED]");
+
+        // 4. Sanitize user task goal of any raw PII or email
+        let sanitizedUserGoal = userTask;
+        for (const raw of rawPiiVals) {
+          if (raw && raw.length >= 2) {
+            const esc = String(raw).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            sanitizedUserGoal = sanitizedUserGoal.replace(new RegExp(esc, "gi"), "[REDACTED]");
+          }
+        }
+        sanitizedUserGoal = sanitizedUserGoal.replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/gi, "[EMAIL_REDACTED]");
+
         const agentContext = buildAgentContext({
-          userRequest: userTask,
+          userRequest: sanitizedUserGoal,
           agentState,
-          interactiveElements,
+          interactiveElements: sanitizedInteractiveElements,
           sanitizedScreenshot,
-          sanitizedDomText: currentDomText,
-          currentUrl: pageUrl,
-          pageTitle,
+          sanitizedDomText: sanitizedDomContext,
+          currentUrl: sanitizedPageUrl,
+          pageTitle: sanitizedPageTitle,
           rawPiiValues: rawPiiVals
         });
 
@@ -2520,8 +2748,8 @@ if (runTaskButton) {
         updateAiMultimodalTransmissionUI({
           targetAgent: targetAgentDesc,
           screenshotBase64: sanitizedScreenshot,
-          sanitizedDom: currentDomText,
-          elementCount: interactiveElements.length
+          sanitizedDom: sanitizedDomContext,
+          elementCount: sanitizedInteractiveElements.length
         });
 
         setPipelineStage("REDACTED DOM + VISION → AI AGENT");
@@ -2529,17 +2757,31 @@ if (runTaskButton) {
         relayToTerminalLog(`Step ${stepNum}: Multimodal Transmission`, `Transmitting Redacted SS & DOM to Qwen VLM (${targetAgentDesc})`, {
           targetAgent: targetAgentDesc,
           hasRedactedScreenshot: Boolean(sanitizedScreenshot),
-          elementCount: interactiveElements.length,
-          domChars: currentDomText.length
+          elementCount: sanitizedInteractiveElements.length,
+          domChars: sanitizedDomContext.length
         });
+
+        // Cap remote API calls per task to prevent excessive quota consumption and error spam
+        let activeStepProvider = provider;
+        if (activeStepProvider !== "local" && apiKey) {
+          if (remoteCallsThisTask >= MAX_REMOTE_CALLS_PER_TASK) {
+            activeStepProvider = "local";
+            relayToTerminalLog(`Step ${stepNum}: Call Budget Capped`, `Task remote call budget reached (${MAX_REMOTE_CALLS_PER_TASK} calls). Auto-switching to local agent to prevent spam and cost overruns.`, {
+              remoteCallsThisTask,
+              maxAllowed: MAX_REMOTE_CALLS_PER_TASK
+            });
+          } else {
+            remoteCallsThisTask++;
+          }
+        }
 
         let vlmResponse = null;
         try {
           vlmResponse = await ActiveMultimodalVisionAgent.reason({
             apiKey,
             model: selectedModel,
-            provider,
-            userGoal: userTask,
+            provider: activeStepProvider,
+            userGoal: sanitizedUserGoal,
             goal: agentContext.goal,
             agentState,
             tasks: agentState.tasks,
@@ -2547,16 +2789,19 @@ if (runTaskButton) {
             completedTasks: agentState.completedTasks,
             pendingTasks: agentState.pendingTasks,
             executionState: agentContext.executionState,
-            interactiveElements,
+            interactiveElements: sanitizedInteractiveElements,
             screenshotBase64: sanitizedScreenshot,
             actionHistory: agentContext.actionHistory,
-            sanitizedDomContext: currentDomText,
-            currentUrl: pageUrl,
-            pageTitle,
-            rawPiiValues: rawPiiVals
+            sanitizedDomContext,
+            currentUrl: sanitizedPageUrl,
+            pageTitle: sanitizedPageTitle,
+            rawPiiValues: rawPiiVals,
+            onTelemetry: (tEvent) => {
+              relayToTerminalLog(`AI Reasoning API: ${tEvent.status || "EVENT"}`, `${activeStepProvider} (${selectedModel})`, tEvent);
+            }
           });
         } catch (mErr) {
-          relayToTerminalLog(`Step ${stepNum}: Multimodal Reasoning Exception`, mErr.message, {});
+          relayToTerminalLog(`Step ${stepNum}: Multimodal Reasoning Exception`, mErr.message, { stack: mErr.stack }, "error");
         }
 
         // Update working memory from Qwen VLM structured output
@@ -2587,7 +2832,14 @@ if (runTaskButton) {
         // Fallback heuristic if Qwen model unavailable (offline compatibility)
         if (!proposedAction) {
           const fallbackStateManager = {
-            hasPerformedAction: (type) => (agentState?.actionHistory || []).some(a => (a.actionType || a.type) === type || (a.actionIntent || a.reason || "").toLowerCase().includes(String(type).toLowerCase())),
+            hasPerformedAction: (type) => (agentState?.actionHistory || []).some(a => {
+              const actType = (a.action || a.actionType || a.type || "").toLowerCase();
+              const targetType = String(type).toLowerCase();
+              if (actType === targetType) return true;
+              if (targetType === "search" && (actType === "type" || actType === "press_key")) return true;
+              const txt = `${a.actionIntent || ""} ${a.reason || ""} ${a.value || ""}`.toLowerCase();
+              return txt.includes(targetType);
+            }),
             isFilterApplied: (name, val) => (agentState?.actionHistory || []).some(a => a.isFilter && a.filterName === name),
             recordCandidate: (cand) => {},
             consecutiveFailures: 0
@@ -2881,8 +3133,26 @@ if (runTaskButton) {
       const safeErr = ActiveSanitizeTelemetryError ? ActiveSanitizeTelemetryError(err) : { error: err.message };
       relayToTerminalLog("Pipeline Error", safeErr.message || "Execution error", safeErr, "error");
     } finally {
+      isTaskRunning = false;
+      if (runTaskButton) {
+        runTaskButton.disabled = false;
+        runTaskButton.style.opacity = "1";
+        runTaskButton.textContent = originalButtonText || "Run Agent Task";
+      }
       if (typeof chrome !== "undefined" && chrome.tabs?.onCreated?.removeListener) {
         chrome.tabs.onCreated.removeListener(tabCreatedListener);
+      }
+    }
+  });
+}
+
+// Keyboard shortcut: Press Enter in taskInput to trigger execution cleanly
+if (taskInput) {
+  taskInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (!isTaskRunning && runTaskButton && !runTaskButton.disabled) {
+        runTaskButton.click();
       }
     }
   });

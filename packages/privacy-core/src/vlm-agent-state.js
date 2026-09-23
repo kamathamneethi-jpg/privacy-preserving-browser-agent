@@ -154,12 +154,19 @@ export function recordAgentAction(state, rawEntry = {}) {
   const result = String(rawEntry.result || rawEntry.status || "success");
   const url = rawEntry.url || undefined;
 
+  const actionTypeStr = String(action).toUpperCase();
   const entry = {
     iteration: state.iteration,
-    action: String(action).toUpperCase(),
+    action: actionTypeStr,
+    actionType: actionTypeStr,
+    type: actionTypeStr,
     target,
+    targetId: target,
     value,
     result,
+    status: result,
+    reason: rawEntry.reason || rawEntry.reasoningSummary || "",
+    actionIntent: rawEntry.actionIntent || rawEntry.reasoningSummary || "",
     url,
     timestamp: Date.now()
   };
