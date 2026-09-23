@@ -770,7 +770,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
               ✔ Telemetry server running on <code style="color: var(--accent-cyan);">http://${HOST}:${PORT}</code>
             </div>
             <div id="diag-model-status" style="padding: 10px 14px; background: #0f1624; border-radius: 6px; border: 1px solid var(--border-subtle); font-size: 13px;">
-              ℹ️ Default Model Provider: <strong>Hugging Face (Free / Qwen3-VL-4B-Instruct)</strong>
+              ℹ️ Default Model Provider: <strong>Hugging Face (Qwen/Qwen2.5-VL-72B-Instruct)</strong>
             </div>
             <div id="diag-tab-status" style="padding: 10px 14px; background: #0f1624; border-radius: 6px; border: 1px solid var(--border-subtle); font-size: 13px;">
               ℹ️ Tab Status: Awaiting extension action
@@ -1227,7 +1227,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 
         tr.innerHTML = \`
           <td style="font-family: var(--font-mono); font-size: 12px; color: var(--text-dim);">\${call.timeShort}</td>
-          <td><strong style="color: var(--text-main);">\${d.model || "Qwen/Qwen3-VL-4B-Instruct"}</strong><br><span style="font-size: 11px; color: var(--text-dim);">\${d.provider || "Hugging Face"}</span></td>
+          <td><strong style="color: var(--text-main);">\${d.model || "Qwen/Qwen2.5-VL-72B-Instruct"}</strong><br><span style="font-size: 11px; color: var(--text-dim);">\${d.provider || "Hugging Face"}</span></td>
           <td style="font-family: var(--font-mono); font-size: 11px; color: var(--accent-blue); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">\${d.endpoint || "https://router.huggingface.co/v1/chat/completions"}</td>
           <td><span class="status-code \${statusClass}">\${status}</span></td>
           <td style="font-family: var(--font-mono); font-size: 12px;">\${d.latencyMs ? d.latencyMs + " ms" : "--"}</td>
@@ -1824,6 +1824,40 @@ export function createObservabilityServer(port = PORT, host = HOST) {
           res.end(JSON.stringify({ ok: false, error: "Invalid JSON: " + err.message }));
         }
       });
+      return;
+    }
+
+    // 1b. Environment & Token Configuration: GET /api/config
+    if (req.method === "GET" && pathname === "/api/config") {
+      const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+      const envPath = path.resolve(rootDir, ".env");
+      const envVars = {};
+      if (fs.existsSync(envPath)) {
+        const lines = fs.readFileSync(envPath, "utf-8").split("\n");
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith("#")) continue;
+          const idx = trimmed.indexOf("=");
+          if (idx > 0) {
+            const key = trimmed.slice(0, idx).trim();
+            const val = trimmed.slice(idx + 1).trim();
+            envVars[key] = val;
+          }
+        }
+      }
+      const hfKey = envVars.HUGGINGFACE_API_KEY || envVars.HF_TOKEN || process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN || "";
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        ok: true,
+        provider: envVars.LLM_PROVIDER || "huggingface",
+        huggingface_api_key: hfKey,
+        hf_token: hfKey,
+        huggingface_model: envVars.HUGGINGFACE_MODEL || "Qwen/Qwen2.5-VL-72B-Instruct",
+        openrouter_api_key: envVars.OPENROUTER_API_KEY || "",
+        openrouter_model: envVars.OPENROUTER_MODEL || "qwen/qwen-2.5-vl-72b-instruct:free",
+        groq_api_key: envVars.GROQ_API_KEY || "",
+        groq_model: envVars.GROQ_MODEL || "llama-3.3-70b-versatile"
+      }));
       return;
     }
 

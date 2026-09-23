@@ -821,8 +821,8 @@ if (copyRedactedDomButton) {
   });
 }
 
-const providerSelect = document.querySelector("#provider-select");
-const modelInput = document.querySelector("#model-input");
+const providerSelect = doc.querySelector("#provider-select");
+const modelInput = doc.querySelector("#model-input");
 
 /**
  * Sends real-time stage logs and telemetry to local observability backend if active.
@@ -862,28 +862,64 @@ if (btnOpenDashboard) {
   });
 }
 
-const ENV_HUGGINGFACE_KEY = (typeof process !== "undefined" && (process.env?.HUGGINGFACE_API_KEY || process.env?.HF_TOKEN)) || "";
-const ENV_HUGGINGFACE_MODEL = (typeof process !== "undefined" && process.env?.HUGGINGFACE_MODEL) || "Qwen/Qwen3-VL-4B-Instruct";
-const ENV_GROQ_KEY = (typeof process !== "undefined" && process.env?.GROQ_API_KEY) || "";
-const ENV_GROQ_MODEL = (typeof process !== "undefined" && process.env?.GROQ_MODEL) || "llama-3.3-70b-versatile";
-const ENV_OPENROUTER_KEY = (typeof process !== "undefined" && process.env?.OPENROUTER_API_KEY) || "";
-const ENV_OPENROUTER_MODEL = (typeof process !== "undefined" && process.env?.OPENROUTER_MODEL) || "qwen/qwen-2.5-vl-72b-instruct:free";
+const ENV_HUGGINGFACE_KEY = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN || "";
+const ENV_HUGGINGFACE_MODEL = process.env.HUGGINGFACE_MODEL || "Qwen/Qwen2.5-VL-72B-Instruct";
+const ENV_GROQ_KEY = process.env.GROQ_API_KEY || "";
+const ENV_GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+const ENV_OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
+const ENV_OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || "qwen/qwen-2.5-vl-72b-instruct:free";
 
-const DEFAULT_PROVIDER = ENV_HUGGINGFACE_KEY ? "huggingface" : (ENV_OPENROUTER_KEY ? "openrouter" : (ENV_GROQ_KEY ? "groq" : "huggingface"));
+const DEFAULT_PROVIDER = "huggingface";
+
+let liveEnvHfKey = ENV_HUGGINGFACE_KEY;
+let liveEnvHfModel = ENV_HUGGINGFACE_MODEL;
+
+function getEffectiveHfKey() {
+  return (liveEnvHfKey || ENV_HUGGINGFACE_KEY || "").trim();
+}
 
 function getDefaultModelForProvider(prov) {
   if (prov === "local") return "Local-Agent-Port-8765";
-  if (prov === "huggingface" || prov === "hf") return ENV_HUGGINGFACE_MODEL;
+  if (prov === "huggingface" || prov === "hf") return liveEnvHfModel || ENV_HUGGINGFACE_MODEL;
   if (prov === "groq") return ENV_GROQ_MODEL;
   return ENV_OPENROUTER_MODEL;
 }
 
 function getDefaultKeyForProvider(prov) {
   if (prov === "local") return "local-no-key-required";
-  if (prov === "huggingface" || prov === "hf") return ENV_HUGGINGFACE_KEY;
-  if (prov === "groq") return ENV_GROQ_KEY;
-  return ENV_OPENROUTER_KEY;
+  if (prov === "huggingface" || prov === "hf") return getEffectiveHfKey();
+  if (prov === "groq") return ENV_GROQ_KEY || getEffectiveHfKey();
+  return ENV_OPENROUTER_KEY || getEffectiveHfKey();
 }
+
+// Synchronize live .env configuration from local observability server if running
+async function syncEnvConfigFromLocalServer() {
+  try {
+    const res = await fetch("http://127.0.0.1:8765/api/config");
+    if (res.ok) {
+      const cfg = await res.json();
+      const serverKey = (cfg.huggingface_api_key || cfg.hf_token || "").trim();
+      if (serverKey) {
+        liveEnvHfKey = serverKey;
+        if (cfg.huggingface_model) {
+          liveEnvHfModel = cfg.huggingface_model;
+        }
+        if (apiKeyInput && (!apiKeyInput.value || apiKeyInput.value === "local-no-key-required" || apiKeyInput.value === ENV_HUGGINGFACE_KEY)) {
+          apiKeyInput.value = serverKey;
+        }
+        if (providerSelect && (!providerSelect.value || providerSelect.value === "local")) {
+          providerSelect.value = "huggingface";
+        }
+        if (modelInput && (!modelInput.value || modelInput.value.includes("Local"))) {
+          modelInput.value = liveEnvHfModel;
+        }
+      }
+    }
+  } catch {
+    // Offline or server not active; bundled ENV_HUGGINGFACE_KEY is used automatically
+  }
+}
+syncEnvConfigFromLocalServer();
 
 // Auto-populate from environment configuration if available
 if (providerSelect) {
@@ -892,24 +928,31 @@ if (providerSelect) {
 if (modelInput) {
   modelInput.value = getDefaultModelForProvider(DEFAULT_PROVIDER);
 }
-if (apiKeyInput && !apiKeyInput.value) {
+if (apiKeyInput) {
   const defaultKey = getDefaultKeyForProvider(DEFAULT_PROVIDER);
   if (defaultKey) {
     apiKeyInput.value = defaultKey;
   }
+  apiKeyInput.placeholder = "hf_... (Using token from .env if empty)";
 }
 
 // Load stored user overrides if available
 if (typeof chrome !== "undefined" && chrome.storage?.local) {
   chrome.storage.local.get(["llm_provider", "llm_api_key", "llm_model"], (result) => {
-    if (result?.llm_provider && providerSelect) {
-      providerSelect.value = result.llm_provider;
+    const userSelectedOther = Boolean(result?.llm_provider && result.llm_provider !== "huggingface" && result.llm_provider !== "local" && result?.llm_api_key && result.llm_api_key.trim());
+    const effectiveProvider = userSelectedOther ? result.llm_provider : DEFAULT_PROVIDER;
+    if (providerSelect) {
+      providerSelect.value = effectiveProvider;
     }
-    if (result?.llm_api_key && apiKeyInput) {
-      apiKeyInput.value = result.llm_api_key;
+    if (apiKeyInput) {
+      const storedKey = (result?.llm_api_key || "").trim();
+      apiKeyInput.value = storedKey || getDefaultKeyForProvider(effectiveProvider);
+      if (!apiKeyInput.value) {
+        apiKeyInput.value = getEffectiveHfKey();
+      }
     }
-    if (result?.llm_model && modelInput) {
-      modelInput.value = result.llm_model;
+    if (modelInput) {
+      modelInput.value = (userSelectedOther ? result.llm_model : "") || getDefaultModelForProvider(effectiveProvider);
     }
   });
 }
@@ -958,7 +1001,7 @@ if (saveKeyButton && apiKeyInput) {
 /**
  * Robust message sender to active webpage tab with fallback and dynamic injection.
  */
-async function sendTabMessage(message) {
+async function sendTabMessage(message, targetTabId = null) {
   if (typeof chrome === "undefined" || !chrome.tabs || typeof chrome.tabs.query !== "function") {
     if (typeof globalThis.ActionRuntime !== "undefined") {
       if (message.type === "OBSERVE_INTERACTIVE_DOM") return globalThis.ActionRuntime.observeInteractiveDom();
@@ -969,8 +1012,16 @@ async function sendTabMessage(message) {
     throw new Error("Extension tab environment unavailable. Please click the extension icon on an active webpage tab.");
   }
 
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  const tab = tabs?.[0] || (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))?.[0];
+  let tab = null;
+  if (targetTabId) {
+    try {
+      tab = await chrome.tabs.get(targetTabId);
+    } catch {}
+  }
+  if (!tab?.id) {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    tab = tabs?.[0] || (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))?.[0];
+  }
   if (!tab?.id) {
     throw new Error("No active browser tab found. Please switch to the webpage tab.");
   }
@@ -985,6 +1036,7 @@ async function sendTabMessage(message) {
             target: { tabId: tab.id },
             files: ["src/policy-runtime.js", "src/ocr-service.js", "src/content-pii.js", "src/content-metadata.js", "src/action-runtime.js"]
           });
+          await new Promise(r => setTimeout(r, 200));
           return await chrome.tabs.sendMessage(tab.id, message);
         } catch (injectErr) {
           throw new Error("Cannot run on internal browser pages. Please navigate to a standard http/https webpage.");
@@ -1158,7 +1210,7 @@ if (scanButton) {
  */
 export function extractNavigationUrl(task, currentUrl = "", parsedGoal = null) {
   if (!task) return null;
-  const isInternal = !currentUrl || currentUrl.startsWith("chrome://") || currentUrl.startsWith("about:") || currentUrl.startsWith("chrome-extension://") || currentUrl.startsWith("devtools://");
+  const isInternal = !currentUrl || currentUrl.startsWith("chrome://") || currentUrl.startsWith("about:") || currentUrl.startsWith("chrome-extension://") || currentUrl.startsWith("devtools://") || currentUrl.startsWith("edge://") || currentUrl.startsWith("view-source:");
 
   // 1. Explicit full URL in user instruction (e.g., https://... or http://...)
   const urlMatch = task.match(/https?:\/\/[^\s]+/i);
@@ -1233,8 +1285,12 @@ export function extractNavigationUrl(task, currentUrl = "", parsedGoal = null) {
   }
 
   // 6. If user is on an INTERNAL browser tab (chrome://newtab, about:blank, etc.),
-  // resolve initial destination based on task domain:
+  // resolve initial destination based on raw domain in prompt or task domain:
   if (isInternal) {
+    const rawDomainMatch = task.match(/\b([a-zA-Z0-9-]+\.(?:com|in|org|net|io|co|gov|edu|ai|app|dev))\b/i);
+    if (rawDomainMatch) {
+      return `https://${rawDomainMatch[1]}`;
+    }
     const domain = parsedGoal?.domain || (ActiveGoalParser && ActiveGoalParser.detectDomain ? ActiveGoalParser.detectDomain(task) : "general");
     if (domain === "ecommerce") {
       return "https://www.google.com";
@@ -1243,6 +1299,65 @@ export function extractNavigationUrl(task, currentUrl = "", parsedGoal = null) {
   }
 
   return null;
+}
+
+/**
+ * Waits for a browser tab to complete loading and DOM settlement.
+ */
+async function waitForTabReady(tabId, maxWaitMs = 12000) {
+  if (typeof chrome === "undefined" || !chrome.tabs) return null;
+
+  return new Promise((resolve) => {
+    let isResolved = false;
+
+    const cleanup = () => {
+      if (chrome.tabs.onUpdated?.removeListener) {
+        chrome.tabs.onUpdated.removeListener(onUpdatedListener);
+      }
+    };
+
+    const finish = (tab) => {
+      if (!isResolved) {
+        isResolved = true;
+        cleanup();
+        resolve(tab);
+      }
+    };
+
+    const onUpdatedListener = (updatedTabId, changeInfo, tab) => {
+      if (updatedTabId === tabId) {
+        const isComplete = changeInfo.status === "complete" || tab?.status === "complete";
+        const hasUrl = tab?.url && !tab.url.startsWith("about:") && !tab.url.startsWith("chrome://");
+        if (isComplete && hasUrl) {
+          setTimeout(() => finish(tab), 1400); // 1.4s DOM settle
+        }
+      }
+    };
+
+    if (chrome.tabs.onUpdated?.addListener) {
+      chrome.tabs.onUpdated.addListener(onUpdatedListener);
+    }
+
+    // Check if the tab is already complete
+    try {
+      chrome.tabs.get(tabId, (tab) => {
+        if (!chrome.runtime.lastError && tab?.status === "complete" && tab?.url && !tab.url.startsWith("about:") && !tab.url.startsWith("chrome://")) {
+          setTimeout(() => finish(tab), 1400);
+        }
+      });
+    } catch {}
+
+    // Fallback timeout to prevent hanging
+    setTimeout(() => {
+      if (!isResolved) {
+        try {
+          chrome.tabs.get(tabId, (tab) => finish(tab || null));
+        } catch {
+          finish(null);
+        }
+      }
+    }, maxWaitMs);
+  });
 }
 
 /**
@@ -1557,9 +1672,10 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
     }
   }
 
-  // 2. Search Task: find search input field (supports Google <textarea name="q">, search inputs, etc.)
-  const isDedicatedNonSearchTask = taskType === "perform_action" || taskType === "submit_form" || taskType === "submit" || taskType === "fill_form" || taskType === "close_modal";
-  if (taskType === "search" || (!isDedicatedNonSearchTask && stepNum === 1 && !stateManager.hasPerformedAction("search") && goal?.domain !== "form_filling")) {
+  // 2. Search Task: find search input field (only executed if search hasn't been performed yet)
+  const isDedicatedNonSearchTask = taskType === "perform_action" || taskType === "submit_form" || taskType === "submit" || taskType === "fill_form" || taskType === "close_modal" || taskType === "select_candidate" || taskType === "inspect" || taskType === "add_to_cart";
+  const hasSearchAction = typeof stateManager?.hasPerformedAction === "function" ? stateManager.hasPerformedAction("search") : false;
+  if (!hasSearchAction && (taskType === "search" || (!isDedicatedNonSearchTask && stepNum === 1 && goal?.domain !== "form_filling"))) {
     const searchInput = interactiveElements.find(el => {
       if (el.isSponsored || el.isAd) return false;
       if (el.tag !== "input" && el.tag !== "textarea") return false;
@@ -1573,25 +1689,43 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
     });
 
     if (searchInput) {
-      let query = entity || (currentTask?.description ? currentTask.description.replace(/^Search for\s*/i, "") : goal.summary);
-      query = query
-        .replace(/^(?:search\s+(?:for\s+)?|find\s+|look\s+up\s+|browse\s+)/i, "")
-        .replace(/\s+(?:on|in|at)\s+(?:google|wikipedia|youtube|amazon|github|flipkart|reddit|ebay|walmart)\b/i, "")
-        .replace(/\b(?:on|in|at)\s+(?:google|wikipedia|youtube|amazon|github|flipkart|reddit|ebay|walmart)\s+(?:for\s+)?/i, "")
-        .trim();
+      let query = entity || goal?.targetEntity || "";
+      if (!query || query.toLowerCase() === "advance goal" || query.toLowerCase() === "item") {
+        const raw = (currentTask?.description && currentTask.description.toLowerCase() !== "advance goal")
+          ? currentTask.description
+          : (goal?.rawRequest || goal?.summary || goal?.description || "");
+
+        const searchMatch = raw.match(/(?:search\s+(?:for\s+)?|find\s+|look\s+up\s+|browse\s+(?:for\s+)?|query\s+(?:for\s+)?|query\s+for\s*["']?)(.*?)(?:\s+(?:and\s+(?:select|click|add|filter|buy|check)|on\s+|in\s+|at\s+|$)|["'])/i);
+        if (searchMatch && searchMatch[1]?.trim() && searchMatch[1].trim().toLowerCase() !== "advance goal") {
+          query = searchMatch[1].trim().replace(/^["']|["']$/g, "");
+        } else {
+          query = raw
+            .replace(/^(?:open|go to|navigate to|visit)\s+[a-z0-9.-]+\s+(?:and|then)\s+/i, "")
+            .replace(/^(?:search\s+(?:for\s+)?|find\s+|look\s+up\s+|browse\s+|locate search bar and enter query for\s*["']?)/i, "")
+            .replace(/\s+(?:on|in|at)\s+(?:google|wikipedia|youtube|amazon|github|flipkart|reddit|ebay|walmart)\b/i, "")
+            .replace(/\b(?:on|in|at)\s+(?:google|wikipedia|youtube|amazon|github|flipkart|reddit|ebay|walmart)\s+(?:for\s+)?/i, "")
+            .replace(/\s+and\s+(?:select|click|add|buy|filter).*$/i, "")
+            .replace(/^["']|["']$/g, "")
+            .trim();
+        }
+      }
+      if (!query || query.toLowerCase() === "advance goal") {
+        query = goal?.targetEntity || goal?.summary || goal?.rawRequest || "items";
+      }
+
       return {
         actionType: "TYPE",
         target: searchInput.elementId,
-        parameters: { text: query || goal.summary },
+        parameters: { text: query },
         thenPressEnter: true,
-        reasoningSummary: `Entered search query "${query || goal.summary}" into search field.`
+        reasoningSummary: `Entered search query "${query}" into search field.`
       };
     }
   }
 
   // 3. Filter Task: prioritize price range filters, exclude all ads/sponsored elements
   if (taskType === "filter") {
-    const pendingConstraints = constraints.filter(c => !stateManager.isFilterApplied(c.name, c.value));
+    const pendingConstraints = constraints.filter(c => typeof stateManager?.isFilterApplied === "function" ? !stateManager.isFilterApplied(c.name, c.value) : true);
 
     // Sort so price filters are always attempted first
     pendingConstraints.sort((a, b) => {
@@ -1749,11 +1883,16 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
       }
     }
 
-    // Option B: Keyword / Organic Results Matching
-    const candidateLink = interactiveElements.find(el => {
+    // Option B: Specific target item matching from user prompt (e.g. wd_black sn7100) or organic candidate match
+    const rawGoalText = `${goal?.rawRequest || ""} ${goal?.originalGoal || ""} ${goal?.summary || ""} ${currentTask?.description || ""}`;
+    const specificItemMatch = rawGoalText.match(/\b(?:select|choose|click\s+on|pick|find|add)\s+([a-zA-Z0-9_\s-]+?)(?:\s+(?:and|to\s+the\s+cart|to\s+cart|into\s+cart)|$)/i);
+    const targetItemName = specificItemMatch ? specificItemMatch[1].trim() : (entity || goal?.targetEntity || "");
+    const targetWords = targetItemName.toLowerCase().split(/[\s_-]+/).filter(w => w.length > 1 && !["the", "and", "cart", "item", "product"].includes(w));
+
+    const candidateLinks = interactiveElements.filter(el => {
       if (el.isSponsored || el.isAd) return false;
-      if (el.tag !== "a" && el.tag !== "div" && el.tag !== "li" && el.tag !== "h3" && el.tag !== "h2") return false;
-      const t = (el.text || el.ariaLabel || "").trim();
+      if (el.tag !== "a" && el.tag !== "div" && el.tag !== "li" && el.tag !== "h3" && el.tag !== "h2" && el.tag !== "button") return false;
+      const t = `${el.text || ""} ${el.ariaLabel || ""} ${el.title || ""}`.trim();
       if (t.length < 5) return false;
       if (/\b(sign in|login|register|cart|basket|home|help|customer service|privacy|terms|about us|careers|contact|menu|navigation|back to top|next|previous)\b/i.test(t)) {
         return false;
@@ -1761,31 +1900,48 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
       if (/\b(cleaner|foam spray|cleaning kit|shoe horn|crease protector|brush)\b/i.test(t) && !/cleaner/i.test(entity || "")) {
         return false;
       }
-      if (entity) {
-        const words = entity.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-        const matches = words.filter(w => t.toLowerCase().includes(w)).length;
-        if (matches >= 1) return true;
+      return el.isProductResult || el.role === "heading" || t.length > 15;
+    });
+
+    let bestCandidate = null;
+    let bestScore = -1;
+
+    for (const el of candidateLinks) {
+      const t = `${el.text || ""} ${el.ariaLabel || ""} ${el.title || ""}`.toLowerCase();
+      let score = 0;
+      if (targetWords.length > 0) {
+        for (const w of targetWords) {
+          if (t.includes(w)) score += 2;
+        }
       }
-      return el.isProductResult || el.role === "heading" || t.length > 20;
-    }) || interactiveElements.find(el => !el.isSponsored && !el.isAd && (el.isProductResult || (el.tag === "a" && (el.text || "").length > 15)));
+      if (score > bestScore) {
+        bestScore = score;
+        bestCandidate = el;
+      }
+    }
+
+    const candidateLink = bestCandidate || candidateLinks[0] || interactiveElements.find(el => !el.isSponsored && !el.isAd && (el.isProductResult || (el.tag === "a" && (el.text || "").length > 15)));
 
     if (candidateLink) {
-      stateManager.recordCandidate({
-        title: candidateLink.text || candidateLink.ariaLabel || "Candidate Result",
-        elementId: candidateLink.elementId,
-        url: candidateLink.href || null
-      });
+      if (typeof stateManager?.recordCandidate === "function") {
+        stateManager.recordCandidate({
+          title: candidateLink.text || candidateLink.ariaLabel || "Candidate Result",
+          elementId: candidateLink.elementId,
+          url: candidateLink.href || null
+        });
+      }
       return {
         actionType: "CLICK",
         target: candidateLink.elementId,
         parameters: {},
-        reasoningSummary: `Inspecting organic candidate: "${(candidateLink.text || candidateLink.ariaLabel || '').slice(0, 45)}...".`
+        reasoningSummary: `Selected candidate result: "${(candidateLink.text || candidateLink.ariaLabel || '').slice(0, 50)}...".`
       };
     }
   }
 
   // 5. Add to Cart Task: specifically matches Add to Cart / Add to Bag / Add to Basket (Never confuses with Buy Now / Checkout)
-  if (taskType === "add_to_cart" || (/add to cart|add to bag|add to basket/i.test(goal?.rawRequest || goal?.originalGoal || "") && !stateManager.hasPerformedAction("add_to_cart"))) {
+  const hasCartAction = typeof stateManager?.hasPerformedAction === "function" ? stateManager.hasPerformedAction("add_to_cart") : false;
+  if (taskType === "add_to_cart" || (/add to cart|add to bag|add to basket/i.test(goal?.rawRequest || goal?.originalGoal || "") && !hasCartAction)) {
     const cartBtn = interactiveElements.find(el => {
       if (el.isSponsored || el.isAd) return false;
       const t = `${el.text || ""} ${el.value || ""} ${el.ariaLabel || ""} ${el.title || ""}`.toLowerCase();
@@ -1976,7 +2132,8 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
 
   // 7b. Perform Generic User-Requested UI Action (e.g. subscribe, follow, star, like, bookmark, download, share, pin, play, favorite, join)
   const actionIntent = currentTask?.actionIntent || goal?.actionIntent || (currentTask?.type === "perform_action" ? currentTask.actionIntent : null);
-  if (taskType === "perform_action" || (actionIntent && !stateManager.hasPerformedAction(actionIntent))) {
+  const hasIntentAction = typeof stateManager?.hasPerformedAction === "function" && actionIntent ? stateManager.hasPerformedAction(actionIntent) : false;
+  if (taskType === "perform_action" || (actionIntent && !hasIntentAction)) {
     const intentVerb = String(actionIntent || "").toLowerCase().trim();
     if (intentVerb) {
       const intentRegex = new RegExp(`\\b${intentVerb}\\b`, "i");
@@ -2036,8 +2193,8 @@ export function buildAgentContext({
   rawPiiValues = []
 } = {}) {
   const currentTask = agentState?.currentTaskId
-    ? agentState.tasks.find(t => t.id === agentState.currentTaskId) || { id: agentState.currentTaskId, description: "Advance goal" }
-    : (agentState?.tasks?.[0] || { type: "general_action", description: "Advance goal" });
+    ? agentState.tasks.find(t => t.id === agentState.currentTaskId) || { id: agentState.currentTaskId, description: userRequest }
+    : (agentState?.tasks?.[0] || { type: "general_action", description: userRequest });
 
   return {
     goal: {
@@ -2137,12 +2294,94 @@ if (runTaskButton) {
         activeTab = tabs?.[0] || (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))?.[0] || null;
       }
 
-      const currentUrl = activeTab?.url || "";
+      let currentWorkingTabId = activeTab?.id || null;
+      let currentUrl = activeTab?.url || "";
+
+      // Dynamic tab listener to track tabs opened by buttons, links (target="_blank"), or scripts
+      const newlyOpenedTabs = [];
+      const tabCreatedListener = (tab) => {
+        if (tab && tab.id) {
+          newlyOpenedTabs.push(tab);
+        }
+      };
+      if (typeof chrome !== "undefined" && chrome.tabs?.onCreated) {
+        chrome.tabs.onCreated.addListener(tabCreatedListener);
+      }
+
+      // 2.1 Auto-navigate if started on an internal page (chrome://, edge://, about:blank) or if task specifies a website
+      const isInternalUrl = (url) => !url || url.startsWith("chrome://") || url.startsWith("about:") || url.startsWith("chrome-extension://") || url.startsWith("devtools://") || url.startsWith("edge://") || url.startsWith("view-source:");
+
+      const parsedGoal = typeof ActiveGoalParser !== "undefined" && ActiveGoalParser.parse ? ActiveGoalParser.parse(userTask) : null;
+
+      // Initialize dynamic task plan from parsed goal
+      if (typeof ActiveTaskPlanner !== "undefined" && ActiveTaskPlanner.generateInitialPlan && parsedGoal) {
+        const initialPlan = ActiveTaskPlanner.generateInitialPlan(parsedGoal, { url: currentUrl, isInternalPage: isInternalUrl(currentUrl) });
+        if (Array.isArray(initialPlan) && initialPlan.length > 0) {
+          agentState.tasks = initialPlan;
+          agentState.currentTaskId = initialPlan[0].id;
+          agentState.pendingTasks = initialPlan.slice(1);
+          renderVlmTaskList(agentState.tasks, agentState.currentTaskId);
+        }
+      }
+
+      let initialNavUrl = extractNavigationUrl(userTask, currentUrl, parsedGoal);
+
+      if (isInternalUrl(currentUrl) && !initialNavUrl) {
+        initialNavUrl = "https://www.google.com";
+      }
+
+      if (initialNavUrl && (isInternalUrl(currentUrl) || initialNavUrl !== currentUrl)) {
+        status.textContent = `Navigating to ${initialNavUrl}…`;
+        relayToTerminalLog("Auto-Navigation", `Navigating from ${currentUrl || "internal page"} to ${initialNavUrl}`, {
+          initialUrl: currentUrl,
+          targetUrl: initialNavUrl,
+          userTask
+        });
+        await navigateTabAndWait(currentWorkingTabId, initialNavUrl);
+        if (typeof chrome !== "undefined" && chrome.tabs?.query) {
+          const updatedTabs = await chrome.tabs.query({ active: true, currentWindow: true });
+          activeTab = updatedTabs?.[0] || (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))?.[0] || activeTab;
+          currentWorkingTabId = activeTab?.id || currentWorkingTabId;
+          currentUrl = activeTab?.url || initialNavUrl;
+        }
+
+        // If the first task was navigate and we navigated, mark it completed and advance currentTaskId
+        if (agentState.tasks?.[0]?.type === "navigate") {
+          agentState.tasks[0].status = "completed";
+          agentState.completedTasks.push(agentState.tasks[0]);
+          const nextTask = agentState.tasks.find(t => t.status === "pending");
+          agentState.currentTaskId = nextTask ? nextTask.id : null;
+          agentState.pendingTasks = agentState.tasks.filter(t => t.status === "pending" && t.id !== agentState.currentTaskId);
+          renderVlmTaskList(agentState.tasks, agentState.currentTaskId);
+        }
+      }
 
       // 3. Obtain API settings
-      const userKey = (apiKeyInput?.value || "").trim();
-      const provider = providerSelect?.value || DEFAULT_PROVIDER;
-      const apiKey = userKey || getDefaultKeyForProvider(provider);
+      let provider = providerSelect?.value || DEFAULT_PROVIDER;
+      let userKey = (apiKeyInput?.value || "").trim();
+      const currentHfKey = getEffectiveHfKey();
+
+      // If user hasn't given a token in the extension, use the token given in the .env (HUGGINGFACE_API_KEY or HF_TOKEN)
+      if (!userKey || userKey === "local-no-key-required") {
+        if (currentHfKey) {
+          provider = "huggingface";
+          userKey = currentHfKey;
+          if (apiKeyInput) apiKeyInput.value = currentHfKey;
+          if (providerSelect) providerSelect.value = "huggingface";
+          if (modelInput && (!modelInput.value || modelInput.value.includes("Local"))) {
+            modelInput.value = getDefaultModelForProvider("huggingface");
+          }
+          relayToTerminalLog("Token Configuration", "Using Hugging Face token from .env (HUGGINGFACE_API_KEY / HF_TOKEN)", {
+            provider: "huggingface",
+            model: getDefaultModelForProvider("huggingface"),
+            tokenSource: ".env (HUGGINGFACE_API_KEY / HF_TOKEN)"
+          });
+        }
+      } else if ((provider === "huggingface" || provider === "hf") && !userKey) {
+        userKey = currentHfKey;
+      }
+
+      const apiKey = userKey || getDefaultKeyForProvider(provider) || currentHfKey;
       const selectedModel = (modelInput?.value || "").trim() || getDefaultModelForProvider(provider);
 
       // 4. Multi-Step Iterative Qwen VLM Re-Act Execution Loop
@@ -2162,8 +2401,24 @@ if (runTaskButton) {
         setPipelineStage("LOCAL PII DETECTION → REDACTED DOM");
         status.textContent = `Step ${stepNum}/${agentState.maxIterations}: Scanning page & analyzing DOM...`;
 
+        // Verify current working tab is still valid, else resync with active tab
+        if (typeof chrome !== "undefined" && chrome.tabs?.get && currentWorkingTabId) {
+          try {
+            const checkTab = await chrome.tabs.get(currentWorkingTabId);
+            if (checkTab?.url) {
+              activeTab = checkTab;
+              currentUrl = checkTab.url;
+            }
+          } catch {
+            const currentTabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            activeTab = currentTabs?.[0] || activeTab;
+            currentWorkingTabId = activeTab?.id || null;
+            currentUrl = activeTab?.url || currentUrl;
+          }
+        }
+
         // Local PII Scan
-        const scanRes = await sendTabMessage({ type: "DETECT_AND_LOCALIZE_PAGE_PII" }).catch(() => ({ summary: { totalFindings: 0 } }));
+        const scanRes = await sendTabMessage({ type: "DETECT_AND_LOCALIZE_PAGE_PII" }, currentWorkingTabId).catch(() => ({ summary: { totalFindings: 0 } }));
         const piiFindings = scanRes?.summary || { totalFindings: 0 };
         renderPiiSummary(piiFindings);
 
@@ -2184,13 +2439,13 @@ if (runTaskButton) {
 
         // Discover Interactive Elements on the live page
         let observeErr = null;
-        let observeRes = await sendTabMessage({ type: "OBSERVE_INTERACTIVE_DOM" }).catch((err) => {
+        let observeRes = await sendTabMessage({ type: "OBSERVE_INTERACTIVE_DOM" }, currentWorkingTabId).catch((err) => {
           observeErr = err;
           return null;
         });
         if (!observeRes?.interactiveElements || observeRes.interactiveElements.length === 0) {
           await new Promise(r => setTimeout(r, 1200));
-          observeRes = await sendTabMessage({ type: "OBSERVE_INTERACTIVE_DOM" }).catch((err) => {
+          observeRes = await sendTabMessage({ type: "OBSERVE_INTERACTIVE_DOM" }, currentWorkingTabId).catch((err) => {
             observeErr = err;
             return null;
           });
@@ -2199,6 +2454,20 @@ if (runTaskButton) {
         const interactiveElements = observeRes?.interactiveElements || [];
         const pageTitle = observeRes?.pageTitle || "";
         const pageUrl = observeRes?.url || currentUrl;
+
+        // In-loop recovery for internal browser pages
+        if (interactiveElements.length === 0 && isInternalUrl(pageUrl)) {
+          const targetFallback = extractNavigationUrl(userTask, pageUrl, parsedGoal) || "https://www.google.com";
+          status.textContent = `Internal page detected. Navigating to ${targetFallback}…`;
+          await navigateTabAndWait(currentWorkingTabId, targetFallback);
+          if (typeof chrome !== "undefined" && chrome.tabs?.query) {
+            const updatedTabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            activeTab = updatedTabs?.[0] || activeTab;
+            currentWorkingTabId = activeTab?.id || currentWorkingTabId;
+            currentUrl = activeTab?.url || targetFallback;
+          }
+          continue;
+        }
 
         // Capture On-Device Sanitized Screenshot (Solid Blackout Redaction)
         const tabViewportContext = piiFindings.viewport || {
@@ -2226,7 +2495,7 @@ if (runTaskButton) {
             error: errMsg,
             pageUrl,
             pageTitle,
-            diagnosticHelp: pageUrl.startsWith("chrome://") ? "Cannot inject content scripts into chrome:// internal pages. Please open a standard website." : "Page has no interactive elements."
+            diagnosticHelp: isInternalUrl(pageUrl) ? "Cannot inject content scripts into internal browser pages. Auto-navigating to a standard website." : "Page has no interactive elements."
           }, "error");
           break;
         }
@@ -2317,11 +2586,17 @@ if (runTaskButton) {
 
         // Fallback heuristic if Qwen model unavailable (offline compatibility)
         if (!proposedAction) {
+          const fallbackStateManager = {
+            hasPerformedAction: (type) => (agentState?.actionHistory || []).some(a => (a.actionType || a.type) === type || (a.actionIntent || a.reason || "").toLowerCase().includes(String(type).toLowerCase())),
+            isFilterApplied: (name, val) => (agentState?.actionHistory || []).some(a => a.isFilter && a.filterName === name),
+            recordCandidate: (cand) => {},
+            consecutiveFailures: 0
+          };
           const fallback = deriveGeneralizedFallbackAction({
             currentTask: agentContext.currentTask,
-            goal: { summary: userTask, constraints: [] },
+            goal: parsedGoal || { summary: userTask, constraints: [] },
             interactiveElements,
-            stateManager: { consecutiveFailures: 0 },
+            stateManager: fallbackStateManager,
             stepNum
           });
           if (fallback) {
@@ -2372,9 +2647,14 @@ if (runTaskButton) {
           reasoningSummary
         });
 
+        // Snapshot open tabs before executing action to detect any newly opened tabs
+        const preActionTabs = (typeof chrome !== "undefined" && chrome.tabs?.query)
+          ? await chrome.tabs.query({ currentWindow: true })
+          : [];
+
         let execRes = null;
         if (vType === "NAVIGATE" && validatedAction.url) {
-          await navigateTabAndWait(activeTab?.id, validatedAction.url);
+          await navigateTabAndWait(currentWorkingTabId, validatedAction.url);
           execRes = { ok: true, status: "COMPLETED" };
         } else if (vType === "DONE" || vType === "COMPLETE") {
           execRes = { ok: true, status: "COMPLETED" };
@@ -2385,7 +2665,7 @@ if (runTaskButton) {
             actionType: vType,
             targetId: vTarget,
             parameters: validatedAction.parameters
-          });
+          }, currentWorkingTabId);
 
           if (vType === "TYPE" && (validatedAction.thenPressEnter || proposedAction.thenPressEnter)) {
             await sendTabMessage({
@@ -2393,7 +2673,7 @@ if (runTaskButton) {
               actionType: "PRESS_KEY",
               targetId: vTarget,
               parameters: { key: "Enter" }
-            });
+            }, currentWorkingTabId);
           }
         }
 
@@ -2412,6 +2692,29 @@ if (runTaskButton) {
           ActiveRecordAgentAction(agentState, stepOutcome);
         }
 
+        // Advance dynamic task plan
+        if (execRes?.ok && agentState.tasks && agentState.tasks.length > 0) {
+          const currentTaskObj = agentState.tasks.find(t => t.id === agentState.currentTaskId);
+          if (currentTaskObj) {
+            let taskSatisfied = false;
+            if (currentTaskObj.type === "navigate" && vType === "NAVIGATE") taskSatisfied = true;
+            else if (currentTaskObj.type === "search" && vType === "TYPE") taskSatisfied = true;
+            else if ((currentTaskObj.type === "inspect" || currentTaskObj.type === "select_candidate" || currentTaskObj.type === "filter") && vType === "CLICK") taskSatisfied = true;
+            else if (currentTaskObj.type === "add_to_cart" && vType === "CLICK") taskSatisfied = true;
+
+            if (taskSatisfied) {
+              currentTaskObj.status = "completed";
+              if (!agentState.completedTasks.some(t => t.id === currentTaskObj.id)) {
+                agentState.completedTasks.push(currentTaskObj);
+              }
+              const nextTask = agentState.tasks.find(t => t.status === "pending" && t.id !== currentTaskObj.id);
+              agentState.currentTaskId = nextTask ? nextTask.id : null;
+              agentState.pendingTasks = agentState.tasks.filter(t => t.status === "pending" && t.id !== agentState.currentTaskId);
+              renderVlmTaskList(agentState.tasks, agentState.currentTaskId);
+            }
+          }
+        }
+
         if (!execRes?.ok) {
           anyFailed = true;
           relayToTerminalLog(`Step ${stepNum}: Action Failed`, execRes?.error || "Action execution error", stepOutcome, "error");
@@ -2427,7 +2730,7 @@ if (runTaskButton) {
               actionType: "SCROLL",
               targetId: "page_root",
               parameters: { direction: "down", distance: 400 }
-            }).catch(() => { });
+            }, currentWorkingTabId).catch(() => { });
           }
         }
 
@@ -2436,9 +2739,79 @@ if (runTaskButton) {
         // State Stabilization Pause (DOM Settlement)
         if (vType === "NAVIGATE" || vType === "PRESS_KEY" || vType === "SUBMIT" || validatedAction.thenPressEnter || (vType === "CLICK" && vTarget.startsWith("el_"))) {
           status.textContent = `Step ${stepNum} complete. Waiting for page update...`;
-          await new Promise(r => setTimeout(r, 2200));
+          await new Promise(r => setTimeout(r, 2000));
         } else {
-          await new Promise(r => setTimeout(r, 900));
+          await new Promise(r => setTimeout(r, 800));
+        }
+
+        // Seamless Multi-Tab Tracking: Continue working on new tabs like humans do
+        if (typeof chrome !== "undefined" && chrome.tabs?.query) {
+          const postActionTabs = await chrome.tabs.query({ currentWindow: true });
+
+          // 1. Check if a new tab was created during this step
+          let newTabToSwitch = newlyOpenedTabs.pop() || postActionTabs.find(t => t.id !== currentWorkingTabId && !preActionTabs.some(p => p.id === t.id));
+
+          // 2. Check openerTabId linkage
+          if (!newTabToSwitch && currentWorkingTabId) {
+            newTabToSwitch = postActionTabs.find(t => t.id !== currentWorkingTabId && t.openerTabId === currentWorkingTabId);
+          }
+
+          // 3. If action clicked a link with target="_blank" and browser blocked new tab, open it proactively
+          if (!newTabToSwitch && execRes?.opensNewTab && execRes?.targetHref && chrome.tabs.create) {
+            try {
+              newTabToSwitch = await chrome.tabs.create({ url: execRes.targetHref, active: true });
+            } catch {}
+          }
+
+          // 4. Check if the active tab in current window changed
+          if (!newTabToSwitch) {
+            const focusedTab = postActionTabs.find(t => t.active);
+            if (focusedTab && focusedTab.id !== currentWorkingTabId && focusedTab.id) {
+              newTabToSwitch = focusedTab;
+            }
+          }
+
+          if (newTabToSwitch && newTabToSwitch.id && newTabToSwitch.id !== currentWorkingTabId) {
+            const prevId = currentWorkingTabId;
+            const newId = newTabToSwitch.id;
+            status.textContent = `New tab opened! Switching agent to new tab #${newId}…`;
+            relayToTerminalLog(`Step ${stepNum}: Tab Switch`, `Switched active agent context from tab #${prevId} to new tab #${newId}`, {
+              fromTabId: prevId,
+              toTabId: newId,
+              url: newTabToSwitch.url || "loading",
+              reason: execRes?.opensNewTab ? "Clicked link with target=_blank" : "New tab opened by button/event"
+            });
+
+            // Activate the new tab in Chrome so the user and browser focus it
+            try {
+              await chrome.tabs.update(newId, { active: true });
+            } catch {}
+
+            // Wait for new tab to finish loading and DOM settle
+            const readyTab = await waitForTabReady(newId, 12000);
+            currentWorkingTabId = newId;
+            activeTab = readyTab || newTabToSwitch;
+            currentUrl = activeTab?.url || currentUrl;
+
+            // Ensure content scripts are active on the new tab
+            if (typeof chrome.scripting !== "undefined" && chrome.scripting.executeScript && activeTab?.id) {
+              try {
+                await chrome.scripting.executeScript({
+                  target: { tabId: activeTab.id },
+                  files: ["src/policy-runtime.js", "src/ocr-service.js", "src/content-pii.js", "src/content-metadata.js", "src/action-runtime.js"]
+                });
+              } catch {}
+            }
+
+            // Brief hydration pause
+            await new Promise(r => setTimeout(r, 1200));
+
+            relayToTerminalLog(`Step ${stepNum}: New Tab Ready`, `New tab #${newId} is ready on "${activeTab?.title || activeTab?.url}". Resuming multi-step reasoning.`, {
+              tabId: newId,
+              url: activeTab?.url,
+              title: activeTab?.title
+            });
+          }
         }
       }
 
@@ -2507,6 +2880,10 @@ if (runTaskButton) {
       status.textContent = `Task execution error: ${err.message || "Cannot inspect tab."}`;
       const safeErr = ActiveSanitizeTelemetryError ? ActiveSanitizeTelemetryError(err) : { error: err.message };
       relayToTerminalLog("Pipeline Error", safeErr.message || "Execution error", safeErr, "error");
+    } finally {
+      if (typeof chrome !== "undefined" && chrome.tabs?.onCreated?.removeListener) {
+        chrome.tabs.onCreated.removeListener(tabCreatedListener);
+      }
     }
   });
 }

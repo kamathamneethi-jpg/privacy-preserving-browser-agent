@@ -276,8 +276,8 @@ export class MultimodalVisionAgent {
    */
   static async reason({
     apiKey = "",
-    model = DEFAULT_MULTIMODAL_MODEL,
-    provider = "openrouter",
+    model = (typeof process !== "undefined" && process.env?.HUGGINGFACE_MODEL) || DEFAULT_MULTIMODAL_MODEL,
+    provider = "huggingface",
     goal = {},
     userGoal = null,
     agentState = null,
@@ -297,6 +297,19 @@ export class MultimodalVisionAgent {
     onTelemetry = null,
     localEndpoint = (typeof process !== "undefined" && process.env?.LOCAL_AGENT_URL) || "http://127.0.0.1:8765/api/agent/reason"
   }) {
+    // Fallback to environment tokens if apiKey not explicitly supplied
+    if (!apiKey || typeof apiKey !== "string" || !apiKey.trim()) {
+      if (typeof process !== "undefined" && process.env) {
+        if (provider === "huggingface" || provider === "hf") {
+          apiKey = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN || "";
+        } else if (provider === "openrouter") {
+          apiKey = process.env.OPENROUTER_API_KEY || "";
+        } else if (provider === "groq") {
+          apiKey = process.env.GROQ_API_KEY || "";
+        }
+      }
+    }
+
     // 1. Local AI Agent Server (Port 8765, Zero Remote Key Required)
     if (provider === "local") {
       const localStartTime = Date.now();

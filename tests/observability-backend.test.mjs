@@ -28,6 +28,18 @@ test("Observability Backend & Real-time Dashboard Test Suite", async (t) => {
     assert.strictEqual(data.port, 8765);
   });
 
+  // 1b. Environment Configuration endpoint
+  await t.test("GET /api/config returns .env tokens and default Hugging Face provider", async () => {
+    const res = await fetch(`${baseUrl}/api/config`);
+    assert.strictEqual(res.status, 200);
+    const data = await res.json();
+    assert.strictEqual(data.ok, true);
+    assert.strictEqual(data.provider, "huggingface");
+    assert.ok(data.huggingface_api_key.startsWith("hf_") || data.huggingface_api_key === "");
+    assert.strictEqual(data.huggingface_api_key, data.hf_token);
+    assert.ok(data.huggingface_model.includes("Qwen"));
+  });
+
   // 2. Dashboard UI Serving
   await t.test("GET / serves rich HTML dashboard with valid content-type", async () => {
     const res = await fetch(`${baseUrl}/`);

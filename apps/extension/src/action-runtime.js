@@ -731,8 +731,27 @@
 
       switch (actionType) {
         case "CLICK": {
+          const { element } = resolveElement(targetId);
+          const link = element?.closest ? element.closest("a[href]") : (element?.tagName === "A" && element?.href ? element : null);
+          const targetAttr = (link?.getAttribute?.("target") || "").toLowerCase();
+          const opensNewTab = Boolean(
+            targetAttr === "_blank" ||
+            targetAttr === "_new" ||
+            (element?.getAttribute?.("target") || "").toLowerCase() === "_blank" ||
+            (element?.getAttribute?.("data-new-tab") !== null && element?.getAttribute?.("data-new-tab") !== undefined)
+          );
+          const targetHref = link?.href || link?.getAttribute?.("href") || null;
+
           const ok = performClick(targetId);
-          return { ok, status: ok ? "COMPLETED" : "FAILED_EXECUTION", actionType, targetId, error: ok ? undefined : `Target '${targetId}' click failed.` };
+          return {
+            ok,
+            status: ok ? "COMPLETED" : "FAILED_EXECUTION",
+            actionType,
+            targetId,
+            error: ok ? undefined : `Target '${targetId}' click failed.`,
+            opensNewTab,
+            targetHref
+          };
         }
         case "TYPE": {
           const text = typeof parameters.text === "string" ? parameters.text : (parameters.value || "");

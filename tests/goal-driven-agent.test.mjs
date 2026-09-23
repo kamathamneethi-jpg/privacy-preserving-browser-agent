@@ -690,6 +690,14 @@ test("29. extractNavigationUrl navigates accurately to requested platforms and U
   // Explicit full URL
   const directNav = extractNavigationUrl("open https://news.ycombinator.com and read top story", "chrome://newtab", GoalParser.parse("open https://news.ycombinator.com and read top story"));
   assert.strictEqual(directNav, "https://news.ycombinator.com");
+
+  // Raw domain on internal tab
+  const rawDomainNav = extractNavigationUrl("cnn.com latest headlines", "chrome://newtab/", GoalParser.parse("cnn.com latest headlines"));
+  assert.strictEqual(rawDomainNav, "https://cnn.com");
+
+  // Fallback to Google on internal newtab for general query
+  const fallbackNav = extractNavigationUrl("what is quantum computing", "edge://newtab", GoalParser.parse("what is quantum computing"));
+  assert.strictEqual(fallbackNav, "https://www.google.com");
 });
 
 test("30. deriveGeneralizedFallbackAction handles Google search with textarea[name='q'] and cleans query", () => {
@@ -850,5 +858,53 @@ test("33. TaskPlanner produces domain-tailored execution plans for diverse tasks
   const actionPlanner = new TaskPlanner(actionGoal);
   const actionTypes = actionPlanner.tasks.map(t => t.type);
   assert.deepStrictEqual(actionTypes, ["navigate", "search", "select_candidate", "perform_action", "verify_goal"]);
+});
+
+test("34. MultimodalVisionAgent uses HUGGINGFACE_API_KEY / HF_TOKEN from env when no apiKey provided", async () => {
+  let requestedUrl = "";
+  let requestedAuth = "";
+
+  const mockFetch = async (url, opts) => {
+    requestedUrl = url;
+    requestedAuth = opts.headers["Authorization"];
+    return {
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                observation: "Fallback Hugging Face token successful",
+                goal_progress: { isSatisfied: true },
+                action: { actionType: "DONE", reasoningSummary: "Task completed" }
+              })
+            }
+          }
+        ]
+      })
+    };
+  };
+
+  const prevHfKey = process.env.HUGGINGFACE_API_KEY;
+  const prevHfToken = process.env.HF_TOKEN;
+  try {
+    process.env.HUGGINGFACE_API_KEY = "hf_env_token_from_dotenv_99999";
+    delete process.env.HF_TOKEN;
+
+    const result = await MultimodalVisionAgent.reason({
+      apiKey: "", // empty - user did not provide token in extension
+      goal: GoalParser.parse("Test env token fallback"),
+      fetchClient: mockFetch
+    });
+
+    assert.strictEqual(requestedUrl, "https://router.huggingface.co/v1/chat/completions");
+    assert.strictEqual(requestedAuth, "Bearer hf_env_token_from_dotenv_99999");
+    assert.strictEqual(result.action.actionType, "DONE");
+  } finally {
+    if (prevHfKey !== undefined) process.env.HUGGINGFACE_API_KEY = prevHfKey;
+    else delete process.env.HUGGINGFACE_API_KEY;
+    if (prevHfToken !== undefined) process.env.HF_TOKEN = prevHfToken;
+    else delete process.env.HF_TOKEN;
+  }
 });
 

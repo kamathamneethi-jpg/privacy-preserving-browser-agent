@@ -23,20 +23,21 @@ export const LLM_MODELS = Object.freeze({
   OPENAI_GPT4O: "gpt-4o",
   GROQ_LLAMA3: "llama-3.3-70b-versatile",
   OPENROUTER_DEFAULT: "qwen/qwen-2.5-vl-72b-instruct:free",
-  HUGGINGFACE_DEFAULT: "Qwen/Qwen3-VL-4B-Instruct"
+  HUGGINGFACE_DEFAULT: "Qwen/Qwen2.5-VL-72B-Instruct"
 });
 
 export class LlmReasoningProvider {
   constructor(options = {}) {
     this.providerType = REASONING_PROVIDER_TYPES.REAL_REMOTE;
-    this.providerName = options.providerName || process.env.LLM_PROVIDER || "gemini";
+    this.providerName = options.providerName || process.env.LLM_PROVIDER || "huggingface";
     this.apiKey = options.apiKey !== undefined ? options.apiKey : (
-      process.env.GEMINI_API_KEY ||
-      process.env.OPENAI_API_KEY ||
-      process.env.GROQ_API_KEY ||
-      process.env.OPENROUTER_API_KEY ||
+      this._getKeyForProvider(this.providerName) ||
       process.env.HUGGINGFACE_API_KEY ||
       process.env.HF_TOKEN ||
+      process.env.OPENROUTER_API_KEY ||
+      process.env.GROQ_API_KEY ||
+      process.env.GEMINI_API_KEY ||
+      process.env.OPENAI_API_KEY ||
       process.env.REASONING_API_KEY ||
       ""
     );
@@ -44,6 +45,16 @@ export class LlmReasoningProvider {
     this.model = options.model || this._getDefaultModelForProvider(this.providerName);
     this.fetchFn = options.fetchFn || globalThis.fetch;
     this.timeoutMs = options.timeoutMs || 10000;
+  }
+
+  _getKeyForProvider(provider) {
+    const p = String(provider).toLowerCase();
+    if (p === "huggingface" || p === "hf") return process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN || "";
+    if (p === "groq") return process.env.GROQ_API_KEY || "";
+    if (p === "openrouter") return process.env.OPENROUTER_API_KEY || "";
+    if (p === "gemini") return process.env.GEMINI_API_KEY || "";
+    if (p === "openai") return process.env.OPENAI_API_KEY || "";
+    return process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN || process.env.REASONING_API_KEY || "";
   }
 
   _getDefaultModelForProvider(provider) {
