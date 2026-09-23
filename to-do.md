@@ -101,7 +101,16 @@ The **Privacy-Preserving Browser Agent** is fully functional end-to-end:
 - [x] **LOCAL_ONLY Remote Egress Correction**: Verified secrets are completely excluded (`EXCLUDED`) from remote payloads while protected locally in DOM (`[LOCAL_ONLY_PROTECTED]`) and masked in screenshots.
 - [x] **Token & Vault Consistency**: Verified single token consistency across DOM, Remote, PolicyEngine, and PrivacyVault.
 - [x] **Dedicated Automated Test Suite**: 10-requirement validation suite in `tests/phase7-runtime-transparency.test.mjs` (10/10 tests pass).
-- [x] **Zero Hardcoding Invariant**: Source audit verified zero website-specific or decision-mapping branches introduced.
+### Milestone 12: Generalized Browser Agent Task Execution Pipeline & Action State Isolation [COMPLETED]
+- [x] **Generic Semantic Target Resolver** (`packages/privacy-core/src/semantic-target-resolver.js`): Multi-signal semantic scoring (`resolveSemanticTarget`, `scoreElementMatch`) evaluating labels, aria-labels, names, IDs, placeholders, semantic types, and tags with zero hardcoded website selectors.
+- [x] **Goal Parser NLP Generalization** (`packages/privacy-core/src/goal-parser.js`): Bidirectional natural language extraction (`change X to Y`, `enter Y into X`, `update X to Y`, `type Y in X`, `replace X with Y`, `set X to Y`), clean target semantics, and explicit click target extraction.
+- [x] **Task Planner State Separation** (`packages/privacy-core/src/task-planner.js`): Clean task decomposition ensuring `fill_form` is only added when form filling or field updates are instructed, click tasks are strictly `actionType: "CLICK"` with `value: null`, and sequential multi-action ordering (`fill_form` -> `submit_form` -> `verify_goal`) is strictly preserved.
+- [x] **Action State Isolation in Client Fallback & Server Decision** (`apps/extension/src/popup.js`, `scripts/extension-log-server.mjs`):
+  - Strictly gated search so non-search tasks never trigger search or hijack input fields.
+  - Form filling resolves elements in DOM order using `ActiveResolveSemanticTarget` and never falls through into `submit_form` unless explicitly requested.
+  - Standalone clicks and submits strictly return `parameters: {}` with zero value inheritance.
+- [x] **Controlled Demo Portal Feedback** (`tests/fixtures/controlled-privacy-demo.html`): Added generic action execution feedback toast and dynamic confirmation view with zero hardcoded selectors or confirmation strings.
+- [x] **Generalized Regression Test Suite** (`tests/generalized-semantic-pipeline.test.mjs`): 11 comprehensive automated tests covering tasks A through K (independent sequential tasks, zero value/target bleeding, unseen fields/buttons, NLP variations, and source-level hardcoding audits). All 582 tests across 15 test suites pass.
 
 ---
 
@@ -110,5 +119,6 @@ The **Privacy-Preserving Browser Agent** is fully functional end-to-end:
 - [ ] **Physical ONNX Model Binaries in Extension Package**: Package trained `yolo_pii.onnx` and `vit_context.onnx` directly into `apps/extension/` for local visual inference.
 - [ ] **Voice Input for Agent Tasks**: Add Web Speech API integration in extension popup.
 - [ ] **Multi-Tab Orchestration**: Extend planner to coordinate tasks across multiple browser tabs concurrently.
+
 
 

@@ -103,12 +103,13 @@ export class GoalParser {
     const navigation = this.extractNavigationIntent(trimmed);
     const selection = this.extractSelection(trimmed);
     const domain = this.detectDomain(trimmed, navigation);
+    const clickTarget = this.extractClickTarget(trimmed);
     const actionIntent = this.extractActionIntent(trimmed);
     const entities = this.extractPrepositionalEntities(trimmed);
     const constraints = this.extractConstraints(trimmed, entities);
-    const targetEntity = this.extractTargetEntity(trimmed, domain, actionIntent, selection);
-    const required_operations = this.extractOperations(trimmed, domain, constraints, actionIntent, navigation, selection);
-    const summary = this.summarizeGoal(trimmed, targetEntity, domain, actionIntent, selection, navigation);
+    const targetEntity = this.extractTargetEntity(trimmed, domain, actionIntent, selection, clickTarget);
+    const required_operations = this.extractOperations(trimmed, domain, constraints, actionIntent, navigation, selection, clickTarget);
+    const summary = this.summarizeGoal(trimmed, targetEntity, domain, actionIntent, selection, navigation, clickTarget, constraints);
 
     return {
       rawRequest: trimmed,
@@ -122,6 +123,7 @@ export class GoalParser {
       constraints,
       targetWebsite: navigation.destinationKeyword,
       targetEntity,
+      clickTarget: clickTarget || null,
       actionIntent: actionIntent || null,
       required_operations,
       operations: required_operations
@@ -385,7 +387,12 @@ export class GoalParser {
     if (/\b(?:fill out|fill in|complete form|registration form|signup form|contact form|survey|application form|enter name|enter email)\b/i.test(lower)) {
       return TASK_DOMAINS.FORM_FILLING;
     }
-    if (/\b(?:change|update|replace|modify|edit|set|enter|fill)\s+(?:the\s+)?(?:[a-zA-Z0-9_\-\s]{2,25}?)\s+(?:to|with|=|as)\b/i.test(lower)) {
+    // Pattern A: "change [the] <field> to/with/as <val>"
+    if (/\b(?:change|update|replace|modify|edit|set|fill)\s+(?:the\s+)?(?:[a-zA-Z0-9_\-\s]{2,30}?)\s+(?:to|with|=|as)\b/i.test(lower)) {
+      return TASK_DOMAINS.FORM_FILLING;
+    }
+    // Pattern B: "enter/type/put/insert <val> in/into/to [the] <field>"
+    if (/\b(?:enter|type|put|insert|fill)\s+.+?\s+(?:in|into|to|inside)\s+(?:the\s+)?[a-zA-Z0-9_\-\s]{2,30}\b/i.test(lower)) {
       return TASK_DOMAINS.FORM_FILLING;
     }
     if (/\b(?:change|update|replace|modify|edit|set|enter|fill)\s+(?:the\s+)?(?:email|phone|otp|password|code|two factor|2fa|name|address|input|field|message|details)\b/i.test(lower)) {
@@ -523,13 +530,16 @@ export class GoalParser {
     }
 
     // 10. Form Field constraints (name, email, phone, message, etc.)
-    const isExplicitMod = /\b(?:change|update|replace|modify|set|enter|fill in|fill)\b/i.test(text);
+    const isExplicitMod = /\b(?:change|update|replace|modify|set|enter|type|put|insert|fill in|fill)\b/i.test(text);
+
     const emailMatch = text.match(/(?:email|e-mail)\s*(?:as|is|to|=|:)?\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i) ||
       text.match(/\b([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b/i);
     if (emailMatch) {
       addConstraint("email", CONSTRAINT_OPERATORS.EQUALS, emailMatch[1].trim(), {
         explicit: isExplicitMod,
-        isExplicitOverwrite: isExplicitMod
+        isExplicitOverwrite: isExplicitMod,
+        targetSemantic: "email",
+        isFieldUpdate: isExplicitMod
       });
     }
 
@@ -537,7 +547,9 @@ export class GoalParser {
     if (nameMatch) {
       addConstraint("name", CONSTRAINT_OPERATORS.EQUALS, nameMatch[1].trim(), {
         explicit: isExplicitMod,
-        isExplicitOverwrite: isExplicitMod
+        isExplicitOverwrite: isExplicitMod,
+        targetSemantic: "name",
+        isFieldUpdate: isExplicitMod
       });
     }
 
@@ -545,7 +557,9 @@ export class GoalParser {
     if (phoneMatch) {
       addConstraint("phone", CONSTRAINT_OPERATORS.EQUALS, phoneMatch[1].replace(/[\s-]/g, "").trim(), {
         explicit: isExplicitMod,
-        isExplicitOverwrite: isExplicitMod
+        isExplicitOverwrite: isExplicitMod,
+        targetSemantic: "phone",
+        isFieldUpdate: isExplicitMod
       });
     }
 
@@ -553,23 +567,43 @@ export class GoalParser {
     if (msgMatch) {
       addConstraint("message", CONSTRAINT_OPERATORS.EQUALS, msgMatch[1].replace(/^["']|["']$/g, "").trim(), {
         explicit: isExplicitMod,
-        isExplicitOverwrite: isExplicitMod
+        isExplicitOverwrite: isExplicitMod,
+        targetSemantic: "message",
+        isFieldUpdate: isExplicitMod
       });
     }
 
-    // 10b. Generic natural language field modification / assignment constraints
-    // e.g. "change the email to user@example.com", "update the otp to 112345", "replace the two factor code with 112345", "set quantity to 3"
+    // Helper to clean semantic target phrase
+    const cleanSemanticTarget = (raw) => {
+      let c = String(raw || "").trim().toLowerCase();
+      c = c.replace(/^(?:the|an|a)\s+/, "");
+      c = c.replace(/\s+(?:field|input|box|control|element)$/i, "");
+      return c.trim();
+    };
+
+    // 10b. Pattern A: "change/update/replace/modify/set/fill [the] <field> to/with/as/is <val>"
+    // e.g. "change the email to abc@gmail.com", "update phone number to 9876543210", "set quantity to 3"
     const modifyPattern = /\b(?:change|update|replace|modify|set|enter|fill in|fill)\s+(?:the\s+)?([a-zA-Z0-9_\-\s]{2,35}?)\s+(?:to|with|=|as|is)\s+([^,;\n]+?)(?=(?:\s+(?:and|then|click|confirm|submit|with|after)\b|(?:\.\s+)|\.$|$))/gi;
     let modMatch;
     while ((modMatch = modifyPattern.exec(text)) !== null) {
       const fieldRaw = modMatch[1].trim();
       const valRaw = modMatch[2].replace(/^["']|["']$/g, "").trim();
       if (fieldRaw && valRaw && !/\b(?:first|second|top|options|candidates)\b/i.test(fieldRaw)) {
-        const normAttr = fieldRaw.toLowerCase().replace(/\s+/g, "_");
-        const existing = constraints.find(c => c.attribute === normAttr || c.name === normAttr || (c.attribute === "email" && normAttr === "email") || (c.attribute === "phone" && normAttr === "phone") || (c.attribute === "name" && normAttr === "name"));
+        const cleanTarget = cleanSemanticTarget(fieldRaw);
+        const normAttr = cleanTarget.replace(/\s+/g, "_");
+        const existing = constraints.find(c =>
+          c.attribute === normAttr ||
+          c.name === normAttr ||
+          c.targetSemantic === cleanTarget ||
+          (cleanTarget === "email" && (c.attribute === "email" || c.targetSemantic === "email")) ||
+          (cleanTarget.includes("phone") && (c.attribute === "phone" || c.targetSemantic === "phone")) ||
+          (cleanTarget === "name" && (c.attribute === "name" || c.targetSemantic === "name"))
+        );
         if (existing) {
           existing.explicit = true;
           existing.isExplicitOverwrite = true;
+          existing.isFieldUpdate = true;
+          existing.targetSemantic = cleanTarget;
           if (valRaw && existing.value !== valRaw) {
             existing.value = valRaw;
           }
@@ -577,6 +611,45 @@ export class GoalParser {
           addConstraint(normAttr, CONSTRAINT_OPERATORS.EQUALS, valRaw, {
             explicit: true,
             isExplicitOverwrite: true,
+            isFieldUpdate: true,
+            targetSemantic: cleanTarget,
+            rawField: fieldRaw
+          });
+        }
+      }
+    }
+
+    // 10c. Pattern B: "enter/type/put/insert <val> in/into/to [the] <field>"
+    // e.g. "enter alice@example.com into the email field", "type 9876543210 in the phone field"
+    const enterPattern = /\b(?:enter|type|put|insert|fill)\s+([^,;\n]+?)\s+(?:in|into|to|inside)\s+(?:the\s+)?([a-zA-Z0-9_\-\s]{2,35}?)(?=(?:\s+(?:and|then|click|confirm|submit|with|after)\b|(?:\.\s+)|\.$|$))/gi;
+    let enterMatch;
+    while ((enterMatch = enterPattern.exec(text)) !== null) {
+      const valRaw = enterMatch[1].replace(/^["']|["']$/g, "").trim();
+      const fieldRaw = enterMatch[2].trim();
+      if (fieldRaw && valRaw && !/\b(?:first|second|top|options|candidates|cart|bag)\b/i.test(fieldRaw)) {
+        const cleanTarget = cleanSemanticTarget(fieldRaw);
+        const normAttr = cleanTarget.replace(/\s+/g, "_");
+        const existing = constraints.find(c =>
+          c.attribute === normAttr ||
+          c.name === normAttr ||
+          c.targetSemantic === cleanTarget ||
+          (cleanTarget === "email" && (c.attribute === "email" || c.targetSemantic === "email")) ||
+          (cleanTarget.includes("phone") && (c.attribute === "phone" || c.targetSemantic === "phone"))
+        );
+        if (existing) {
+          existing.explicit = true;
+          existing.isExplicitOverwrite = true;
+          existing.isFieldUpdate = true;
+          existing.targetSemantic = cleanTarget;
+          if (valRaw && existing.value !== valRaw) {
+            existing.value = valRaw;
+          }
+        } else {
+          addConstraint(normAttr, CONSTRAINT_OPERATORS.EQUALS, valRaw, {
+            explicit: true,
+            isExplicitOverwrite: true,
+            isFieldUpdate: true,
+            targetSemantic: cleanTarget,
             rawField: fieldRaw
           });
         }
@@ -596,27 +669,64 @@ export class GoalParser {
   }
 
   /**
-   * Extracts generic UI action intent specified in the request
-   * (e.g. subscribe, follow, star, like, bookmark, download, share, pin, play, favorite, join, open, read, archive, approve, confirm, continue, submit).
-   * Excludes standard eCommerce cart actions or form fills that have dedicated operation types.
+   * Extracts generic click target description from user instruction
+   * (e.g. "confirm order", "submit", "continue", "cancel", "save", "proceed").
+   *
+   * @param {string} text - User request
+   * @returns {string|null} Semantic click target
+   */
+  static extractClickTarget(text) {
+    if (!text || typeof text !== "string") return null;
+    const lower = text.toLowerCase();
+
+    // 1. Compound click: "... and/then click [on] [the] <target>"
+    const compoundClickMatch = lower.match(/\b(?:and|then|to)\s+(?:click\s+(?:on\s+)?|press\s+(?:on\s+)?|tap\s+(?:on\s+)?|select\s+|activate\s+)(?:the\s+)?([a-zA-Z0-9_\-\s]+?)(?=[,\.]|\s+(?:with|after|before)|$)/i);
+    if (compoundClickMatch) {
+      const target = compoundClickMatch[1].trim().replace(/\s+(?:button|btn|link)$/i, "");
+      if (target && !/^(?:it|this|that|first|second|item|result)$/i.test(target)) return target;
+    }
+
+    // 2. Direct click: "click [on] [the] <target>"
+    const directClickMatch = lower.match(/\b(?:click\s+(?:on\s+)?|press\s+(?:on\s+)?|tap\s+(?:on\s+)?|select\s+|activate\s+)(?:the\s+)?([a-zA-Z0-9_\-\s]+?)(?=[,\.]|\s+(?:and|then|with|after|before)|$)/i);
+    if (directClickMatch) {
+      const target = directClickMatch[1].trim().replace(/\s+(?:button|btn|link)$/i, "");
+      if (target && !/^(?:it|this|that|first|second|item|result)$/i.test(target)) return target;
+    }
+
+    // 3. Direct action commands: "(confirm|submit|continue|cancel|save|proceed|checkout|place order)\b"
+    const directActionMatch = lower.match(/\b(confirm\s+order|place\s+order|submit\s+form|confirm|submit|continue|cancel|save|proceed|checkout)\b/i);
+    if (directActionMatch) {
+      return directActionMatch[1].trim();
+    }
+
+    return null;
+  }
+
+  /**
+   * Extracts generic UI action intent specified in the request.
    */
   static extractActionIntent(text) {
     if (!text || typeof text !== "string") return null;
     const lower = text.toLowerCase();
 
-    // Avoid overriding dedicated workflows (add to cart, form filling)
+    // Avoid overriding dedicated workflows (add to cart)
     if (/\b(?:add to cart|add to bag|add to basket|buy now)\b/i.test(lower)) {
       return null;
     }
 
-    // Match explicit compound action verbs (e.g., "... and subscribe", "... and follow", "... then bookmark", "... and click on confirm", "... and confirm")
-    const compoundMatch = lower.match(/\b(?:and|then|to)\s+(?:click\s+(?:on\s+)?)?(subscribe|follow|star|like|bookmark|download|share|pin|play|favorite|join|install|upvote|vote|fork|enroll|listen|watch|unfollow|unsubscribe|archive|delete|approve|merge|reply|confirm|continue|submit|save|proceed)\b/i);
+    const clickTarget = this.extractClickTarget(text);
+    if (clickTarget) {
+      return clickTarget.split(/\s+/)[0];
+    }
+
+    // Match explicit compound action verbs
+    const compoundMatch = lower.match(/\b(?:and|then|to)\s+(?:click\s+(?:on\s+)?)?(subscribe|follow|star|like|bookmark|download|share|pin|play|favorite|join|install|upvote|vote|fork|enroll|listen|watch|unfollow|unsubscribe|archive|delete|approve|merge|reply|confirm|continue|submit|save|proceed|cancel)\b/i);
     if (compoundMatch) {
       return compoundMatch[1].toLowerCase();
     }
 
     // Match direct action command verbs
-    const directMatch = lower.match(/\b(?:click\s+(?:on\s+)?)?(subscribe|follow|star|bookmark|download|upvote|fork|archive|approve|confirm|continue|proceed)\b/i);
+    const directMatch = lower.match(/\b(?:click\s+(?:on\s+)?)?(subscribe|follow|star|bookmark|download|upvote|fork|archive|approve|confirm|continue|proceed|cancel)\b/i);
     if (directMatch && !/\b(?:search|find|read)\s+about\b/i.test(lower)) {
       return directMatch[1].toLowerCase();
     }
@@ -627,7 +737,7 @@ export class GoalParser {
   /**
    * Identifies required operations from the task intent.
    */
-  static extractOperations(text, domain, constraints, actionIntent = null, navigation = {}, selection = null) {
+  static extractOperations(text, domain, constraints = [], actionIntent = null, navigation = {}, selection = null, clickTarget = null) {
     const ops = new Set();
     const lower = text.toLowerCase();
 
@@ -644,7 +754,10 @@ export class GoalParser {
       ops.add(BROWSER_OPERATIONS.FILTER);
     }
 
-    if (selection || ops.has(BROWSER_OPERATIONS.SEARCH) || /\b(?:inspect|check|view|details|look at|examine|open first|click|open|read|select|review)\b/i.test(lower) || domain === TASK_DOMAINS.ECOMMERCE || domain === TASK_DOMAINS.RESEARCH) {
+    const hasFieldUpdates = constraints.some(c => c.isFieldUpdate || c.explicit);
+    const isClickRequested = Boolean(clickTarget || actionIntent || /\b(?:click|press|tap)\b/i.test(lower));
+
+    if (selection || ops.has(BROWSER_OPERATIONS.SEARCH) || (/\b(?:inspect|check|view|details|look at|examine|open first|review)\b/i.test(lower) && !isClickRequested) || domain === TASK_DOMAINS.ECOMMERCE || domain === TASK_DOMAINS.RESEARCH) {
       ops.add(BROWSER_OPERATIONS.INSPECT);
     }
 
@@ -653,12 +766,14 @@ export class GoalParser {
       ops.add(BROWSER_OPERATIONS.COMPARE_CANDIDATES);
     }
 
-    if (/\b(?:fill|enter|input|type|change|update|replace|modify|set|edit)\b/i.test(lower) || domain === TASK_DOMAINS.FORM_FILLING) {
+    if (hasFieldUpdates || /\b(?:fill|enter|input|type|change|update|replace|modify|set|edit)\b/i.test(lower) || domain === TASK_DOMAINS.FORM_FILLING) {
       ops.add(BROWSER_OPERATIONS.FILL);
       ops.add(BROWSER_OPERATIONS.FILL_FORM);
     }
 
-    if (/\b(?:submit|apply|register|sign up|book now|complete form|confirm|continue|checkout|place order|send message|save)\b/i.test(lower) || /\b(?:click|press|tap)\s+(?:on\s+)?(?:confirm|submit|continue|save|send|place order)\b/i.test(lower)) {
+    const isSubmitOrClickIntent = isClickRequested || /\b(?:submit|apply|register|sign up|book now|complete form|confirm|continue|checkout|place order|send message|save|cancel)\b/i.test(lower);
+    if (isSubmitOrClickIntent) {
+      ops.add(BROWSER_OPERATIONS.CLICK);
       ops.add(BROWSER_OPERATIONS.SUBMIT);
       ops.add(BROWSER_OPERATIONS.SUBMIT_FORM);
     }
@@ -668,7 +783,7 @@ export class GoalParser {
       ops.add(BROWSER_OPERATIONS.SUBMIT);
     }
 
-    if (actionIntent) {
+    if (actionIntent || clickTarget) {
       ops.add(BROWSER_OPERATIONS.PERFORM_ACTION);
     }
 
@@ -685,12 +800,15 @@ export class GoalParser {
 
   /**
    * Extracts the main subject or target entity dynamically without a fixed domain vocabulary.
-   * Extensible to unseen domains (e.g. mail, article, ticket, pull request, shoe, invoice, etc.).
    */
-  static extractTargetEntity(text, domain, actionIntent = null, selection = null) {
+  static extractTargetEntity(text, domain, actionIntent = null, selection = null, clickTarget = null) {
+    if (clickTarget) {
+      return clickTarget;
+    }
+
     let cleaned = text.trim();
 
-    // 1. Explicit search query extraction (e.g. "search for joshua weissman", "search for white running shoes")
+    // 1. Explicit search query extraction
     const searchMatch = cleaned.match(/(?:search\s+(?:on|in)\s+[a-z0-9.-]+\s+for|search\s+[a-z0-9.-]+\s+for|search\s+for|look\s+up|find\s+information\s+(?:on|about)|read\s+about|learn\s+about)\s+(.+?)(?:\s+(?:and\s+.*|under\s+.*|below\s+.*|with\s+.*))?$/i);
     if (searchMatch) {
       let entity = searchMatch[1].trim();
@@ -701,7 +819,7 @@ export class GoalParser {
       return entity;
     }
 
-    // 2. In-page item open/select extraction (e.g. "open first mail from LinkedIn", "find paper by DeepMind", "forward ticket to Support Team")
+    // 2. In-page item open/select extraction
     const itemActionMatch = cleaned.match(/^(?:open|read|view|select|click|inspect|check|review|book|download|forward|find|get|show|send)\s+(?:me\s+)?(?:a\s+|an\s+|the\s+)?(?:first|second|third|latest|newest|last|top|1st|2nd|3rd)?\s*([a-zA-Z0-9_\-#\s]+?)(?=[,\.]|\s+(?:from|by|to|for|on|in|under|with|and)|\s*$)/i);
     if (itemActionMatch) {
       const itemNoun = itemActionMatch[1].trim();
@@ -719,7 +837,7 @@ export class GoalParser {
       cleaned = cleaned.replace(intentPattern, "").trim();
     }
 
-    // 5. Strip trailing filter constraints (e.g. "under 7k", "below $100", "in black")
+    // 5. Strip trailing filter constraints
     cleaned = cleaned.replace(/\s+(?:under|below|less than|above|over|priced|max)\s+.*$/i, "");
     cleaned = cleaned.trim();
 
@@ -729,9 +847,19 @@ export class GoalParser {
   /**
    * Creates a concise goal summary.
    */
-  static summarizeGoal(text, targetEntity, domain, actionIntent = null, selection = null, navigation = {}) {
+  static summarizeGoal(text, targetEntity, domain, actionIntent = null, selection = null, navigation = {}, clickTarget = null, constraints = []) {
     const selPrefix = selection?.ordinal ? `${selection.ordinal} ` : "";
+    const fieldUpdates = constraints.filter(c => c.isFieldUpdate || c.explicit);
 
+    if (fieldUpdates.length > 0 && clickTarget) {
+      return `Update form fields and click "${clickTarget}"`;
+    }
+    if (fieldUpdates.length > 0) {
+      return `Update form field: ${fieldUpdates.map(f => `${f.targetSemantic || f.name} to "${f.value}"`).join(", ")}`;
+    }
+    if (clickTarget) {
+      return `Click "${clickTarget}"`;
+    }
     if (actionIntent) {
       return `Find ${selPrefix}${targetEntity || "target"} and ${actionIntent}`;
     }
@@ -753,4 +881,5 @@ export class GoalParser {
     return `Accomplish user goal: ${text}`;
   }
 }
+
 

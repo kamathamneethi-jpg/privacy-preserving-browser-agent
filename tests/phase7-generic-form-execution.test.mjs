@@ -45,6 +45,7 @@ import {
   BROWSER_OPERATIONS,
   TASK_DOMAINS,
   ExecutionStateManager,
+  GoalCompletionChecker,
   evaluatePiiPolicyItem,
   evaluateBatchPrivacyPolicy,
   sanitizedContextBuilder,
@@ -459,4 +460,86 @@ describe("Phase 7 — Generic Form Modification and Confirmation Execution", () 
     }
   });
 
+  // ---------------------------------------------------------------------------
+  // TEST 9: Full Dynamic Execution: Email update and Confirm Order submission
+  // ---------------------------------------------------------------------------
+  it("9. Dynamic Execution: Plan, client fallback, server autonomous decision, and goal completion checker successfully handle 'change email and confirm order'", () => {
+    const userTask = "change the email to alex@gmail.com and click on confirm order";
+    const goal = GoalParser.parse(userTask);
+    const plan = TaskPlanner.generateInitialPlan(goal, { url: "http://127.0.0.1:8765/controlled-privacy-demo.html" });
+
+    // Validate plan structure
+    assert.ok(plan.length >= 2, "Plan must have at least fill and submit steps");
+    assert.equal(plan[0].type, "fill_form");
+    assert.equal(plan[1].type, "submit_form");
+    assert.equal(plan[1].actionIntent, "confirm");
+
+    const elements = [
+      { elementId: "el_1", tag: "input", type: "email", id: "recipient-email", name: "recipient_email", value: "alex.taylor@example.net", labelText: "Recipient Email Address:", isInteractive: true },
+      { elementId: "el_2", tag: "input", type: "tel", id: "customer-phone", name: "customer_phone", value: "+1-555-0188", labelText: "Customer Contact Phone:", isInteractive: true },
+      { elementId: "el_3", tag: "input", type: "password", id: "account-password", name: "account_password", value: null, labelText: "Account Password:", isInteractive: true },
+      { elementId: "el_4", tag: "input", type: "text", id: "auth-otp", name: "auth_otp", value: "958214", labelText: "Two-Factor Authentication Code:", isInteractive: true },
+      { elementId: "el_5", tag: "button", type: "submit", id: "btn-submit-order", text: "Confirm Order", role: "button", isInteractive: true }
+    ];
+
+    const stateManager = new ExecutionStateManager({ goal });
+
+    // Step 1: Client Fallback action on fill_form
+    const action1 = deriveGeneralizedFallbackAction({
+      currentTask: plan[0],
+      goal,
+      interactiveElements: elements,
+      stateManager,
+      stepNum: 1
+    });
+    assert.ok(action1, "Step 1 action must be derived");
+    assert.equal(action1.actionType, "TYPE");
+    assert.equal(action1.target, "el_1");
+    assert.equal(action1.parameters.text, "alex@gmail.com");
+
+    stateManager.recordActionOutcome({
+      actionType: action1.actionType,
+      target: action1.target,
+      parameters: action1.parameters,
+      ok: true,
+      status: "COMPLETED",
+      taskType: plan[0].type
+    });
+    stateManager.recordFieldFilled(action1.fieldName || "email", action1.fieldValue || "alex@gmail.com");
+    elements[0].value = "alex@gmail.com";
+
+    // Step 2: Client Fallback action on submit_form
+    const action2 = deriveGeneralizedFallbackAction({
+      currentTask: plan[1],
+      goal,
+      interactiveElements: elements,
+      stateManager,
+      stepNum: 2
+    });
+    assert.ok(action2, "Step 2 action must be derived");
+    assert.equal(action2.actionType, "CLICK");
+    assert.equal(action2.target, "el_5");
+
+    stateManager.recordActionOutcome({
+      actionType: action2.actionType,
+      target: action2.target,
+      parameters: action2.parameters,
+      actionIntent: action2.actionIntent || "confirm",
+      ok: true,
+      status: "COMPLETED",
+      taskType: plan[1].type
+    });
+
+    const completionCheck = GoalCompletionChecker.check({
+      goal,
+      stateManager,
+      actionHistory: [
+        `Step 1: [${action1.actionType}] on ${action1.target} (${plan[0].type}) — ${action1.reasoningSummary}`,
+        `Step 2: [${action2.actionType}] on ${action2.target} (${plan[1].type}) — ${action2.reasoningSummary}`
+      ]
+    });
+    assert.equal(completionCheck.isSatisfied, true, `Goal should be satisfied: ${completionCheck.reason}`);
+  });
+
 });
+

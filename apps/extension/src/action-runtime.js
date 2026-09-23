@@ -125,8 +125,26 @@
 
       // Safe value extraction: Never expose password values
       let value = null;
-      if (lowerType !== "password" && (tag === "select" || tag === "option" || lowerType === "checkbox" || lowerType === "radio")) {
-        value = el.value ? String(el.value).slice(0, 80) : null;
+      if (lowerType !== "password") {
+        const rawVal = el.value !== undefined ? el.value : (typeof el.getAttribute === "function" ? el.getAttribute("value") : null);
+        if (typeof rawVal === "string" || typeof rawVal === "number") {
+          value = String(rawVal).slice(0, 80);
+        }
+      }
+
+      // Accessible label text extraction for form inputs
+      let labelText = null;
+      if (el.labels && el.labels.length > 0) {
+        labelText = Array.from(el.labels).map(l => l.textContent).join(" ").replace(/\s+/g, " ").trim().slice(0, 100);
+      } else if (el.id && typeof document !== "undefined") {
+        try {
+          const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+          if (lbl) labelText = lbl.textContent.replace(/\s+/g, " ").trim().slice(0, 100);
+        } catch {}
+      }
+      if (!labelText && typeof el.closest === "function") {
+        const parentLabel = el.closest("label");
+        if (parentLabel) labelText = parentLabel.textContent.replace(/\s+/g, " ").trim().slice(0, 100);
       }
 
       const checked = typeof el.checked === "boolean" ? el.checked : (el.getAttribute("checked") !== null ? true : undefined);
@@ -230,7 +248,7 @@
 
       // Semantic Form Field Classification
       let semanticType = null;
-      const combinedFieldHint = `${name || ""} ${el.id || ""} ${placeholder || ""} ${ariaLabel || ""} ${el.getAttribute("autocomplete") || ""}`.toLowerCase();
+      const combinedFieldHint = `${name || ""} ${el.id || ""} ${placeholder || ""} ${ariaLabel || ""} ${labelText || ""} ${el.getAttribute("autocomplete") || ""}`.toLowerCase();
       if (lowerType === "email" || /email|e-mail/i.test(combinedFieldHint)) {
         semanticType = "email";
       } else if (/phone|mobile|tel|contact/i.test(combinedFieldHint)) {
@@ -283,7 +301,8 @@
         ...(isMinPriceInput ? { isMinPriceInput: true } : {}),
         ...(isPriceGoButton ? { isPriceGoButton: true } : {}),
         ...(isProductResult ? { isProductResult: true } : {}),
-        ...(semanticType ? { semanticType } : {})
+        ...(semanticType ? { semanticType } : {}),
+        ...(labelText ? { labelText } : {})
       };
 
       snapshotRegistry.elements.set(elementId, el);
@@ -490,10 +509,30 @@
     const { element, isStale, isConnected } = resolveElement(target);
     if (!element || isStale || !isConnected || typeof textValue !== "string") return false;
     try {
-      element.focus();
-      element.value = textValue;
-      element.dispatchEvent(new Event("input", { bubbles: true }));
-      element.dispatchEvent(new Event("change", { bubbles: true }));
+      if (typeof element.focus === "function") {
+        try { element.focus(); } catch {}
+      }
+      if (typeof window !== "undefined" && typeof HTMLInputElement !== "undefined" && element instanceof HTMLInputElement) {
+        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+        if (nativeSetter) {
+          nativeSetter.call(element, textValue);
+        } else {
+          element.value = textValue;
+        }
+      } else if (typeof window !== "undefined" && typeof HTMLTextAreaElement !== "undefined" && element instanceof HTMLTextAreaElement) {
+        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
+        if (nativeSetter) {
+          nativeSetter.call(element, textValue);
+        } else {
+          element.value = textValue;
+        }
+      } else {
+        element.value = textValue;
+      }
+      if (typeof Event !== "undefined") {
+        try { element.dispatchEvent(new Event("input", { bubbles: true, composed: true })); } catch {}
+        try { element.dispatchEvent(new Event("change", { bubbles: true, composed: true })); } catch {}
+      }
       return true;
     } catch {
       return false;

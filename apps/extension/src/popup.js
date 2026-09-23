@@ -34,11 +34,22 @@ import {
   evaluatePiiTaskRelevance as CoreEvaluatePiiTaskRelevance,
   formatReviewerDecisionBadge as CoreFormatReviewerDecisionBadge,
   assertCrossRepresentationConsistency as CoreAssertCrossRepresentationConsistency,
+  resolveSemanticTarget as CoreResolveSemanticTarget,
   POLICY_ACTIONS as CorePolicyActions,
   PROCESSING_DESTINATIONS as CoreProcessingDestinations
 } from "../../../packages/privacy-core/src/index.js";
 
 const PC = (typeof PrivacyCore !== "undefined" ? PrivacyCore : (typeof window !== "undefined" && window.PrivacyCore ? window.PrivacyCore : {}));
+const ActiveResolveSemanticTarget = CoreResolveSemanticTarget || PC.resolveSemanticTarget || ((els, { targetSemantic, mode }) => {
+  const q = String(targetSemantic || "").toLowerCase().trim();
+  if (!q) return null;
+  return els.find(el => {
+    if (el.isSponsored || el.isAd) return false;
+    const t = `${el.text || ""} ${el.value || ""} ${el.ariaLabel || ""} ${el.name || ""} ${el.id || ""} ${el.labelText || ""} ${el.placeholder || ""}`.toLowerCase();
+    return t.includes(q) || (q.includes("phone") && (/phone|mobile|tel/i.test(t) || el.type === "tel")) || (q.includes("email") && (/email/i.test(t) || el.type === "email"));
+  });
+});
+
 const ActiveGoalParser = CoreGoalParser || PC.GoalParser;
 const ActiveTaskPlanner = CoreTaskPlanner || PC.TaskPlanner;
 const ActiveTaskStatus = CoreTaskStatus || PC.TASK_STATUS;
@@ -1546,8 +1557,11 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
   }
 
   // 2. Search Task: find search input field (supports Google <textarea name="q">, search inputs, etc.)
-  const isDedicatedNonSearchTask = taskType === "perform_action" || taskType === "submit_form" || taskType === "submit" || taskType === "fill_form" || taskType === "close_modal";
-  if (taskType === "search" || (!isDedicatedNonSearchTask && stepNum === 1 && !stateManager.hasPerformedAction("search") && goal?.domain !== "form_filling")) {
+  const hasFieldUpdates = Array.isArray(constraints) && constraints.some(c => c.isFieldUpdate || c.explicit);
+  const hasClickTarget = Boolean(goal?.clickTarget);
+  const isSearchRequested = taskType === "search" || (taskType === "general" && goal?.operations?.includes("search") && !hasFieldUpdates && !hasClickTarget);
+
+  if (isSearchRequested && !stateManager.hasPerformedAction("search")) {
     const searchInput = interactiveElements.find(el => {
       if (el.isSponsored || el.isAd) return false;
       if (el.tag !== "input" && el.tag !== "textarea") return false;
@@ -1797,102 +1811,37 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
 
   // 6. Form Filling & Explicit Field Modification
   if (taskType === "fill_form") {
-    // Phase 7.1: Explicit Overwrite Rule
     let targetField = null;
     let targetFillVal = null;
     let targetReason = null;
     let targetConstraintName = null;
 
-    // Helper to find constraint matching an element
-    const findMatchingConstraint = (el) => {
-      if (!Array.isArray(constraints) || constraints.length === 0) return null;
-      const semType = (el.semanticType || "").toLowerCase();
-      const type = (el.type || "").toLowerCase();
-      const fieldIdentifier = `${el.name || ""} ${el.id || ""} ${el.placeholder || ""} ${el.ariaLabel || ""} ${el.labelText || ""} ${el.text || ""}`.toLowerCase();
-
-      return constraints.find(c => {
-        const cName = String(c.name || c.attribute || "").toLowerCase().replace(/_/g, " ").trim();
-        if (!cName) return false;
-
-        const isTypeMatch =
-          (cName === "email" && (semType === "email" || type === "email" || /email/i.test(fieldIdentifier))) ||
-          (cName === "phone" && (semType === "phone" || type === "tel" || /phone|mobile|tel/i.test(fieldIdentifier))) ||
-          ((cName === "otp" || cName === "two factor code" || cName === "two_factor_code" || cName === "code" || cName === "auth code") && (semType === "otp" || /otp|2fa|code|two.?factor|auth.?otp/i.test(fieldIdentifier))) ||
-          ((cName === "name" || cName === "full name" || cName === "first name" || cName === "last name") && (semType === "name" || semType === "first_name" || semType === "last_name" || /name/i.test(fieldIdentifier))) ||
-          ((cName === "password" || cName === "account password") && (type === "password" || semType === "password" || /password/i.test(fieldIdentifier))) ||
-          (cName === "message" && (semType === "message" || el.tag === "textarea" || /message|comment/i.test(fieldIdentifier)));
-
-        const isNameMatch = cName === semType || fieldIdentifier.includes(cName) || cName.split(/\s+/).every(w => w.length > 2 && fieldIdentifier.includes(w));
-        return isTypeMatch || isNameMatch;
-      });
-    };
-
-    // Priority 1: Check elements in DOM order that match an explicit constraint whose value is not yet set
-    for (const el of interactiveElements) {
-      if (el.isSponsored || el.isAd) continue;
-      if (el.tag !== "input" && el.tag !== "textarea") continue;
-      const type = (el.type || "").toLowerCase();
-      if (type === "hidden" || type === "submit" || type === "button" || type === "reset" || type === "image") continue;
-
-      const matchingConstraint = findMatchingConstraint(el);
-      if (matchingConstraint) {
-        const cVal = matchingConstraint.value !== undefined && matchingConstraint.value !== null ? String(matchingConstraint.value) : "";
-        const currentVal = el.value !== undefined && el.value !== null ? String(el.value).trim() : "";
-        if (cVal && currentVal !== cVal.trim()) {
-          targetField = el;
-          targetFillVal = cVal;
-          targetConstraintName = matchingConstraint.name || matchingConstraint.attribute;
-          targetReason = `Updating form field "${el.name || el.id || el.elementId}" with requested value "${cVal}".`;
-          break;
-        }
-      }
-    }
-
-    // Priority 2: Generic Form Filling for unpopulated empty fields (when no element matched an explicit constraint with pending value)
-    if (!targetField) {
+    if (Array.isArray(constraints) && constraints.length > 0) {
       for (const el of interactiveElements) {
         if (el.isSponsored || el.isAd) continue;
         if (el.tag !== "input" && el.tag !== "textarea") continue;
         const type = (el.type || "").toLowerCase();
         if (type === "hidden" || type === "submit" || type === "button" || type === "reset" || type === "image") continue;
-        if (el.value && String(el.value).trim().length > 0) continue;
 
-        targetField = el;
-        const semType = (el.semanticType || "").toLowerCase();
-        const fieldIdentifier = `${el.name || ""} ${el.placeholder || ""} ${el.ariaLabel || ""} ${el.id || ""}`.toLowerCase();
-
-        if (type === "checkbox") {
-          return {
-            actionType: "CHECK",
-            target: el.elementId,
-            parameters: {},
-            reasoningSummary: `Checked terms or agreement checkbox "${el.name || el.ariaLabel || 'Agree'}".`
-          };
-        }
-
-        const matchingConstraint = findMatchingConstraint(el);
-        if (matchingConstraint && matchingConstraint.value) {
-          targetFillVal = matchingConstraint.value;
-          targetConstraintName = matchingConstraint.name || matchingConstraint.attribute;
-        } else {
-          if (semType === "email" || type === "email" || /email/i.test(fieldIdentifier)) {
-            targetFillVal = "user@example.com";
-          } else if (semType === "phone" || type === "tel" || /phone|mobile|tel/i.test(fieldIdentifier)) {
-            targetFillVal = "9876543210";
-          } else if (semType === "first_name" || /first.*name/i.test(fieldIdentifier)) {
-            targetFillVal = "John";
-          } else if (semType === "last_name" || /last.*name/i.test(fieldIdentifier)) {
-            targetFillVal = "Doe";
-          } else if (semType === "name" || /name/i.test(fieldIdentifier)) {
-            targetFillVal = "John Doe";
-          } else if (semType === "message" || el.tag === "textarea" || /message|comment|inquiry/i.test(fieldIdentifier)) {
-            targetFillVal = "Hello, I am interested in your service. Please reach out with details.";
-          } else {
-            targetFillVal = "Test Value";
+        for (const c of constraints) {
+          const query = c.targetSemantic || c.name || c.attribute;
+          const matched = ActiveResolveSemanticTarget([el], {
+            targetSemantic: query,
+            mode: "input"
+          });
+          if (matched) {
+            const cVal = c.value !== undefined && c.value !== null ? String(c.value) : "";
+            const curVal = el.value !== undefined && el.value !== null ? String(el.value).trim() : "";
+            if (cVal && curVal !== cVal.trim()) {
+              targetField = el;
+              targetFillVal = cVal;
+              targetConstraintName = c.name || c.attribute || query;
+              targetReason = `Updating form field "${el.name || el.id || el.elementId}" with requested value "${cVal}".`;
+              break;
+            }
           }
         }
-        targetReason = `Populating form field "${el.name || el.placeholder || el.ariaLabel || el.elementId}" with "${targetFillVal}".`;
-        break;
+        if (targetField) break;
       }
     }
 
@@ -1917,6 +1866,59 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
       };
     }
 
+    // Generic form filling for unpopulated empty fields ONLY if no explicit constraints were defined
+    if (!targetField && (!constraints || constraints.length === 0)) {
+      for (const el of interactiveElements) {
+        if (el.isSponsored || el.isAd) continue;
+        if (el.tag !== "input" && el.tag !== "textarea") continue;
+        const type = (el.type || "").toLowerCase();
+        if (type === "hidden" || type === "submit" || type === "button" || type === "reset" || type === "image") continue;
+        if (el.value && String(el.value).trim().length > 0) continue;
+
+        targetField = el;
+        const semType = (el.semanticType || "").toLowerCase();
+        const fieldIdentifier = `${el.name || ""} ${el.placeholder || ""} ${el.ariaLabel || ""} ${el.id || ""}`.toLowerCase();
+
+        if (type === "checkbox") {
+          return {
+            actionType: "CHECK",
+            target: el.elementId,
+            parameters: {},
+            reasoningSummary: `Checked terms or agreement checkbox "${el.name || el.ariaLabel || 'Agree'}".`
+          };
+        }
+
+        if (semType === "email" || type === "email" || /email/i.test(fieldIdentifier)) {
+          targetFillVal = "user@example.com";
+        } else if (semType === "phone" || type === "tel" || /phone|mobile|tel/i.test(fieldIdentifier)) {
+          targetFillVal = "9876543210";
+        } else if (semType === "first_name" || /first.*name/i.test(fieldIdentifier)) {
+          targetFillVal = "John";
+        } else if (semType === "last_name" || /last.*name/i.test(fieldIdentifier)) {
+          targetFillVal = "Doe";
+        } else if (semType === "name" || /name/i.test(fieldIdentifier)) {
+          targetFillVal = "John Doe";
+        } else if (semType === "message" || el.tag === "textarea" || /message|comment|inquiry/i.test(fieldIdentifier)) {
+          targetFillVal = "Hello, I am interested in your service. Please reach out with details.";
+        } else {
+          targetFillVal = "Test Value";
+        }
+        targetReason = `Populating form field "${el.name || el.placeholder || el.ariaLabel || el.elementId}" with "${targetFillVal}".`;
+        break;
+      }
+      if (targetField && targetFillVal !== null) {
+        return {
+          actionType: "TYPE",
+          target: targetField.elementId,
+          parameters: { text: String(targetFillVal) },
+          isFieldFill: true,
+          fieldName: targetField.name || targetField.id || "field",
+          fieldValue: String(targetFillVal),
+          reasoningSummary: targetReason
+        };
+      }
+    }
+
     // Check for unchecked consent checkboxes
     const uncheckedBox = interactiveElements.find(el => {
       if (el.tag === "input" && el.type === "checkbox" && !el.checked) {
@@ -1935,29 +1937,45 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
       };
     }
 
-    // If inputs and checkboxes are fulfilled, advance to submit
-    taskType = "submit_form";
+    // If inputs and checkboxes are fulfilled, advance to submit ONLY if explicitly requested by user or plan
+    const shouldSubmit = Boolean(
+      hasClickTarget ||
+      goal?.operations?.includes("submit") ||
+      goal?.operations?.includes("click") ||
+      (currentTask?.subsequentTasks && currentTask.subsequentTasks.includes("submit_form"))
+    );
+    if (shouldSubmit) {
+      taskType = "submit_form";
+    } else {
+      return null;
+    }
   }
 
-  // 7. Submit Form / Explicit User-Requested Final Action Execution
-  if (taskType === "submit_form" || taskType === "submit") {
-    const actionBtn = interactiveElements.find(el => {
-      if (el.isSponsored || el.isAd) return false;
-      const t = `${el.text || ""} ${el.value || ""} ${el.ariaLabel || ""} ${el.title || ""}`.toLowerCase();
-      return /^(?:submit|send|send message|sign up|register|book now|save|confirm|continue|proceed|complete|place order)\b/i.test(t) ||
-             /\b(?:confirm order|place order|submit form|confirm details)\b/i.test(t);
-    }) || interactiveElements.find(el => !el.isSponsored && !el.isAd && (
-      (el.tag === "button" && el.type === "submit") ||
-      (el.tag === "input" && el.type === "submit") ||
-      (el.tag === "button" && /submit|send|save|next|confirm|continue/i.test(el.text || ""))
-    ));
+  // 7. Submit Form / Explicit User-Requested Final Action Execution / Click
+  if (taskType === "submit_form" || taskType === "submit" || taskType === "perform_action" || taskType === "click" || hasClickTarget) {
+    const clickSemantic = goal?.clickTarget || currentTask?.actionIntent || goal?.actionIntent || (taskType === "submit_form" ? "submit" : "");
+    let actionBtn = null;
+    if (clickSemantic) {
+      actionBtn = ActiveResolveSemanticTarget(interactiveElements, {
+        targetSemantic: clickSemantic,
+        mode: "click"
+      });
+    }
+    if (!actionBtn && (taskType === "submit_form" || taskType === "submit")) {
+      actionBtn = interactiveElements.find(el => !el.isSponsored && !el.isAd && (
+        (el.tag === "button" && el.type === "submit") ||
+        (el.tag === "input" && el.type === "submit") ||
+        (el.tag === "button" && /submit|send|save|next|confirm|continue|proceed|place order/i.test(el.text || el.value || ""))
+      ));
+    }
 
     if (actionBtn) {
       return {
         actionType: "CLICK",
         target: actionBtn.elementId,
         parameters: {},
-        reasoningSummary: `Submitting action via "${actionBtn.text || actionBtn.ariaLabel || actionBtn.value || 'Submit'}".`
+        actionIntent: clickSemantic || "submit",
+        reasoningSummary: `Executing click action via "${actionBtn.text || actionBtn.ariaLabel || actionBtn.value || 'Submit'}".`
       };
     }
   }
@@ -1967,15 +1985,13 @@ export function deriveGeneralizedFallbackAction({ currentTask, goal, interactive
   if (taskType === "perform_action" || (actionIntent && !stateManager.hasPerformedAction(actionIntent))) {
     const intentVerb = String(actionIntent || "").toLowerCase().trim();
     if (intentVerb) {
-      const intentRegex = new RegExp(`\\b${intentVerb}\\b`, "i");
-      const targetBtn = interactiveElements.find(el => {
-        if (el.isSponsored || el.isAd) return false;
-        const text = `${el.text || ""} ${el.ariaLabel || ""} ${el.title || ""} ${el.value || ""}`.toLowerCase();
-        return intentRegex.test(text);
+      const targetBtn = ActiveResolveSemanticTarget(interactiveElements, {
+        targetSemantic: intentVerb,
+        mode: "click"
       }) || interactiveElements.find(el => {
         if (el.isSponsored || el.isAd) return false;
-        const text = `${el.text || ""} ${el.ariaLabel || ""}`.toLowerCase();
-        return text.includes(intentVerb);
+        const text = `${el.text || ""} ${el.ariaLabel || ""} ${el.title || ""} ${el.value || ""}`.toLowerCase();
+        return new RegExp(`\\b${intentVerb}\\b`, "i").test(text);
       });
 
       if (targetBtn) {

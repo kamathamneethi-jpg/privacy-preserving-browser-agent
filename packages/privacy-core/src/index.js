@@ -258,6 +258,7 @@ export {
   formatReviewerDecisionBadge,
   evaluateMixedContentDemo,
   assertCrossRepresentationConsistency
-} from "./reviewer-transparency-engine.js";
-
-
+} from "./reviewer-transparency-engine.js";export {
+  resolveSemanticTarget,
+  scoreElementMatch
+} from "./semantic-target-resolver.js";

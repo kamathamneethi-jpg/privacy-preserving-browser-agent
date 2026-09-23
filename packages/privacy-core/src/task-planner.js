@@ -64,8 +64,18 @@ export class TaskPlanner {
 
     // 1. Navigation Task:
     // Strictly ONLY when user explicitly requested navigation OR when starting from an empty/internal browser tab
+    const hasFieldUpdates = constraints.some(c => c.isFieldUpdate || c.explicit);
+    const isClickOrSubmitRequested = Boolean(
+      goalSpec.clickTarget ||
+      ops.has(BROWSER_OPERATIONS.CLICK) ||
+      ops.has(BROWSER_OPERATIONS.SUBMIT) ||
+      ops.has(BROWSER_OPERATIONS.SUBMIT_FORM) ||
+      ops.has(BROWSER_OPERATIONS.ADD_TO_CART) ||
+      /\b(?:click|press|tap|submit|confirm|continue|cancel|checkout|place order|add to cart)\b/i.test(goalSpec.rawRequest || goalSpec.originalGoal || "")
+    );
+    const isDirectNonSearchClick = Boolean(goalSpec.clickTarget || (!ops.has(BROWSER_OPERATIONS.SEARCH) && isClickOrSubmitRequested && domain !== TASK_DOMAINS.ECOMMERCE));
     const requiresExplicitNav = Boolean(navigation.requiresExplicitNavigation || navigation.isExplicit);
-    const requiresBlankTabNav = isInternalPage && domain !== TASK_DOMAINS.FORM_FILLING && !goalSpec.currentUrl;
+    const requiresBlankTabNav = isInternalPage && domain !== TASK_DOMAINS.FORM_FILLING && !goalSpec.currentUrl && !hasFieldUpdates && (ops.has(BROWSER_OPERATIONS.SEARCH) || !isDirectNonSearchClick);
 
     if (requiresExplicitNav || requiresBlankTabNav || ops.has(BROWSER_OPERATIONS.NAVIGATE)) {
       tasks.push({
@@ -95,8 +105,9 @@ export class TaskPlanner {
     }
 
     // 3. Filter Application Task (if filterable constraints exist)
-    const hasFilterableConstraints = constraints.some(c => c.name !== "url" && c.name !== "candidate_count" && c.attribute !== "url" && c.name !== "sender" && c.name !== "author");
-    if (ops.has(BROWSER_OPERATIONS.FILTER) && hasFilterableConstraints && domain !== TASK_DOMAINS.FORM_FILLING && domain !== TASK_DOMAINS.NAVIGATION) {
+    const hasFilterableConstraints = constraints.some(c => c.name !== "url" && c.name !== "candidate_count" && c.attribute !== "url" && c.name !== "sender" && c.name !== "author" && !c.isFieldUpdate);
+
+    if (ops.has(BROWSER_OPERATIONS.FILTER) && hasFilterableConstraints && domain !== TASK_DOMAINS.FORM_FILLING && domain !== TASK_DOMAINS.NAVIGATION && !hasFieldUpdates && !isDirectNonSearchClick) {
       const constraintDesc = constraints.map(c => `${c.attribute || c.name} ${c.operator} ${c.value}`).join(", ");
       tasks.push({
         id: `task_${counter++}`,
@@ -106,18 +117,33 @@ export class TaskPlanner {
       });
     }
 
-    // 4. Form Filling Task (if form domain)
-    if (domain === TASK_DOMAINS.FORM_FILLING || ops.has(BROWSER_OPERATIONS.FILL) || ops.has(BROWSER_OPERATIONS.FILL_FORM)) {
+    // 4. Form Filling Task (strictly when field updates or form filling requested)
+    const hasFormFillIntent = ops.has(BROWSER_OPERATIONS.FILL) || ops.has(BROWSER_OPERATIONS.FILL_FORM) || domain === TASK_DOMAINS.FORM_FILLING || hasFieldUpdates;
+    const isStandaloneClickOnly = isDirectNonSearchClick && !hasFieldUpdates && !ops.has(BROWSER_OPERATIONS.FILL) && !ops.has(BROWSER_OPERATIONS.FILL_FORM) && !/fill|complete form|enter|type|input/i.test(goalSpec.rawRequest || "");
+    const shouldFillForm = hasFormFillIntent && !isStandaloneClickOnly;
+
+    if (shouldFillForm || hasFieldUpdates) {
+      const fieldConstraints = constraints.filter(c => c.isFieldUpdate || c.explicit);
+      const desc = fieldConstraints.length > 0
+        ? `Update form fields: ${fieldConstraints.map(c => `${c.targetSemantic || c.name} = "${c.value}"`).join(", ")}`
+        : `Fill out required form fields with relevant context`;
+
       tasks.push({
         id: `task_${counter++}`,
         type: "fill_form",
-        description: `Fill out required form fields with relevant context`,
-        status: TASK_STATUS.PENDING
+        actionType: "FILL",
+        description: desc,
+        status: TASK_STATUS.PENDING,
+        fieldUpdates: fieldConstraints.map(c => ({
+          targetSemantic: c.targetSemantic || c.name || c.attribute,
+          value: c.value,
+          rawField: c.rawField
+        }))
       });
     }
 
-    // 5. Inspect / Select Candidate Results Task
-    if (hasDirectItemSelection || ops.has(BROWSER_OPERATIONS.SEARCH) || domain === TASK_DOMAINS.ECOMMERCE || domain === TASK_DOMAINS.RESEARCH) {
+    // 5. Inspect / Select Candidate Results Task (strictly ecommerce/research search, never direct form or click tasks)
+    if ((hasDirectItemSelection || ops.has(BROWSER_OPERATIONS.SEARCH) || domain === TASK_DOMAINS.ECOMMERCE || domain === TASK_DOMAINS.RESEARCH) && !hasFieldUpdates && !isDirectNonSearchClick) {
       let desc = `Inspect visible candidate results and verify attributes`;
       if (selection?.ordinal) {
         desc = `Locate and select ${selection.ordinal} ${targetEntity} matching constraints`;
@@ -139,7 +165,7 @@ export class TaskPlanner {
           constraints
         }
       });
-    } else if (domain === TASK_DOMAINS.NAVIGATION || ops.has(BROWSER_OPERATIONS.INSPECT)) {
+    } else if ((domain === TASK_DOMAINS.NAVIGATION || ops.has(BROWSER_OPERATIONS.INSPECT)) && domain !== TASK_DOMAINS.FORM_FILLING && !hasFieldUpdates && !isDirectNonSearchClick) {
       tasks.push({
         id: `task_${counter++}`,
         type: "inspect",
@@ -158,27 +184,20 @@ export class TaskPlanner {
       });
     }
 
-    // 7. Final Action Task (perform_action, submit form, add to cart, book)
-    const actionVerb = goalSpec.actionIntent ? String(goalSpec.actionIntent).toLowerCase() : null;
-    const isDirectOpenOnly = (actionVerb === "open" || actionVerb === "read" || actionVerb === "view") && hasDirectItemSelection;
-
-    if ((ops.has(BROWSER_OPERATIONS.PERFORM_ACTION) || goalSpec.actionIntent) && !isDirectOpenOnly && domain !== TASK_DOMAINS.FORM_FILLING) {
-      const intent = goalSpec.actionIntent || "action";
-      tasks.push({
-        id: `task_${counter++}`,
-        type: "perform_action",
-        actionIntent: intent,
-        description: `Execute requested action: ${intent} for ${targetEntity}`,
-        status: TASK_STATUS.PENDING
-      });
-    } else if (domain === TASK_DOMAINS.FORM_FILLING || ops.has(BROWSER_OPERATIONS.SUBMIT) || ops.has(BROWSER_OPERATIONS.ADD_TO_CART) || ops.has(BROWSER_OPERATIONS.SUBMIT_FORM) || /add to cart|buy|submit|book|confirm/i.test(goalSpec.rawRequest || goalSpec.originalGoal || "")) {
+    // 7. Click / Submit / Perform Action Task (strictly when user requested click/submit/confirm/action)
+    if (isClickOrSubmitRequested) {
       const isCart = ops.has(BROWSER_OPERATIONS.ADD_TO_CART) || /add to cart|add to bag|add to basket/i.test(goalSpec.rawRequest || goalSpec.originalGoal || "");
-      const isForm = domain === TASK_DOMAINS.FORM_FILLING || ops.has(BROWSER_OPERATIONS.SUBMIT_FORM);
+      const isSubmitLike = isCart || /\b(?:submit|confirm|place order|register|checkout|save)\b/i.test(goalSpec.clickTarget || goalSpec.actionIntent || goalSpec.rawRequest || "");
+      const targetSemantic = goalSpec.clickTarget || goalSpec.actionIntent || (isCart ? "add to cart" : "submit");
+
       tasks.push({
         id: `task_${counter++}`,
-        type: isCart ? "add_to_cart" : (isForm ? "submit_form" : "submit"),
-        actionIntent: goalSpec.actionIntent || (isCart ? "add_to_cart" : (isForm ? "submit" : "action")),
-        description: isCart ? "Add selected item to cart" : (isForm ? (goalSpec.actionIntent ? `Submit or confirm form action: ${goalSpec.actionIntent}` : "Submit completed form") : "Execute requested final action"),
+        type: isCart ? "add_to_cart" : (isSubmitLike ? "submit_form" : "perform_action"),
+        actionType: "CLICK",
+        actionIntent: goalSpec.actionIntent || (isCart ? "add_to_cart" : (isSubmitLike ? "confirm" : "click")),
+        targetSemantic,
+        value: null, // CLICK ACTIONS NEVER RECEIVE OR INHERIT A VALUE!
+        description: isCart ? "Add selected item to cart" : `Click "${targetSemantic}"`,
         status: TASK_STATUS.PENDING
       });
     }

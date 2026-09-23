@@ -2,7 +2,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { sanitizeTelemetryData, evaluateMixedContentDemo } from "../packages/privacy-core/src/index.js";
+import { sanitizeTelemetryData, evaluateMixedContentDemo, resolveSemanticTarget } from "../packages/privacy-core/src/index.js";
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8765;
 const HOST = process.env.HOST || "127.0.0.1";
@@ -1457,8 +1457,12 @@ export function computeAutonomousAgentDecision({
     };
   }
 
-  // 2. Search Task: find search input field
-  if (taskType === "search" || (!actionHistory.some(a => a.includes("search") || a.includes("TYPE")) && !executionState.hasSearched)) {
+  // 2. Search Task: find search input field (strictly non-form-filling tasks)
+  const hasFieldUpdates = Array.isArray(constraints) && constraints.some(c => c.isFieldUpdate || c.explicit);
+  const hasClickTarget = Boolean(goal?.clickTarget);
+  const isSearchRequested = taskType === "search" || (goal?.operations?.includes("search") && !hasFieldUpdates && !hasClickTarget);
+
+  if (isSearchRequested && !actionHistory.some(a => a.includes("search") || a.includes("TYPE")) && !executionState.hasSearched) {
     const searchInput = interactiveElements.find(el => {
       const tag = (el.tag || "").toLowerCase();
       const type = (el.type || "").toLowerCase();
@@ -1619,15 +1623,17 @@ export function computeAutonomousAgentDecision({
   }
 
   // 5b. Generic UI Action Task (e.g., subscribe, follow, star, like, bookmark, download, share, pin, play, favorite, join)
-  const actionIntent = currentTask?.actionIntent || goal?.actionIntent;
-  if (taskType === "perform_action" || (actionIntent && !actionHistory.some(a => String(a).toLowerCase().includes(String(actionIntent).toLowerCase())))) {
+  const actionIntent = currentTask?.actionIntent || (taskType === "perform_action" ? goal?.actionIntent : null);
+  if (taskType === "perform_action" || (taskType !== "fill_form" && actionIntent && !actionHistory.some(a => String(a).toLowerCase().includes(String(actionIntent).toLowerCase())))) {
     const intentVerb = String(actionIntent || "").toLowerCase().trim();
     if (intentVerb) {
-      const intentRegex = new RegExp(`\\b${intentVerb}\\b`, "i");
-      const targetBtn = interactiveElements.find(el => {
+      const targetBtn = resolveSemanticTarget(interactiveElements, {
+        targetSemantic: intentVerb,
+        mode: "click"
+      }) || interactiveElements.find(el => {
         if (el.isSponsored || el.isAd) return false;
         const text = `${el.text || ""} ${el.ariaLabel || ""} ${el.title || ""} ${el.value || ""}`.toLowerCase();
-        return intentRegex.test(text);
+        return new RegExp(`\\b${intentVerb}\\b`, "i").test(text);
       }) || interactiveElements.find(el => {
         if (el.isSponsored || el.isAd) return false;
         const text = `${el.text || ""} ${el.ariaLabel || ""}`.toLowerCase();
@@ -1653,49 +1659,109 @@ export function computeAutonomousAgentDecision({
     }
   }
 
-  // 6. Form Filling
+  // 6. Form Filling & Explicit Field Modification
   if (taskType === "fill_form") {
-    const emptyField = interactiveElements.find(el => {
-      if (el.isSponsored || el.isAd) return false;
-      if (el.tag !== "input" && el.tag !== "textarea") return false;
-      const type = (el.type || "").toLowerCase();
-      if (type === "hidden" || type === "submit" || type === "button" || type === "reset") return false;
-      return !el.value || String(el.value).trim().length === 0;
-    });
+    let targetField = null;
+    let targetFillVal = null;
+    let targetConstraintName = null;
 
-    if (emptyField) {
-      const semType = emptyField.semanticType || (emptyField.type || "").toLowerCase();
-      const fieldId = `${emptyField.name || ""} ${emptyField.placeholder || ""} ${emptyField.ariaLabel || ""}`.toLowerCase();
-      let fillVal = "user@example.com";
-      if (semType === "phone" || /phone|mobile|tel/i.test(fieldId)) fillVal = "9876543210";
-      else if (semType === "name" || /name/i.test(fieldId)) fillVal = "John Doe";
-      else if (semType === "message" || emptyField.tag === "textarea") fillVal = "Hello, requesting information.";
+    if (Array.isArray(constraints) && constraints.length > 0) {
+      for (const c of constraints) {
+        const query = c.targetSemantic || c.name || c.attribute;
+        const matched = resolveSemanticTarget(interactiveElements, {
+          targetSemantic: query,
+          mode: "input"
+        });
+        if (matched) {
+          const cVal = c.value !== undefined && c.value !== null ? String(c.value) : "";
+          const curVal = matched.value !== undefined && matched.value !== null ? String(matched.value).trim() : "";
+          if (cVal && curVal !== cVal.trim()) {
+            targetField = matched;
+            targetFillVal = cVal;
+            targetConstraintName = c.name || c.attribute || query;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!targetField && (!constraints || constraints.length === 0)) {
+      targetField = interactiveElements.find(el => {
+        if (el.isSponsored || el.isAd) return false;
+        if (el.tag !== "input" && el.tag !== "textarea") return false;
+        const type = (el.type || "").toLowerCase();
+        if (type === "hidden" || type === "submit" || type === "button" || type === "reset") return false;
+        return !el.value || String(el.value).trim().length === 0;
+      });
+      if (targetField) {
+        const semType = targetField.semanticType || (targetField.type || "").toLowerCase();
+        const fieldId = `${targetField.name || ""} ${targetField.placeholder || ""} ${targetField.ariaLabel || ""}`.toLowerCase();
+        if (semType === "phone" || /phone|mobile|tel/i.test(fieldId)) targetFillVal = "9876543210";
+        else if (semType === "name" || /name/i.test(fieldId)) targetFillVal = "John Doe";
+        else if (semType === "message" || targetField.tag === "textarea") targetFillVal = "Hello, requesting information.";
+        else targetFillVal = "user@example.com";
+      }
+    }
+
+    if (targetField && targetFillVal) {
+      const remainingPending = constraints.filter(c => {
+        const query = c.targetSemantic || c.name || c.attribute;
+        const matched = resolveSemanticTarget(interactiveElements, { targetSemantic: query, mode: "input" });
+        if (!matched) return false;
+        if (matched.elementId === targetField.elementId) return false;
+        const cVal = c.value !== undefined && c.value !== null ? String(c.value).trim() : "";
+        const curVal = matched.value !== undefined && matched.value !== null ? String(matched.value).trim() : "";
+        return cVal && curVal !== cVal;
+      });
+
+      const shouldSubmitAfter = Boolean(
+        hasClickTarget ||
+        goal?.operations?.includes("submit") ||
+        goal?.operations?.includes("click")
+      );
+
+      const nextTask = remainingPending.length > 0 ? "fill_form" : (shouldSubmitAfter ? "submit_form" : null);
 
       return {
         ok: true,
-        observation: `Populating form field [${emptyField.elementId || emptyField.id}].`,
-        goal_progress: { isSatisfied: false, remainingTasks: ["submit_form"] },
-        next_task: "submit_form",
+        observation: `Populating form field [${targetField.elementId || targetField.id}] with requested value "${targetFillVal}".`,
+        goal_progress: { isSatisfied: nextTask === null, remainingTasks: nextTask ? [nextTask] : [] },
+        next_task: nextTask,
         action: {
           actionType: "TYPE",
-          target: emptyField.elementId || emptyField.id,
-          parameters: { text: fillVal },
+          target: targetField.elementId || targetField.id,
+          parameters: { text: targetFillVal },
           thenPressEnter: false,
-          reasoningSummary: `Fill form field with "${fillVal}".`
+          isFieldFill: true,
+          fieldName: targetConstraintName || targetField.name || "field",
+          fieldValue: targetFillVal,
+          reasoningSummary: `Fill form field with "${targetFillVal}".`
         }
       };
     }
   }
 
-  // 7. Submit Form
-  if (taskType === "submit_form" || taskType === "submit") {
-    const submitBtn = interactiveElements.find(el => {
-      if (el.isSponsored || el.isAd) return false;
-      const t = `${el.text || ""} ${el.value || ""} ${el.ariaLabel || ""}`.toLowerCase();
-      return /^(?:submit|send|register|sign up|book now|save|confirm)\b/i.test(t);
-    }) || interactiveElements.find(el => (el.tag === "button" || el.tag === "input") && (el.type === "submit" || /submit|send/i.test(el.text || "")));
+  // 7. Submit Form / Explicit Click
+  if (taskType === "submit_form" || taskType === "submit" || (hasClickTarget && !hasFieldUpdates)) {
+    const clickSemantic = goal?.clickTarget || currentTask?.actionIntent || goal?.actionIntent || (taskType === "submit_form" ? "submit" : "");
+    let submitBtn = null;
+    if (clickSemantic) {
+      submitBtn = resolveSemanticTarget(interactiveElements, {
+        targetSemantic: clickSemantic,
+        mode: "click"
+      });
+    }
+    if (!submitBtn) {
+      submitBtn = interactiveElements.find(el => {
+        if (el.isSponsored || el.isAd) return false;
+        const t = `${el.text || ""} ${el.value || ""} ${el.ariaLabel || ""}`.toLowerCase();
+        return /^(?:submit|send|register|sign up|book now|save|confirm)\b/i.test(t) ||
+               /\b(?:confirm order|place order|submit form|confirm details)\b/i.test(t);
+      }) || interactiveElements.find(el => (el.tag === "button" || el.tag === "input") && (el.type === "submit" || /submit|send|confirm/i.test(el.text || "")));
+    }
 
     if (submitBtn) {
+      const intentVerb = clickSemantic || goal.actionIntent || currentTask?.actionIntent || "confirm";
       return {
         ok: true,
         observation: `Found Submit button [${submitBtn.elementId || submitBtn.id}].`,
@@ -1705,8 +1771,9 @@ export function computeAutonomousAgentDecision({
           actionType: "CLICK",
           target: submitBtn.elementId || submitBtn.id,
           parameters: {},
+          actionIntent: intentVerb,
           thenPressEnter: false,
-          reasoningSummary: "Click Submit button to complete form action."
+          reasoningSummary: `Click "${submitBtn.text || submitBtn.ariaLabel || intentVerb}" to complete action.`
         }
       };
     }
@@ -1942,6 +2009,16 @@ export function createObservabilityServer(port = PORT, host = HOST) {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(DASHBOARD_HTML);
       return;
+    }
+
+    // 8. Serve Controlled Privacy Demo: GET /controlled-privacy-demo.html or GET /demo
+    if (req.method === "GET" && (pathname === "/controlled-privacy-demo.html" || pathname === "/demo")) {
+      const demoPath = path.resolve(rootDir, "tests/fixtures/controlled-privacy-demo.html");
+      if (fs.existsSync(demoPath)) {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(fs.readFileSync(demoPath, "utf-8"));
+        return;
+      }
     }
 
     // Fallback 404

@@ -77,22 +77,30 @@ export class GoalCompletionChecker {
       }
     }
 
-    // 3. Check if form submission was requested and performed (only if NOT an add to cart task)
-    const requiresSubmit = !requiresCart && (operations.has("submit_form") || operations.has("submit") || /\b(?:submit|register|book now|complete order)\b/i.test(goalText));
+    // 3. Check if form submission or click action was requested and performed (only if NOT an add to cart task)
+    const hasSubmitTaskInPlan = planner?.tasks ? planner.tasks.some(t => t.type === "submit_form" || t.type === "submit" || (t.type === "perform_action" && t.actionType === "CLICK")) : true;
+    const isSubmitOrClickIntent = Boolean(goal.clickTarget || operations.has("submit_form") || operations.has("submit") || /\b(?:submit|register|book now|complete order|confirm|confirm order|place order)\b/i.test(goalText));
+    const requiresSubmit = !requiresCart && isSubmitOrClickIntent && hasSubmitTaskInPlan;
+
     if (requiresSubmit) {
+      const clickVerb = (goal.clickTarget || goal.actionIntent || "submit").toLowerCase();
       const submitExecuted = actionHistory.some(a => {
-        const text = typeof a === "string" ? a : `${a.actionType || ""} ${a.reason || ""} ${a.target || ""}`;
-        return /\b(?:submit|registered|booked|submitted form|order placed)\b/i.test(text) || (a.actionType === "SUBMIT");
-      });
+        const text = typeof a === "string" ? a.toLowerCase() : `${a.actionType || ""} ${a.reason || ""} ${a.actionIntent || ""} ${a.target || ""}`.toLowerCase();
+        return /\b(?:submit|submitting|registered|booked|submitted form|order placed|confirm|confirmed|clicked)\b/i.test(text) ||
+               text.includes(clickVerb) ||
+               (a.actionType === "SUBMIT") ||
+               (a.actionType === "CLICK" && (a.actionIntent || clickVerb));
+      }) || (typeof stateManager?.hasPerformedAction === "function" && (stateManager.hasPerformedAction("submit") || stateManager.hasPerformedAction("confirm") || stateManager.hasPerformedAction(clickVerb)));
+
       if (!submitExecuted) {
-        missingRequirements.push("Form submission or final action has not been executed yet.");
+        missingRequirements.push("Requested action or submission has not been executed yet.");
       }
     }
 
     // 3b. Check if generic UI action was requested and performed (e.g. subscribe, follow, star, like, bookmark, download, share, etc.)
     const actionIntent = goal.actionIntent || (planner && Array.isArray(planner.tasks) ? planner.tasks.find(t => t.type === "perform_action")?.actionIntent : null);
     const isDirectOpenOnly = (actionIntent === "open" || actionIntent === "read" || actionIntent === "view") && (goal.selection || goal.entities?.length > 0);
-    const requiresPerformAction = Boolean((actionIntent || operations.has("perform_action")) && !isDirectOpenOnly);
+    const requiresPerformAction = Boolean((actionIntent || operations.has("perform_action")) && !isDirectOpenOnly && !requiresSubmit);
 
     if (requiresPerformAction) {
       const intentVerb = String(actionIntent || "action").toLowerCase().trim();
@@ -123,12 +131,19 @@ export class GoalCompletionChecker {
     }
 
     // 5. Check if form filling was requested and performed
-    const requiresFormFill = (operations.has("fill_form") || operations.has("fill") || goal.domain === "form_filling") && !requiresCart;
+    const hasFieldUpdates = Array.isArray(constraints) && constraints.some(c => c.isFieldUpdate || c.explicit);
+    const requiresFormFill = !requiresCart && (
+      hasFieldUpdates ||
+      ((operations.has("fill_form") || operations.has("fill") || goal.domain === "form_filling") && !goal.clickTarget && !/^(?:click\s|press\s|tap\s|confirm\s|submit\s)/i.test(goal.rawRequest || ""))
+    );
+
     if (requiresFormFill) {
       const formFillExecuted = actionHistory.some(a => {
         const text = typeof a === "string" ? a : `${a.actionType || ""} ${a.reason || ""} ${a.target || ""}`;
-        return /\b(?:fill|populated|typed?|entered|form field|input|select|check)\b/i.test(text);
-      }) || (stateManager?.executedActions && stateManager.executedActions.some(a => a.actionType === "TYPE" || a.actionType === "CHECK" || a.actionType === "SELECT"));
+        return /\b(?:fill|populated|typed?|entered|form field|input|select|check)\b/i.test(text) || a.actionType === "TYPE";
+      }) || (stateManager?.executedActions && stateManager.executedActions.some(a => a.actionType === "TYPE" || a.actionType === "CHECK" || a.actionType === "SELECT"))
+         || (Array.isArray(stateManager?.filledFields) && stateManager.filledFields.length > 0);
+
       if (!formFillExecuted) {
         missingRequirements.push("Form fields have not been populated yet.");
       }

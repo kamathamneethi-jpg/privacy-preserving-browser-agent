@@ -94,7 +94,71 @@
             Confirm Order
           </button>
         </form>
+
+        <!-- Order Confirmation Success View -->
+        <div id="order-confirmed-banner" style="display:none; background:#ecfdf5; border:1px solid #6ee7b7; border-radius:8px; padding:16px; margin-top:16px;">
+          <h3 style="color:#065f46; margin:0 0 8px 0; font-size:16px;">🎉 Order Confirmed!</h3>
+          <p style="color:#047857; margin:0 0 6px 0; font-size:13px;">You are inside the confirm order summary.</p>
+          <p style="font-size:12px; color:#0f766e; margin:0;">
+            Confirmation sent to: <strong id="confirmed-email-display">alex.taylor@example.net</strong>
+          </p>
+        </div>
+
+        <!-- Generic Action Execution Feedback Toast -->
+        <div id="generic-action-feedback" style="display:none; margin-top:12px; background:#1e293b; color:#f8fafc; padding:8px 12px; border-radius:4px; font-size:12px; font-family:monospace;"></div>
       </section>
     </main>
+
+    <script>
+      (function() {
+        const orderForm = document.getElementById("order-form");
+        const btnSubmit = document.getElementById("btn-submit-order");
+        const banner = document.getElementById("order-confirmed-banner");
+        const emailInput = document.getElementById("recipient-email");
+        const emailDisplay = document.getElementById("confirmed-email-display");
+        const feedbackToast = document.getElementById("generic-action-feedback");
+
+        function showActionFeedback(msg) {
+          if (feedbackToast) {
+            feedbackToast.textContent = msg;
+            feedbackToast.style.display = "block";
+          }
+        }
+
+        // Generic click listener for all interactive buttons / inputs on the demo portal
+        document.addEventListener("click", function(ev) {
+          const t = ev.target;
+          if (t && (t.tagName === "BUTTON" || t.tagName === "A" || t.type === "submit")) {
+            const label = (t.textContent || t.value || t.id || "element").trim().slice(0, 30);
+            showActionFeedback("Action completed: CLICK [" + label + "]");
+          }
+        }, true);
+
+        function handleOrderConfirm(e) {
+          if (e && typeof e.preventDefault === "function") {
+            e.preventDefault();
+          }
+          const emailVal = emailInput ? emailInput.value : "";
+          if (emailDisplay) {
+            emailDisplay.textContent = emailVal;
+          }
+          if (banner) {
+            banner.style.display = "block";
+          }
+          if (btnSubmit) {
+            btnSubmit.textContent = "✓ Order Confirmed";
+            btnSubmit.style.background = "#16a34a";
+          }
+          showActionFeedback("Action completed: SUBMIT / CONFIRM [Order Confirmed]");
+        }
+
+        if (orderForm) {
+          orderForm.addEventListener("submit", handleOrderConfirm);
+        }
+        if (btnSubmit) {
+          btnSubmit.addEventListener("click", handleOrderConfirm);
+        }
+      })();
+    </script>
   </body>
 </html>
