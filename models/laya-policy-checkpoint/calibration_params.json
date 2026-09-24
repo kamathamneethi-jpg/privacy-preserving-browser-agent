@@ -1,0 +1,136 @@
+{
+  "optimal_temperature": 1.5549,
+  "optimal_theta": 0.74,
+  "raw_ece": 0.1003,
+  "calibrated_ece": 0.1547,
+  "classes": [
+    "ALLOW",
+    "TOKENIZE",
+    "REDACT",
+    "LOCAL_ONLY"
+  ],
+  "class2id": {
+    "ALLOW": 0,
+    "TOKENIZE": 1,
+    "REDACT": 2,
+    "LOCAL_ONLY": 3
+  },
+  "calibration_sample_size": 55,
+  "threshold_sweep": [
+    {
+      "theta": 0.5,
+      "coverage": 0.8,
+      "precision_at_threshold": 0.7045
+    },
+    {
+      "theta": 0.52,
+      "coverage": 0.7091,
+      "precision_at_threshold": 0.7436
+    },
+    {
+      "theta": 0.54,
+      "coverage": 0.7091,
+      "precision_at_threshold": 0.7436
+    },
+    {
+      "theta": 0.56,
+      "coverage": 0.6727,
+      "precision_at_threshold": 0.7297
+    },
+    {
+      "theta": 0.58,
+      "coverage": 0.6,
+      "precision_at_threshold": 0.8182
+    },
+    {
+      "theta": 0.6,
+      "coverage": 0.5273,
+      "precision_at_threshold": 0.8276
+    },
+    {
+      "theta": 0.62,
+      "coverage": 0.4909,
+      "precision_at_threshold": 0.8148
+    },
+    {
+      "theta": 0.64,
+      "coverage": 0.4182,
+      "precision_at_threshold": 0.8261
+    },
+    {
+      "theta": 0.66,
+      "coverage": 0.4,
+      "precision_at_threshold": 0.8636
+    },
+    {
+      "theta": 0.68,
+      "coverage": 0.3455,
+      "precision_at_threshold": 0.8421
+    },
+    {
+      "theta": 0.7,
+      "coverage": 0.3091,
+      "precision_at_threshold": 0.8235
+    },
+    {
+      "theta": 0.72,
+      "coverage": 0.2909,
+      "precision_at_threshold": 0.875
+    },
+    {
+      "theta": 0.74,
+      "coverage": 0.2364,
+      "precision_at_threshold": 0.9231
+    },
+    {
+      "theta": 0.76,
+      "coverage": 0.1455,
+      "precision_at_threshold": 1.0
+    },
+    {
+      "theta": 0.78,
+      "coverage": 0.1273,
+      "precision_at_threshold": 1.0
+    },
+    {
+      "theta": 0.8,
+      "coverage": 0.1273,
+      "precision_at_threshold": 1.0
+    },
+    {
+      "theta": 0.82,
+      "coverage": 0.1273,
+      "precision_at_threshold": 1.0
+    },
+    {
+      "theta": 0.84,
+      "coverage": 0.1091,
+      "precision_at_threshold": 1.0
+    },
+    {
+      "theta": 0.86,
+      "coverage": 0.1091,
+      "precision_at_threshold": 1.0
+    },
+    {
+      "theta": 0.88,
+      "coverage": 0.0909,
+      "precision_at_threshold": 1.0
+    },
+    {
+      "theta": 0.9,
+      "coverage": 0.0364,
+      "precision_at_threshold": 1.0
+    },
+    {
+      "theta": 0.92,
+      "coverage": 0.0364,
+      "precision_at_threshold": 1.0
+    },
+    {
+      "theta": 0.94,
+      "coverage": 0.0,
+      "precision_at_threshold": 1.0
+    }
+  ]
+}

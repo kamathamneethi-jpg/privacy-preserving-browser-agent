@@ -1,0 +1,23 @@
+[
+  {
+    "epoch": 1,
+    "train_loss": 1.4035,
+    "calib_loss": 1.2318,
+    "train_acc": 0.3591,
+    "calib_acc": 0.5455
+  },
+  {
+    "epoch": 2,
+    "train_loss": 1.1434,
+    "calib_loss": 1.009,
+    "train_acc": 0.5714,
+    "calib_acc": 0.5818
+  },
+  {
+    "epoch": 3,
+    "train_loss": 0.6991,
+    "calib_loss": 0.8847,
+    "train_acc": 0.7761,
+    "calib_acc": 0.7091
+  }
+]

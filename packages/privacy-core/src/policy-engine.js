@@ -365,3 +365,69 @@ export function sanitizeRemotePayload(data) {
 
   return data;
 }
+
+/**
+ * Evaluates privacy policy decision with optional Laya ML confidence scoring in parallel.
+ * ADDITIVE ONLY: Does not modify evaluatePiiPolicyItem's existing authoritative decision logic.
+ *
+ * @param {object} [params={}]
+ * @param {object} [params.piiItem]
+ * @param {object} [params.context]
+ * @param {object} [params.relevanceItem]
+ * @param {string} [params.destination]
+ * @param {object} [params.authorization]
+ * @param {object} [params.layaClient] - Optional LayaConfidenceClient instance
+ * @returns {Promise<object>} PolicyDecision enriched with laya confidence metadata
+ */
+export async function evaluatePolicyWithConfidence(params = {}) {
+  // 1. Authoritative Rule Decision (Ground Truth)
+  const ruleDecision = evaluatePiiPolicyItem(params);
+
+  // 2. Query Laya Confidence in parallel (Advisory)
+  const piiItem = params.piiItem || {};
+  const context = params.context || {};
+
+  const state = {
+    label: piiItem.label || piiItem.name || piiItem.id || String(piiItem.category || ""),
+    type: piiItem.type || piiItem.tagName || "text",
+    surrounding_dom: piiItem.surroundingText || piiItem.domContext || "",
+    task_context: context.taskIntent || context.intent || "GENERAL"
+  };
+
+  let layaResult = null;
+  try {
+    const client = params.layaClient || (await import("./laya-confidence-client.js")).defaultLayaClient;
+    if (client && typeof client.scoreField === "function") {
+      layaResult = await client.scoreField(state);
+    }
+  } catch (err) {
+    layaResult = {
+      choice: null,
+      confidence: 0.0,
+      error: "LAYA_CLIENT_LOAD_ERROR"
+    };
+  }
+
+  const enriched = {
+    ...ruleDecision,
+    rule_decision: ruleDecision.decision,
+    laya_decision: layaResult?.choice || null,
+    laya_confidence: layaResult?.confidence ?? 0.0,
+    laya_per_option_probs: layaResult?.perOptionProbs || null,
+    laya_latency_ms: layaResult?.latencyMs || 0.0,
+    laya_disagreement: Boolean(layaResult?.choice && layaResult.choice !== ruleDecision.decision),
+    review_suggested: false
+  };
+
+  // Flag review suggested if disagreement + high confidence >= theta*
+  const theta = layaResult?.thetaStar || 0.85;
+  if (enriched.laya_disagreement && enriched.laya_confidence >= theta) {
+    enriched.review_suggested = true;
+  }
+
+  if (layaResult?.error) {
+    enriched.laya_error = layaResult.error;
+  }
+
+  return Object.freeze(enriched);
+}

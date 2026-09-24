@@ -1,0 +1,34 @@
+{
+  "mode": "lora",
+  "base_model": "answerdotai/ModernBERT-base",
+  "dataset_hashes": {
+    "train.jsonl": "ce8254041cb48c0ddc6a12d43b4ad19becf507a24d421047108d7a5b07084385",
+    "calib.jsonl": "abc0546a7a89984eb43e38f3710e94f6a3c2f114f08a1bcf714d011f8e9e16a3",
+    "held_out.jsonl": "7648aeecf1eb6276c91506081b236bf0e4d230a807e25ba5b00ca23cae199d87"
+  },
+  "hyperparameters": {
+    "epochs_requested": 3,
+    "epochs_trained": 3,
+    "batch_size": 8,
+    "learning_rate": 0.0002,
+    "lora_r": 8,
+    "lora_alpha": 16,
+    "weight_decay": 0.01,
+    "dropout": 0.1
+  },
+  "device": "cpu",
+  "duration_seconds": 1171.21,
+  "final_metrics": {
+    "epoch": 3,
+    "train_loss": 0.6991,
+    "calib_loss": 0.8847,
+    "train_acc": 0.7761,
+    "calib_acc": 0.7091
+  },
+  "calibration": {
+    "optimal_temperature": 1.5549,
+    "optimal_theta": 0.74,
+    "ece_before": 0.1003,
+    "ece_after": 0.1547
+  }
+}

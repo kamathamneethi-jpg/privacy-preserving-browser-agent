@@ -1,0 +1,586 @@
+{
+  "timestamp": "20260923-214341",
+  "sample_size": 55,
+  "operating_threshold_theta": 0.74,
+  "temperature_applied": 1.5549,
+  "device": "cpu",
+  "metrics": {
+    "rule_accuracy": 0.5273,
+    "total_rule_errors": 26,
+    "total_rule_correct": 29,
+    "fault_catch_recall": 0.0769,
+    "caught_errors_count": 2,
+    "false_flag_rate": 0.0,
+    "false_flags_count": 0,
+    "p50_latency_ms": 117.77,
+    "p90_latency_ms": 139.93,
+    "max_latency_ms": 311.25
+  },
+  "per_class_rule": {
+    "ALLOW": {
+      "precision": 0.4,
+      "recall": 0.8235294117647058,
+      "f1-score": 0.5384615384615384,
+      "support": 17.0
+    },
+    "TOKENIZE": {
+      "precision": 0.6,
+      "recall": 0.6,
+      "f1-score": 0.6,
+      "support": 10.0
+    },
+    "REDACT": {
+      "precision": 1.0,
+      "recall": 0.25,
+      "f1-score": 0.4,
+      "support": 8.0
+    },
+    "LOCAL_ONLY": {
+      "precision": 0.875,
+      "recall": 0.35,
+      "f1-score": 0.5,
+      "support": 20.0
+    },
+    "accuracy": 0.5272727272727272,
+    "macro avg": {
+      "precision": 0.71875,
+      "recall": 0.5058823529411764,
+      "f1-score": 0.5096153846153846,
+      "support": 55.0
+    },
+    "weighted avg": {
+      "precision": 0.6963636363636363,
+      "recall": 0.5272727272727272,
+      "f1-score": 0.5155244755244756,
+      "support": 55.0
+    }
+  },
+  "disagreements": [
+    {
+      "index": 1,
+      "label": "Gift wrap checkbox (variant 22)",
+      "task": "ACCOUNT_SETTINGS",
+      "ground_truth": "ALLOW",
+      "rule_decision": "ALLOW",
+      "laya_decision": "TOKENIZE",
+      "laya_confidence": 0.4437,
+      "flagged": false,
+      "rule_was_wrong": false,
+      "laya_was_right": false
+    },
+    {
+      "index": 3,
+      "label": "Attendee name",
+      "task": "EVENT_REGISTRATION",
+      "ground_truth": "TOKENIZE",
+      "rule_decision": "ALLOW",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.6278,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": false
+    },
+    {
+      "index": 4,
+      "label": "Incidental user comment (variant 65)",
+      "task": "ECOMMERCE_CHECKOUT",
+      "ground_truth": "REDACT",
+      "rule_decision": "ALLOW",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.5896,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": true
+    },
+    {
+      "index": 6,
+      "label": "Attendee name (variant 146)",
+      "task": "REGISTRATION",
+      "ground_truth": "TOKENIZE",
+      "rule_decision": "ALLOW",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.5082,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": false
+    },
+    {
+      "index": 8,
+      "label": "Coupon code input",
+      "task": "PROMO_APPLY",
+      "ground_truth": "ALLOW",
+      "rule_decision": "ALLOW",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.4845,
+      "flagged": false,
+      "rule_was_wrong": false,
+      "laya_was_right": false
+    },
+    {
+      "index": 10,
+      "label": "Developer API Key in input (edge #21)",
+      "task": "PAYMENT",
+      "ground_truth": "LOCAL_ONLY",
+      "rule_decision": "LOCAL_ONLY",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.4608,
+      "flagged": false,
+      "rule_was_wrong": false,
+      "laya_was_right": false
+    },
+    {
+      "index": 11,
+      "label": "Pickup person name (variant 48)",
+      "task": "KYC_VERIFY",
+      "ground_truth": "TOKENIZE",
+      "rule_decision": "ALLOW",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.5005,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": false
+    },
+    {
+      "index": 13,
+      "label": "Account holder display name",
+      "task": "PROFILE_UPDATE",
+      "ground_truth": "TOKENIZE",
+      "rule_decision": "ALLOW",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.6862,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": false
+    },
+    {
+      "index": 14,
+      "label": "Seller personal address (variant 66)",
+      "task": "REGISTRATION",
+      "ground_truth": "REDACT",
+      "rule_decision": "ALLOW",
+      "laya_decision": "TOKENIZE",
+      "laya_confidence": 0.4944,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": false
+    },
+    {
+      "index": 15,
+      "label": "Promo code matching email shape (edge #65)",
+      "task": "ECOMMERCE_CHECKOUT",
+      "ground_truth": "ALLOW",
+      "rule_decision": "ALLOW",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.564,
+      "flagged": false,
+      "rule_was_wrong": false,
+      "laya_was_right": false
+    },
+    {
+      "index": 16,
+      "label": "Masked card identifier (edge #73)",
+      "task": "ECOMMERCE_CHECKOUT",
+      "ground_truth": "TOKENIZE",
+      "rule_decision": "LOCAL_ONLY",
+      "laya_decision": "TOKENIZE",
+      "laya_confidence": 0.5597,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": true
+    },
+    {
+      "index": 17,
+      "label": "Notification phone (variant 44)",
+      "task": "RESEARCH",
+      "ground_truth": "TOKENIZE",
+      "rule_decision": "TOKENIZE",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.5317,
+      "flagged": false,
+      "rule_was_wrong": false,
+      "laya_was_right": false
+    },
+    {
+      "index": 18,
+      "label": "Card chunk 3",
+      "task": "PAYMENT_CHECKOUT",
+      "ground_truth": "LOCAL_ONLY",
+      "rule_decision": "ALLOW",
+      "laya_decision": "LOCAL_ONLY",
+      "laya_confidence": 0.8538,
+      "flagged": true,
+      "rule_was_wrong": true,
+      "laya_was_right": true
+    },
+    {
+      "index": 19,
+      "label": "Unrelated newsletter author",
+      "task": "BLOG_VIEW",
+      "ground_truth": "REDACT",
+      "rule_decision": "ALLOW",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.7161,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": true
+    },
+    {
+      "index": 20,
+      "label": "Last 4 digits (edge #51)",
+      "task": "LOGIN",
+      "ground_truth": "TOKENIZE",
+      "rule_decision": "ALLOW",
+      "laya_decision": "TOKENIZE",
+      "laya_confidence": 0.4975,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": true
+    },
+    {
+      "index": 22,
+      "label": "Fake card in test instructions (edge #68)",
+      "task": "RESEARCH",
+      "ground_truth": "ALLOW",
+      "rule_decision": "LOCAL_ONLY",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.6449,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": false
+    },
+    {
+      "index": 26,
+      "label": "Gift message sender name (edge #13)",
+      "task": "PAYMENT",
+      "ground_truth": "TOKENIZE",
+      "rule_decision": "ALLOW",
+      "laya_decision": "TOKENIZE",
+      "laya_confidence": 0.6064,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": true
+    },
+    {
+      "index": 28,
+      "label": "Indian Aadhaar Number",
+      "task": "KYC_VERIFICATION",
+      "ground_truth": "LOCAL_ONLY",
+      "rule_decision": "ALLOW",
+      "laya_decision": "TOKENIZE",
+      "laya_confidence": 0.4358,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": false
+    },
+    {
+      "index": 30,
+      "label": "User age confirmation (edge #71)",
+      "task": "TAX_FILING",
+      "ground_truth": "ALLOW",
+      "rule_decision": "ALLOW",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.507,
+      "flagged": false,
+      "rule_was_wrong": false,
+      "laya_was_right": false
+    },
+    {
+      "index": 31,
+      "label": "Fake card in test instructions (edge #44)",
+      "task": "RESEARCH",
+      "ground_truth": "ALLOW",
+      "rule_decision": "LOCAL_ONLY",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.6625,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": false
+    },
+    {
+      "index": 32,
+      "label": "Email account password",
+      "task": "SETTINGS",
+      "ground_truth": "LOCAL_ONLY",
+      "rule_decision": "LOCAL_ONLY",
+      "laya_decision": "TOKENIZE",
+      "laya_confidence": 0.4997,
+      "flagged": false,
+      "rule_was_wrong": false,
+      "laya_was_right": false
+    },
+    {
+      "index": 35,
+      "label": "Fake card in test instructions (edge #20)",
+      "task": "RESEARCH",
+      "ground_truth": "ALLOW",
+      "rule_decision": "LOCAL_ONLY",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.6685,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": false
+    },
+    {
+      "index": 36,
+      "label": "Model number (variant 130)",
+      "task": "REGISTRATION",
+      "ground_truth": "ALLOW",
+      "rule_decision": "ALLOW",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.5822,
+      "flagged": false,
+      "rule_was_wrong": false,
+      "laya_was_right": false
+    },
+    {
+      "index": 37,
+      "label": "Donation dedication note",
+      "task": "CHARITY_DONATE",
+      "ground_truth": "TOKENIZE",
+      "rule_decision": "ALLOW",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.5914,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": false
+    },
+    {
+      "index": 38,
+      "label": "Card chunk 4",
+      "task": "PAYMENT_CHECKOUT",
+      "ground_truth": "LOCAL_ONLY",
+      "rule_decision": "ALLOW",
+      "laya_decision": "LOCAL_ONLY",
+      "laya_confidence": 0.8816,
+      "flagged": true,
+      "rule_was_wrong": true,
+      "laya_was_right": true
+    },
+    {
+      "index": 39,
+      "label": "Pickup person name",
+      "task": "STORE_PICKUP",
+      "ground_truth": "TOKENIZE",
+      "rule_decision": "ALLOW",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.5199,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": false
+    },
+    {
+      "index": 42,
+      "label": "Amex 4-digit CID (variant 88)",
+      "task": "KYC_VERIFY",
+      "ground_truth": "LOCAL_ONLY",
+      "rule_decision": "ALLOW",
+      "laya_decision": "LOCAL_ONLY",
+      "laya_confidence": 0.3237,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": true
+    },
+    {
+      "index": 43,
+      "label": "Survey free-text feedback (edge #14)",
+      "task": "ACCOUNT_SETTINGS",
+      "ground_truth": "REDACT",
+      "rule_decision": "TOKENIZE",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.5404,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": true
+    },
+    {
+      "index": 44,
+      "label": "Job applicant full name",
+      "task": "JOB_APPLICATION",
+      "ground_truth": "TOKENIZE",
+      "rule_decision": "ALLOW",
+      "laya_decision": "TOKENIZE",
+      "laya_confidence": 0.5369,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": true
+    },
+    {
+      "index": 46,
+      "label": "UK National Insurance Number (edge #58)",
+      "task": "REGISTRATION",
+      "ground_truth": "TOKENIZE",
+      "rule_decision": "ALLOW",
+      "laya_decision": "TOKENIZE",
+      "laya_confidence": 0.4781,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": true
+    },
+    {
+      "index": 47,
+      "label": "Secondary notification email",
+      "task": "DELIVERY_NOTIFICATION",
+      "ground_truth": "TOKENIZE",
+      "rule_decision": "TOKENIZE",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.6667,
+      "flagged": false,
+      "rule_was_wrong": false,
+      "laya_was_right": false
+    },
+    {
+      "index": 48,
+      "label": "Legal signatory name",
+      "task": "TERMS_PAGE",
+      "ground_truth": "REDACT",
+      "rule_decision": "ALLOW",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.6375,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": true
+    },
+    {
+      "index": 49,
+      "label": "UK National Insurance Number",
+      "task": "EMPLOYEE_ONBOARDING",
+      "ground_truth": "TOKENIZE",
+      "rule_decision": "ALLOW",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.495,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": false
+    },
+    {
+      "index": 50,
+      "label": "Developer API Key in input",
+      "task": "CONFIG_SETTINGS",
+      "ground_truth": "LOCAL_ONLY",
+      "rule_decision": "LOCAL_ONLY",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.5331,
+      "flagged": false,
+      "rule_was_wrong": false,
+      "laya_was_right": false
+    },
+    {
+      "index": 51,
+      "label": "Category tag (variant 12)",
+      "task": "RESEARCH",
+      "ground_truth": "ALLOW",
+      "rule_decision": "ALLOW",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.5812,
+      "flagged": false,
+      "rule_was_wrong": false,
+      "laya_was_right": false
+    },
+    {
+      "index": 53,
+      "label": "Customer testimonial name",
+      "task": "RESEARCH",
+      "ground_truth": "REDACT",
+      "rule_decision": "ALLOW",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.6699,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": true
+    },
+    {
+      "index": 54,
+      "label": "Donation dedication note (edge #39)",
+      "task": "TAX_FILING",
+      "ground_truth": "TOKENIZE",
+      "rule_decision": "ALLOW",
+      "laya_decision": "REDACT",
+      "laya_confidence": 0.5781,
+      "flagged": false,
+      "rule_was_wrong": true,
+      "laya_was_right": false
+    }
+  ],
+  "spot_checks": [
+    {
+      "label": "Support agent internal ID (variant 57)",
+      "task": "ECOMMERCE_CHECKOUT",
+      "rule": "REDACT",
+      "laya": "REDACT",
+      "conf": 0.6564,
+      "truth": "REDACT"
+    },
+    {
+      "label": "Incidental tracking cookie",
+      "task": "PRODUCT_SEARCH",
+      "rule": "REDACT",
+      "laya": "REDACT",
+      "conf": 0.5897,
+      "truth": "REDACT"
+    },
+    {
+      "label": "Developer API Key in input (edge #21)",
+      "task": "PAYMENT",
+      "rule": "LOCAL_ONLY",
+      "laya": "REDACT",
+      "conf": 0.4608,
+      "truth": "LOCAL_ONLY"
+    },
+    {
+      "label": "Promo code matching email shape (edge #65)",
+      "task": "ECOMMERCE_CHECKOUT",
+      "rule": "ALLOW",
+      "laya": "REDACT",
+      "conf": 0.564,
+      "truth": "ALLOW"
+    },
+    {
+      "label": "Last 4 digits (edge #51)",
+      "task": "LOGIN",
+      "rule": "ALLOW",
+      "laya": "TOKENIZE",
+      "conf": 0.4975,
+      "truth": "TOKENIZE"
+    },
+    {
+      "label": "Pagination Next (variant 14)",
+      "task": "ACCOUNT_SETTINGS",
+      "rule": "ALLOW",
+      "laya": "ALLOW",
+      "conf": 0.7053,
+      "truth": "ALLOW"
+    },
+    {
+      "label": "User age confirmation (edge #71)",
+      "task": "TAX_FILING",
+      "rule": "ALLOW",
+      "laya": "REDACT",
+      "conf": 0.507,
+      "truth": "ALLOW"
+    },
+    {
+      "label": "Fake card in test instructions (edge #20)",
+      "task": "RESEARCH",
+      "rule": "LOCAL_ONLY",
+      "laya": "REDACT",
+      "conf": 0.6685,
+      "truth": "ALLOW"
+    },
+    {
+      "label": "In Stock status",
+      "task": "PRODUCT_VIEW",
+      "rule": "ALLOW",
+      "laya": "ALLOW",
+      "conf": 0.8384,
+      "truth": "ALLOW"
+    },
+    {
+      "label": "Job applicant email (variant 151)",
+      "task": "TAX_FILING",
+      "rule": "TOKENIZE",
+      "laya": "TOKENIZE",
+      "conf": 0.8538,
+      "truth": "TOKENIZE"
+    }
+  ]
+}

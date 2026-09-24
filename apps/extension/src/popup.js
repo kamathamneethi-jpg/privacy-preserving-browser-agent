@@ -71,6 +71,200 @@ const togglePiiValuesButton = doc.querySelector("#toggle-pii-values");
 const clearHighlightsButton = doc.querySelector("#clear-highlights");
 const btnReloadExtension = doc.querySelector("#btn-reload-extension");
 
+<<<<<<< Updated upstream
+=======
+const livePrivacyPanel = doc.querySelector("#live-privacy-transparency-panel");
+const transparencyTableBody = doc.querySelector("#transparency-table-body");
+const transparencyStatusBadge = doc.querySelector("#transparency-status-badge");
+const transparencyEmptyHint = doc.querySelector("#transparency-empty-hint");
+
+// ---------------------------------------------------------------------
+// 3-TAB NAVIGATION SYSTEM (Agent & Tasks, Image Privacy, Local Scanner)
+// ---------------------------------------------------------------------
+const tabBtnInstructions = doc.querySelector("#tab-btn-instructions");
+const tabBtnImagePrivacy = doc.querySelector("#tab-btn-image-privacy");
+const tabBtnLocalScanner = doc.querySelector("#tab-btn-local-scanner");
+
+const tabContentInstructions = doc.querySelector("#tab-content-instructions");
+const tabContentImagePrivacy = doc.querySelector("#tab-content-image-privacy");
+const tabContentLocalScanner = doc.querySelector("#tab-content-local-scanner");
+
+export function switchTab(tabId) {
+  const tabs = [
+    { btn: tabBtnInstructions, panel: tabContentInstructions, id: "instructions" },
+    { btn: tabBtnImagePrivacy, panel: tabContentImagePrivacy, id: "image-privacy" },
+    { btn: tabBtnLocalScanner, panel: tabContentLocalScanner, id: "local-scanner" }
+  ];
+
+  tabs.forEach(({ btn, panel, id }) => {
+    const isActive = (id === tabId);
+    if (btn) {
+      btn.classList.toggle("active", isActive);
+      btn.setAttribute("aria-selected", isActive ? "true" : "false");
+    }
+    if (panel) {
+      panel.classList.toggle("active", isActive);
+      if (isActive) {
+        panel.style.display = "block";
+      } else {
+        panel.style.display = "none";
+      }
+    }
+  });
+}
+
+if (tabBtnInstructions) {
+  tabBtnInstructions.addEventListener("click", () => switchTab("instructions"));
+}
+if (tabBtnImagePrivacy) {
+  tabBtnImagePrivacy.addEventListener("click", () => switchTab("image-privacy"));
+}
+if (tabBtnLocalScanner) {
+  tabBtnLocalScanner.addEventListener("click", () => switchTab("local-scanner"));
+}
+
+// ---------------------------------------------------------------------
+// PRESET TASK CHIP CLICK HANDLERS (Populate task-input)
+// ---------------------------------------------------------------------
+const presetChips = doc.querySelectorAll?.(".preset-chip") || [];
+if (presetChips && typeof presetChips.forEach === "function") {
+  presetChips.forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const prompt = chip.getAttribute("data-prompt") || chip.textContent?.trim();
+      if (taskInput && prompt) {
+        taskInput.value = prompt;
+        taskInput.focus();
+      }
+    });
+  });
+}
+
+/**
+ * Renders the Live Privacy Transparency Panel dynamically from authoritative PolicyDecision objects.
+ *
+ * CRITICAL ARCHITECTURAL RULES:
+ * 1. popup.js NEVER acts as a second PolicyEngine. It strictly consumes authoritative PolicyDecision objects.
+ * 2. Visual presentation (icon, label, color) is strictly derived via formatReviewerDecisionBadge().
+ * 3. Never renders raw passwords, OTPs, CVVs, or secret values in the UI.
+ * 4. Dynamically adapts to 0, 1, or many runtime decisions with full transparency metadata.
+ */
+export function renderPrivacyTransparency(decisions = [], rootDoc = typeof document !== "undefined" ? document : null) {
+  const activeDoc = rootDoc || (typeof document !== "undefined" ? document : null);
+  if (!activeDoc) return;
+
+  const tBody = activeDoc.querySelector?.("#transparency-table-body") || transparencyTableBody;
+  const tBadge = activeDoc.querySelector?.("#transparency-status-badge") || transparencyStatusBadge;
+  const tHint = activeDoc.querySelector?.("#transparency-empty-hint") || transparencyEmptyHint;
+  const tPanel = activeDoc.querySelector?.("#live-privacy-transparency-panel") || livePrivacyPanel;
+
+  if (!tBody) return;
+  tBody.replaceChildren();
+
+  const decisionList = Array.isArray(decisions) ? decisions : (decisions?.items || []);
+
+  if (decisionList.length === 0) {
+    if (tHint) tHint.hidden = false;
+    if (tBadge) tBadge.textContent = "0 Decisions Evaluated";
+    return;
+  }
+
+  if (tHint) tHint.hidden = true;
+  if (tBadge) {
+    tBadge.textContent = `${decisionList.length} Authoritative Decision(s)`;
+  }
+
+  for (const dec of decisionList) {
+    if (!dec) continue;
+    const badge = typeof ActiveFormatReviewerDecisionBadge === "function"
+      ? ActiveFormatReviewerDecisionBadge(dec)
+      : { action: dec.decision || dec.action || "REDACT", icon: "⚫", label: dec.decision || dec.action || "REDACT", color: "BLACK" };
+
+    const tr = activeDoc.createElement("tr");
+    tr.style.borderBottom = "1px solid #e2e8f0";
+    tr.style.lineHeight = "1.3";
+
+    // 1. Decision Badge Column (🟢 ALLOW / 🔴 TOKENIZE / ⚫ REDACT / 🔒 LOCAL_ONLY)
+    const tdDecision = activeDoc.createElement("td");
+    tdDecision.style.padding = "6px";
+    tdDecision.style.whiteSpace = "nowrap";
+
+    const badgeSpan = activeDoc.createElement("span");
+    badgeSpan.style.display = "inline-flex";
+    badgeSpan.style.alignItems = "center";
+    badgeSpan.style.gap = "4px";
+    badgeSpan.style.padding = "2px 6px";
+    badgeSpan.style.borderRadius = "4px";
+    badgeSpan.style.fontWeight = "bold";
+    badgeSpan.style.fontSize = "10px";
+    badgeSpan.style.fontFamily = "monospace";
+
+    if (badge.action === "ALLOW") {
+      badgeSpan.style.background = "#dcfce7";
+      badgeSpan.style.color = "#15803d";
+      badgeSpan.style.border = "1px solid #86efac";
+    } else if (badge.action === "TOKENIZE") {
+      badgeSpan.style.background = "#fee2e2";
+      badgeSpan.style.color = "#b91c1c";
+      badgeSpan.style.border = "1px solid #fca5a5";
+    } else if (badge.action === "LOCAL_ONLY") {
+      badgeSpan.style.background = "#f3e8ff";
+      badgeSpan.style.color = "#7e22ce";
+      badgeSpan.style.border = "1px solid #d8b4fe";
+    } else {
+      badgeSpan.style.background = "#f1f5f9";
+      badgeSpan.style.color = "#334155";
+      badgeSpan.style.border = "1px solid #cbd5e1";
+    }
+
+    badgeSpan.textContent = `${badge.icon} ${badge.label}`;
+    tdDecision.appendChild(badgeSpan);
+
+    // 2. Category & Semantic Role Column
+    const tdCategory = activeDoc.createElement("td");
+    tdCategory.style.padding = "6px";
+    const catName = dec.category || dec.piiId || "unknown";
+    const roleName = dec.semanticRole || "UNKNOWN";
+    const sensitivityName = dec.sensitivity || "MEDIUM";
+    tdCategory.innerHTML = `<strong>${catName}</strong><br><span style="color:#64748b; font-size:10px;">Role: ${roleName} (${sensitivityName})</span>`;
+
+    // 3. Necessity & Relevance Column
+    const tdNecessity = activeDoc.createElement("td");
+    tdNecessity.style.padding = "6px";
+    const necessity = dec.taskNecessity || "UNKNOWN";
+    const relevance = dec.taskRelevance || dec.relevance || "UNKNOWN";
+    const reasonCode = (Array.isArray(dec.reasonCodes) ? dec.reasonCodes[0] : dec.reasonCode) || "POLICY_APPLIED";
+    tdNecessity.innerHTML = `<span style="font-weight:600; color:#1e293b;">${necessity}</span><br><span style="color:#64748b; font-size:10px;">${relevance} &bull; ${reasonCode}</span>`;
+
+    // 4. Enforcement, Screenshot & Remote Status Column
+    const tdEnforcement = activeDoc.createElement("td");
+    tdEnforcement.style.padding = "6px";
+
+    let remoteText = "REDACTED";
+    if (badge.action === "ALLOW") {
+      remoteText = "Transmitted (Safe Context)";
+    } else if (badge.action === "TOKENIZE") {
+      remoteText = dec.token ? `Token (${dec.token})` : "Tokenized";
+    } else if (badge.action === "LOCAL_ONLY") {
+      remoteText = "EXCLUDED (Zero Remote Egress)";
+    }
+
+    const ssText = badge.action === "ALLOW" ? "Screenshot: Clear" : "Screenshot: Masked";
+    tdEnforcement.innerHTML = `<span style="font-family:monospace; font-size:10px; font-weight:600;">Remote: ${remoteText}</span><br><span style="color:#64748b; font-size:10px;">${ssText}</span>`;
+
+    tr.appendChild(tdDecision);
+    tr.appendChild(tdCategory);
+    tr.appendChild(tdNecessity);
+    tr.appendChild(tdEnforcement);
+
+    tBody.appendChild(tr);
+  }
+
+  if (tPanel) {
+    tPanel.hidden = false;
+  }
+}
+
+>>>>>>> Stashed changes
 if (btnReloadExtension) {
   btnReloadExtension.addEventListener("click", () => {
     try {
@@ -825,23 +1019,72 @@ async function sendTabMessage(message) {
 }
 
 function renderMetadata(metadata) {
-  if (!metadataList) return;
-  metadataList.replaceChildren();
+  if (!metadata) return;
 
-  for (const [label, value] of Object.entries(metadata)) {
-    const term = document.createElement("dt");
-    term.textContent = label;
-    const description = document.createElement("dd");
-    description.textContent = value;
-    metadataList.append(term, description);
+  const metadataCard = document.querySelector("#metadata-card");
+  const metadataGrid = document.querySelector("#metadata-grid");
+
+  if (metadataGrid) {
+    metadataGrid.replaceChildren();
+
+    for (const [label, value] of Object.entries(metadata)) {
+      const row = document.createElement("div");
+      row.className = "telemetry-item";
+      row.style.display = "flex";
+      row.style.justifyContent = "space-between";
+      row.style.alignItems = "center";
+      row.style.padding = "6px 8px";
+      row.style.fontSize = "11px";
+      row.style.background = "#f8fafc";
+      row.style.border = "1px solid #e2e8f0";
+      row.style.borderRadius = "4px";
+
+      const keySpan = document.createElement("span");
+      keySpan.style.color = "#64748b";
+      keySpan.style.fontWeight = "600";
+      keySpan.style.fontFamily = "var(--font-mono, monospace)";
+      keySpan.style.fontSize = "10px";
+      keySpan.style.textTransform = "uppercase";
+      keySpan.textContent = label;
+
+      const valSpan = document.createElement("span");
+      valSpan.style.color = "#0f172a";
+      valSpan.style.fontFamily = "var(--font-mono, monospace)";
+      valSpan.style.fontWeight = "600";
+      valSpan.style.fontSize = "11px";
+      valSpan.style.wordBreak = "break-all";
+      valSpan.style.maxWidth = "280px";
+      valSpan.style.textAlign = "right";
+      valSpan.textContent = String(value);
+
+      row.appendChild(keySpan);
+      row.appendChild(valSpan);
+      metadataGrid.appendChild(row);
+    }
   }
 
-  metadataList.hidden = false;
+  if (metadataCard) {
+    metadataCard.hidden = false;
+  }
+
+  if (metadataList) {
+    metadataList.replaceChildren();
+    for (const [label, value] of Object.entries(metadata)) {
+      const term = document.createElement("dt");
+      term.textContent = label;
+      const description = document.createElement("dd");
+      description.textContent = value;
+      metadataList.append(term, description);
+    }
+    metadataList.hidden = true;
+  }
 }
 
 if (captureButton) {
   captureButton.addEventListener("click", async () => {
     status.textContent = "Capturing local metadata…";
+    const metadataCard = document.querySelector("#metadata-card");
+    if (metadataCard) metadataCard.hidden = true;
     if (metadataList) metadataList.hidden = true;
     if (piiResults) piiResults.hidden = true;
     if (taskResults) taskResults.hidden = true;
